@@ -1,0 +1,9 @@
+---
+slurm_common_packages:
+  - slurm-client
+  - slurm-wlm-basic-plugins
+  - build-essential
+
+# Extra raw lines appended to slurm.conf just before the node definitions.
+# Handy for GresTypes, MpiDefault, QOS settings...
+slurm_extra_config: []

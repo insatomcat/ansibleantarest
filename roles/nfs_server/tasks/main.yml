@@ -1,0 +1,38 @@
+---
+- name: Install the NFS server
+  ansible.builtin.apt:
+    name:
+      - nfs-kernel-server
+      - nfs-common
+    state: present
+
+- name: Export the shared home
+  ansible.builtin.lineinfile:
+    path: /etc/exports
+    regexp: "^{{ nfs_export_path | regex_escape }}\\s"
+    line: "{{ nfs_export_path }} {{ nfs_export_clients }}({{ nfs_export_options }})"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload the NFS exports
+
+- name: Start and enable the NFS server
+  ansible.builtin.systemd:
+    name: nfs-server
+    enabled: true
+    state: started
+
+- name: Apply the export changes now
+  ansible.builtin.meta: flush_handlers
+
+- name: Check the export is visible
+  ansible.builtin.command: showmount -e localhost
+  register: nfs_showmount
+  changed_when: false
+
+- name: Fail when the shared home is not exported
+  ansible.builtin.assert:
+    that: nfs_export_path in nfs_showmount.stdout
+    fail_msg: "{{ nfs_export_path }} is not exported: {{ nfs_showmount.stdout }}"
+    quiet: true

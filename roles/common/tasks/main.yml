@@ -1,0 +1,76 @@
+---
+- name: Check the distribution is Debian based
+  ansible.builtin.assert:
+    that: ansible_os_family == "Debian"
+    fail_msg: >-
+      This playbook targets Debian (the reference procedure uses Debian).
+      Detected: {{ ansible_distribution }} {{ ansible_distribution_version }}.
+    quiet: true
+
+- name: Install the base packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the antares group
+  ansible.builtin.group:
+    name: "{{ antares_group }}"
+    gid: "{{ antares_gid }}"
+    state: present
+
+- name: Create the antares user
+  ansible.builtin.user:
+    name: "{{ antares_user }}"
+    uid: "{{ antares_uid }}"
+    group: "{{ antares_group }}"
+    home: "{{ antares_home }}"
+    shell: /bin/bash
+    create_home: true
+    state: present
+
+- name: Read back the antares account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ antares_user }}"
+
+# The whole deployment relies on UID/GID 1000 being the antares account: the
+# containers run as 1000:1000 and write into bind mounts and, over SSH, into
+# the shared /home. A mismatch produces permission errors that are painful to
+# diagnose later, so fail early and loudly.
+- name: Check the antares account owns the expected UID
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.getent_passwd[antares_user][1] | int == antares_uid | int
+    fail_msg: >-
+      User {{ antares_user }} has UID
+      {{ ansible_facts.getent_passwd[antares_user][1] }} instead of
+      {{ antares_uid }}. Another account probably already owns that UID on
+      {{ inventory_hostname }}; free it or change antares_uid/antares_gid.
+    quiet: true
+
+- name: Set the hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname.split('.')[0] }}"
+  when: manage_hostname | bool
+
+- name: Declare the cluster nodes in /etc/hosts
+  ansible.builtin.blockinfile:
+    path: /etc/hosts
+    marker: "# {mark} ANSIBLE MANAGED - antares cluster"
+    block: |
+      {% for host in (groups['slurm'] | default([])) | sort %}
+      {{ hostvars[host].slurm_node_ip }} {{ hostvars[host].slurm_node_name }}
+      {% endfor %}
+  when:
+    - manage_etc_hosts | bool
+    - (groups['slurm'] | default([])) | length > 0
+
+- name: Enable time synchronisation
+  ansible.builtin.systemd:
+    name: systemd-timesyncd
+    enabled: true
+    state: started
+  when: common_manage_timesync | bool
+  failed_when: false

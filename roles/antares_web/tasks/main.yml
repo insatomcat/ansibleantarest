@@ -1,0 +1,29 @@
+---
+- name: Fetch the AntaREST sources
+  ansible.builtin.include_tasks: checkout.yml
+
+- name: Install the Antares solvers for the local launcher
+  ansible.builtin.include_role:
+    name: antares_solver
+  vars:
+    antares_solver_dest: "{{ antarest_solvers_dir }}"
+
+- name: Patch the web application sources
+  ansible.builtin.include_tasks: patch_frontend.yml
+  when: antarest_patch_login_label | bool
+
+- name: Build the web application
+  ansible.builtin.include_tasks: build_frontend.yml
+
+- name: Build the Antares-Web image
+  ansible.builtin.include_tasks: build_image.yml
+
+- name: Create the SSH key used to reach the Slurm front-end
+  ansible.builtin.include_tasks: ssh_key.yml
+  when: slurm_enabled | bool
+
+- name: Render the Antares-Web configuration
+  ansible.builtin.include_tasks: config.yml
+
+- name: Start Antares-Web
+  ansible.builtin.include_tasks: service.yml

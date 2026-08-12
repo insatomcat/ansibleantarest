@@ -1,0 +1,36 @@
+---
+- name: Check the solver destination is set
+  ansible.builtin.assert:
+    that: antares_solver_dest | length > 0
+    fail_msg: "antares_solver_dest must be set by the caller of this role."
+    quiet: true
+
+- name: Create the solver directory
+  ansible.builtin.file:
+    path: "{{ antares_solver_dest }}"
+    state: directory
+    owner: "{{ antares_solver_owner }}"
+    group: "{{ antares_solver_group }}"
+    mode: "0755"
+
+- name: Download and unpack the Antares solvers
+  ansible.builtin.unarchive:
+    src: "{{ antares_solver_base_url }}/v{{ item.version }}/antares-{{ item.version }}-{{ antares_solver_os }}.tar.gz"
+    dest: "{{ antares_solver_dest }}"
+    remote_src: true
+    owner: "{{ antares_solver_owner }}"
+    group: "{{ antares_solver_group }}"
+    creates: "{{ antares_solver_dest }}/antares-{{ item.version }}-{{ antares_solver_os }}/bin/{{ item.bin }}"
+  loop: "{{ antares_solvers }}"
+  loop_control:
+    label: "antares-{{ item.version }}"
+
+- name: Check every solver binary is there and executable
+  ansible.builtin.file:
+    path: "{{ antares_solver_dest }}/antares-{{ item.version }}-{{ antares_solver_os }}/bin/{{ item.bin }}"
+    owner: "{{ antares_solver_owner }}"
+    group: "{{ antares_solver_group }}"
+    mode: "0755"
+  loop: "{{ antares_solvers }}"
+  loop_control:
+    label: "antares-{{ item.version }}"

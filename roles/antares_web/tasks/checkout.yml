@@ -1,0 +1,40 @@
+---
+- name: Install the packages needed to build Antares-Web
+  ansible.builtin.apt:
+    name: "{{ antares_web_packages }}"
+    state: present
+
+- name: Create the Antares-Web directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ antares_user }}"
+    group: "{{ antares_group }}"
+    mode: "0755"
+  loop:
+    - "{{ antarest_base_dir }}"
+    - "{{ antarest_deploy_dir }}"
+    - "{{ antarest_data_dir }}"
+
+# force: true so that a re-run can move the checkout to another tag even when
+# the build left artefacts behind. Nothing we generate lives in the checkout,
+# only build outputs (webapp/dist, node_modules), which git leaves alone.
+- name: Clone or update the AntaREST repository
+  ansible.builtin.git:
+    repo: "{{ antarest_repo }}"
+    dest: "{{ antarest_dir }}"
+    version: "{{ antarest_version }}"
+    update: "{{ antarest_update | bool }}"
+    force: true
+  become: true
+  become_user: "{{ antares_user }}"
+  register: antarest_checkout
+
+- name: Make sure the checkout belongs to the antares user
+  ansible.builtin.file:
+    path: "{{ antarest_dir }}"
+    state: directory
+    owner: "{{ antares_user }}"
+    group: "{{ antares_group }}"
+    recurse: true
+  when: antarest_checkout.changed

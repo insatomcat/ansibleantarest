@@ -1,0 +1,31 @@
+---
+- name: Validate the effective compose configuration
+  ansible.builtin.command: "{{ docker_compose_cmd }} {{ antarest_compose_files }} config --quiet"
+  args:
+    chdir: "{{ antarest_dir }}"
+  changed_when: false
+
+- name: Start and enable Antares-Web
+  ansible.builtin.systemd:
+    name: "{{ antarest_service_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Apply the pending restarts now
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the web interface to answer
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ antarest_http_port }}"
+    timeout: 300
+
+- name: Check the API is up
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ antarest_http_port }}/api/health"
+    status_code: [200]
+  register: antarest_health
+  retries: 30
+  delay: 10
+  until: antarest_health.status is defined and antarest_health.status == 200

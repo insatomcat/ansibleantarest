@@ -1,0 +1,116 @@
+---
+# ===========================================================================
+#  Antares-Web + optional Slurm cluster
+#
+#  Full deployment:        ansible-playbook site.yml
+#  Antares-Web only:       ansible-playbook site.yml -e slurm_enabled=false
+#  Cluster only:           ansible-playbook site.yml --limit slurm
+#  Re-deploy the web app:  ansible-playbook site.yml --tags antares_web
+#
+#  Note: slurm.conf is generated from the facts of every compute node, so
+#  avoid running with --limit on a subset of `slurm_compute` unless you pin
+#  slurm_node_cpus / slurm_node_real_memory in the inventory.
+# ===========================================================================
+
+- name: Gather facts from every machine
+  hosts: all
+  gather_facts: true
+  tags: always
+  tasks: []
+
+- name: Base configuration
+  hosts: all
+  become: true
+  tags: common
+  roles:
+    - common
+
+# ---------------------------------------------------------------------------
+#  Slurm cluster
+# ---------------------------------------------------------------------------
+
+- name: Shared /home - NFS server on the Slurm front-end
+  hosts: slurm_frontend
+  become: true
+  tags: [slurm, nfs]
+  roles:
+    - role: nfs_server
+      when: slurm_enabled | bool
+
+- name: Shared /home - NFS clients on the compute nodes
+  hosts: slurm_compute
+  become: true
+  tags: [slurm, nfs]
+  roles:
+    - role: nfs_client
+      when: slurm_enabled | bool
+
+- name: Munge - shared authentication key
+  hosts: slurm
+  become: true
+  tags: [slurm, munge]
+  roles:
+    - role: munge
+      when: slurm_enabled | bool
+
+- name: Slurm - packages and configuration common to every node
+  hosts: slurm
+  become: true
+  tags: slurm
+  roles:
+    - role: slurm_common
+      when: slurm_enabled | bool
+
+- name: Slurm front-end - accounting database and controller
+  hosts: slurm_frontend
+  become: true
+  tags: slurm
+  roles:
+    - role: docker
+      when: slurm_enabled | bool and slurmdbd_enabled | bool
+    - role: slurm_frontend
+      when: slurm_enabled | bool
+
+- name: Slurm compute nodes
+  hosts: slurm_compute
+  become: true
+  tags: slurm
+  roles:
+    - role: slurm_compute
+      when: slurm_enabled | bool
+
+- name: Shared /home - solvers and Antares launch script
+  hosts: slurm_frontend
+  become: true
+  tags: [slurm, solver]
+  roles:
+    - role: antares_solver
+      when: slurm_enabled | bool
+      vars:
+        antares_solver_dest: "{{ slurm_solvers_dir }}"
+    - role: slurm_launch_script
+      when: slurm_enabled | bool
+
+# ---------------------------------------------------------------------------
+#  Antares-Web
+#
+#  The antares_web role clones the repository, then pulls in the
+#  antares_solver role for the local launcher binaries, builds the front-end
+#  and the backend image, renders the configuration and starts the stack.
+# ---------------------------------------------------------------------------
+
+- name: Antares-Web server
+  hosts: antares_web
+  become: true
+  tags: antares_web
+  roles:
+    - docker
+    - antares_web
+
+- name: Authorise Antares-Web to submit jobs on the Slurm front-end
+  hosts: slurm_frontend
+  become: true
+  tags: [antares_web, ssh]
+  roles:
+    - role: antares_ssh_access
+      when: slurm_enabled | bool

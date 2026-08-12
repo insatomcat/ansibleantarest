@@ -1,0 +1,48 @@
+---
+- name: Install the Slurm packages common to every node
+  ansible.builtin.apt:
+    name: "{{ slurm_common_packages }}"
+    state: present
+
+- name: Create the Slurm log directory
+  ansible.builtin.file:
+    path: "{{ slurm_log_dir }}"
+    state: directory
+    owner: "{{ slurm_user }}"
+    group: "{{ slurm_user }}"
+    mode: "0755"
+
+- name: Create the Slurm spool directory
+  ansible.builtin.file:
+    path: "{{ slurm_spool_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Check every compute node exposes its hardware facts
+  ansible.builtin.assert:
+    that:
+      - hostvars[item].slurm_node_name is defined
+      - hostvars[item].slurm_node_ip is defined
+      - hostvars[item].slurm_node_cpus is defined
+      - hostvars[item].slurm_node_sockets is defined
+      - hostvars[item].slurm_node_cores_per_socket is defined
+      - hostvars[item].slurm_node_threads_per_core is defined
+      - hostvars[item].slurm_node_real_memory is defined
+    fail_msg: >-
+      No facts for {{ item }}. slurm.conf lists every compute node, so all of
+      them must be reachable in the same run. Either drop the --limit, or pin
+      slurm_node_cpus / slurm_node_sockets / slurm_node_cores_per_socket /
+      slurm_node_threads_per_core / slurm_node_real_memory in the inventory.
+    quiet: true
+  loop: "{{ groups['slurm_compute'] | default([]) }}"
+
+- name: Deploy slurm.conf
+  ansible.builtin.template:
+    src: slurm.conf.j2
+    dest: "{{ slurm_conf_dir }}/slurm.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  register: slurm_conf
