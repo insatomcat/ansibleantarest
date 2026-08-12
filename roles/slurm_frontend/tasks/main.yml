@@ -1,0 +1,34 @@
+---
+- name: Install the Slurm controller
+  ansible.builtin.apt:
+    name: slurmctld
+    state: present
+
+- name: Create the controller state directory
+  ansible.builtin.file:
+    path: "{{ slurm_spool_dir }}/ctld"
+    state: directory
+    owner: "{{ slurm_user }}"
+    group: "{{ slurm_user }}"
+    mode: "0755"
+
+- name: Configure the accounting database
+  ansible.builtin.include_tasks: slurmdbd.yml
+  when: slurmdbd_enabled | bool
+
+- name: Start and enable slurmctld
+  ansible.builtin.systemd:
+    name: slurmctld
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Restart slurmctld after a configuration change
+  ansible.builtin.systemd:
+    name: slurmctld
+    state: restarted
+  when: slurm_conf.changed | default(false)
+
+- name: Register the cluster in the accounting database
+  ansible.builtin.include_tasks: sacctmgr.yml
+  when: slurmdbd_enabled | bool

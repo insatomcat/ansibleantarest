@@ -1,0 +1,163 @@
+---
+# ===========================================================================
+#  Antares-Web + Slurm deployment - main knobs
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+#  Unprivileged account, identical on every machine.
+#  The UID/GID must match between the Antares-Web containers, the NFS share
+#  and the Slurm nodes, otherwise the studies pushed over SSH are unreadable.
+# ---------------------------------------------------------------------------
+antares_user: antares
+antares_group: antares
+antares_uid: 1000
+antares_gid: 1000
+antares_home: "/home/{{ antares_user }}"
+
+# ---------------------------------------------------------------------------
+#  Slurm on / off
+#
+#  false -> only the `antares_web` play runs and Antares-Web is configured
+#           with the local launcher alone (the solver runs on the web server).
+#  true  -> the Slurm cluster is deployed too and both launchers are exposed.
+# ---------------------------------------------------------------------------
+slurm_enabled: true
+
+# ---------------------------------------------------------------------------
+#  Antares Simulator (the solver)
+#
+#  Installed both on the Antares-Web machine (local launcher) and in the
+#  shared /home of the cluster (Slurm launcher).
+#
+#  `study_version` is the key Antares-Web uses to pick a binary: it is the
+#  "major.minor" of the study. `bin` is the executable name inside the
+#  archive: `antares-<major>.<minor>-solver` up to 8.x, `antares-solver` from
+#  9.x on.
+#  Releases: https://github.com/AntaresSimulatorTeam/Antares_Simulator/releases
+# ---------------------------------------------------------------------------
+antares_solver_os: "Ubuntu-22.04"
+antares_solver_base_url: "https://github.com/AntaresSimulatorTeam/Antares_Simulator/releases/download"
+antares_solvers:
+  - version: "8.8.17"
+    study_version: "8.8"
+    bin: "antares-8.8-solver"
+  - version: "9.2.0"
+    study_version: "9.2"
+    bin: "antares-solver"
+
+# ---------------------------------------------------------------------------
+#  Antares-Web (AntaREST)
+# ---------------------------------------------------------------------------
+antarest_repo: "https://github.com/AntaresSimulatorTeam/AntaREST.git"
+antarest_version: "v2.33.0"            # git tag, branch or commit
+antarest_base_dir: /var/antares-web
+antarest_dir: "{{ antarest_base_dir }}/AntaREST"
+antarest_update: true                  # let the play move the checkout to antarest_version
+antarest_force_rebuild: false          # force front-end + image rebuild even if up to date
+
+# Node version used to build the web app. `auto` reads webapp/.nvmrc from the
+# checkout, which is the version the project actually tests against.
+antarest_node_version: auto
+
+# Add a uid/gid 1000 account inside the backend image. The containers run as
+# `user: 1000:1000` so that the files they create in the bind mounts belong to
+# the antares user; without a matching passwd entry some code paths that need
+# a home directory fail.
+antarest_add_container_user: true
+
+# Secrets - CHANGE THESE.
+antarest_jwt_key: "secretkeytochange"
+antarest_admin_password: "admin"
+antarest_db_password: "somepass"       # postgres password used by the containers
+
+# `local`, `slurm`, or leave it to follow slurm_enabled.
+antarest_default_launcher: "{{ 'slurm' if slurm_enabled | bool else 'local' }}"
+
+# Expose adminer (DB web UI) next to Antares-Web, bound on 127.0.0.1:8080.
+antarest_enable_adminer: false
+
+# ---------------------------------------------------------------------------
+#  Docker
+#
+#  Debian's own docker.io / docker-compose packages ship compose v1, which is
+#  end-of-life. By default we use Docker's APT repository and the compose v2
+#  plugin (`docker compose`). Set to false to use the distribution packages,
+#  and then adjust docker_compose_cmd.
+# ---------------------------------------------------------------------------
+docker_use_upstream_repo: true
+docker_compose_cmd: "/usr/bin/docker compose"
+
+# ---------------------------------------------------------------------------
+#  Slurm cluster
+# ---------------------------------------------------------------------------
+slurm_cluster_name: antares
+slurm_partition: antares
+
+# Paths and system account used by the Slurm daemons. Defined here rather
+# than in the roles because several plays need them.
+slurm_conf_dir: /etc/slurm
+slurm_log_dir: /var/log/slurm
+slurm_spool_dir: /var/spool/slurm
+slurm_user: slurm
+
+# `select/cons_tres` lets several studies share a node, which is what makes
+# the --cpus-per-task sent by antares-launcher meaningful. Switch to
+# `select/linear` for exclusive whole-node allocation.
+slurm_select_type: "select/cons_tres"
+slurm_select_type_parameters: "CR_Core"
+
+# Root of the solver installs inside the shared /home.
+slurm_solvers_dir: "{{ antares_home }}/solvers"
+# Scratch space used by the launch script. Must live in the shared /home so
+# that the front-end can pick the results up.
+slurm_scratch_dir: "{{ antares_home }}/scratch"
+slurm_launch_script: "{{ antares_home }}/launchAntares.sh"
+
+# Accounting database (MariaDB in a container on the front-end).
+slurmdbd_enabled: true
+slurmdbd_db_password: "changeme-slurm-acct"
+slurmdbd_dir: /var/slurmdb
+slurmdbd_mariadb_image: "mariadb:11"
+# The reference procedure uses 12G, which does not fit a small front-end VM.
+slurmdbd_innodb_buffer_pool_size: "1G"
+slurmdbd_enable_adminer: false
+
+# NFS
+nfs_export_path: /home
+nfs_export_options: "rw,sync,no_root_squash,no_subtree_check"
+nfs_export_clients: "*"
+nfs_mount_options: "defaults,_netdev"
+
+# Write the cluster nodes into /etc/hosts so every node can resolve the others.
+manage_etc_hosts: true
+# Set /etc/hostname to the inventory short name (needs a reboot to fully apply).
+manage_hostname: false
+
+# ---------------------------------------------------------------------------
+#  Derived values - normally no need to touch these
+# ---------------------------------------------------------------------------
+_slurm_frontend_host: "{{ (groups['slurm_frontend'] | default([])) | first | default('') }}"
+
+slurm_frontend_name: >-
+  {{ (hostvars[_slurm_frontend_host].slurm_node_name
+      | default(_slurm_frontend_host.split('.')[0])) if _slurm_frontend_host else '' }}
+
+slurm_frontend_ip: >-
+  {{ (hostvars[_slurm_frontend_host].slurm_node_ip
+      | default(hostvars[_slurm_frontend_host].ansible_default_ipv4.address
+      | default(hostvars[_slurm_frontend_host].ansible_host | default('')))) if _slurm_frontend_host else '' }}
+
+# Number of cores offered in the Antares-Web launch dialog for Slurm jobs.
+# The maximum is capped to the smallest compute node, otherwise jobs asking
+# for more cores than any node owns stay pending forever.
+_slurm_compute_vcpus: >-
+  {{ (groups['slurm_compute'] | default([]))
+     | map('extract', hostvars, 'ansible_processor_vcpus')
+     | select('defined') | select('integer') | list }}
+slurm_launcher_nb_cores_min: 1
+slurm_launcher_nb_cores_max: "{{ (_slurm_compute_vcpus | min) if (_slurm_compute_vcpus | length) > 0 else 2 }}"
+slurm_launcher_nb_cores_default: "{{ [2, slurm_launcher_nb_cores_max | int] | min }}"
+
+# Slurm launcher timings (seconds), as in the reference procedure.
+slurm_launcher_default_wait_time: 900
+slurm_launcher_default_time_limit: 172800

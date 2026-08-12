@@ -1,0 +1,70 @@
+---
+# The compose override uses the `!override` tag to replace the project's
+# volume and port lists instead of concatenating with them.
+- name: Read the Docker Compose version
+  ansible.builtin.command: "{{ docker_compose_cmd }} version --short"
+  register: antarest_compose_version
+  changed_when: false
+
+- name: Check Docker Compose is recent enough for the override tags
+  ansible.builtin.assert:
+    that:
+      - (antarest_compose_version.stdout | trim | regex_replace('^v', '')) is version('2.24.0', '>=')
+    fail_msg: >-
+      Docker Compose {{ antarest_compose_version.stdout | trim }} is too old:
+      the `!override` tag needs 2.24.0 or later. Keep
+      docker_use_upstream_repo enabled to get a current compose plugin.
+    quiet: true
+
+- name: Create the Antares-Web data directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ antares_user }}"
+    group: "{{ antares_group }}"
+    mode: "0755"
+  loop:
+    - "{{ antarest_data_dir }}/workspaces"
+    - "{{ antarest_data_dir }}/workspaces/internal_studies"
+    - "{{ antarest_data_dir }}/workspaces/studies"
+    - "{{ antarest_data_dir }}/tmp"
+    - "{{ antarest_data_dir }}/matrices"
+    - "{{ antarest_data_dir }}/archives"
+    - "{{ antarest_data_dir }}/logs"
+    - "{{ antarest_data_dir }}/db"
+    - "{{ antarest_data_dir }}/local_workspace"
+    - "{{ antarest_data_dir }}/local_workspace/local"
+    - "{{ antarest_data_dir }}/local_workspace/slurm"
+
+- name: Deploy the Antares-Web configuration
+  ansible.builtin.template:
+    src: config.prod.yaml.j2
+    dest: "{{ antarest_deploy_dir }}/config.prod.yaml"
+    owner: "{{ antares_user }}"
+    group: "{{ antares_group }}"
+    mode: "0640"
+  notify: Restart Antares-Web
+
+- name: Deploy the compose override
+  ansible.builtin.template:
+    src: docker-compose.override.yml.j2
+    dest: "{{ antarest_deploy_dir }}/docker-compose.override.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Antares-Web
+
+- name: Deploy the Antares-Web systemd unit
+  ansible.builtin.template:
+    src: antares-web.service.j2
+    dest: "/etc/systemd/system/{{ antarest_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  register: antarest_unit
+  notify: Restart Antares-Web
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: antarest_unit.changed

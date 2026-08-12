@@ -1,0 +1,12 @@
+{{ ansible_managed | comment }}
+FROM {{ antarest_base_image }}
+{% if antarest_add_container_user | bool %}
+
+# The compose stack runs the antarest services as {{ antares_uid }}:{{ antares_gid }};
+# give that UID a real account so that anything needing $HOME works.
+RUN set -eux; \
+    getent group {{ antares_gid }} >/dev/null \
+      || groupadd -g {{ antares_gid }} {{ antares_group }}; \
+    getent passwd {{ antares_uid }} >/dev/null \
+      || useradd -u {{ antares_uid }} -g {{ antares_gid }} -m -s /bin/bash {{ antares_user }}
+{% endif %}

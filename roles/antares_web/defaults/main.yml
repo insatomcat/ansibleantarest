@@ -1,0 +1,41 @@
+---
+# Generated configuration (never touched by git), kept out of the checkout so
+# that the checkout stays disposable.
+antarest_deploy_dir: "{{ antarest_base_dir }}/deploy"
+
+# Persistent state: studies, matrices, postgres data, logs. Also kept out of
+# the checkout, so that upgrading Antares-Web never puts the data at risk.
+antarest_data_dir: "{{ antarest_base_dir }}/data"
+
+antarest_solvers_dir: "{{ antarest_deploy_dir }}/solvers"
+antarest_ssh_key: "{{ antarest_deploy_dir }}/id_rsa"
+
+antarest_image: "antarest:latest"
+antarest_base_image: "antarest:base"
+
+# Build context of the derived image. Deliberately a directory of its own,
+# holding nothing but the generated Dockerfile.
+antarest_image_context: "{{ antarest_base_dir }}/image"
+
+antarest_service_name: antares-web
+
+# Port the web UI is published on (nginx inside the stack).
+antarest_http_port: 80
+
+# Node container used to build the web application.
+antarest_node_image_suffix: "-bookworm"
+
+# Records what the web application was last built from, so that a re-run does
+# not rebuild the front-end for nothing. Kept out of the checkout because the
+# checkout is reset on every run.
+antarest_frontend_stamp_file: "{{ antarest_deploy_dir }}/.frontend-build-stamp"
+
+# The login form labels its first field "NNI", RTE's internal employee number,
+# which means nothing outside RTE. Replace it with the project's own
+# translation key so the field stays localised (Username / Nom).
+# Set a quoted literal for a fixed label instead, e.g. '"Identifiant"'.
+antarest_patch_login_label: true
+antarest_login_username_label: '{t("global.username")}'
+
+antares_web_packages:
+  - git

@@ -1,0 +1,53 @@
+---
+- name: Look for an existing Antares-Web image
+  ansible.builtin.command: docker image inspect {{ antarest_image }}
+  register: antarest_image_present
+  changed_when: false
+  failed_when: false
+
+- name: Decide whether the image must be rebuilt
+  ansible.builtin.set_fact:
+    antarest_rebuild_image: >-
+      {{ antarest_force_rebuild | bool
+         or antarest_checkout.changed
+         or antarest_image_present.rc != 0 }}
+
+- name: Build the AntaREST image from the project Dockerfile
+  ansible.builtin.command:
+    cmd: docker build -t {{ antarest_base_image }} .
+    chdir: "{{ antarest_dir }}"
+  when: antarest_rebuild_image | bool
+  changed_when: antarest_rebuild_image | bool
+
+# The containers run as 1000:1000 so that the files they drop in the bind
+# mounts belong to the antares user. The upstream image has no such account,
+# and a few code paths need a real passwd entry with a home directory, so we
+# layer one on top instead of patching the project Dockerfile.
+#
+# This lives in a directory of its own: it is the build context, and the
+# deploy directory next door holds the private key and hundreds of megabytes
+# of solver binaries, none of which have any business being shipped to the
+# Docker daemon.
+- name: Create the build context of the derived image
+  ansible.builtin.file:
+    path: "{{ antarest_image_context }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render the Dockerfile adding the antares account to the image
+  ansible.builtin.template:
+    src: Dockerfile.user.j2
+    dest: "{{ antarest_image_context }}/Dockerfile"
+    owner: root
+    group: root
+    mode: "0644"
+  register: antarest_user_dockerfile
+
+- name: Build the final Antares-Web image
+  ansible.builtin.command:
+    cmd: docker build -t {{ antarest_image }} {{ antarest_image_context }}
+  when: antarest_rebuild_image | bool or antarest_user_dockerfile.changed
+  changed_when: true
+  notify: Restart Antares-Web

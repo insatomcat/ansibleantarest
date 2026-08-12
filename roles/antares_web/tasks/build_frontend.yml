@@ -1,0 +1,101 @@
+---
+# The project pins the node version it is tested with in webapp/.nvmrc, so
+# read it from the checkout rather than guessing.
+- name: Read the node version pinned by the project
+  ansible.builtin.slurp:
+    src: "{{ antarest_dir }}/webapp/.nvmrc"
+  register: antarest_nvmrc
+  when: antarest_node_version == 'auto'
+
+- name: Select the node version
+  ansible.builtin.set_fact:
+    antarest_node_tag: >-
+      {{ (antarest_nvmrc.content | b64decode | trim)
+         if antarest_node_version == 'auto' else antarest_node_version }}
+
+# The checkout is reset on every run (git force), which also reverts the
+# source patches, so "did anything change" cannot be answered by looking at
+# the working tree. Compare a stamp of the build inputs instead.
+- name: Describe what the web application should be built from
+  ansible.builtin.set_fact:
+    antarest_frontend_stamp: |
+      commit={{ antarest_checkout.after | default('unknown') }}
+      node={{ antarest_node_tag }}
+      patch_login_label={{ antarest_patch_login_label | bool }}
+      login_username_label={{ antarest_login_username_label }}
+
+- name: Look for a previous build stamp
+  ansible.builtin.stat:
+    path: "{{ antarest_frontend_stamp_file }}"
+  register: antarest_stamp_file
+
+- name: Read the previous build stamp
+  ansible.builtin.slurp:
+    src: "{{ antarest_frontend_stamp_file }}"
+  register: antarest_prev_stamp
+  when: antarest_stamp_file.stat.exists
+
+- name: Look for an existing build of the web application
+  ansible.builtin.stat:
+    path: "{{ antarest_dir }}/webapp/dist/index.html"
+  register: antarest_webapp_dist
+
+- name: Decide whether the web application must be rebuilt
+  ansible.builtin.set_fact:
+    antarest_rebuild_frontend: >-
+      {{ antarest_force_rebuild | bool
+         or not antarest_webapp_dist.stat.exists
+         or not antarest_stamp_file.stat.exists
+         or (antarest_prev_stamp.content | default('') | b64decode) != antarest_frontend_stamp }}
+
+- name: Create a writable HOME for the build container
+  ansible.builtin.file:
+    path: "{{ antarest_dir }}/webapp/.home"
+    state: directory
+    owner: "{{ antares_user }}"
+    group: "{{ antares_group }}"
+    mode: "0755"
+  when: antarest_rebuild_frontend | bool
+
+# The reference procedure built a dedicated python image for this; the project
+# now only needs node, and the backend dependencies are no longer installed
+# from requirements.txt, so a stock node image is enough.
+- name: Build the web application with node {{ antarest_node_tag }}
+  ansible.builtin.command:
+    cmd: >-
+      docker run --rm
+      -u {{ antares_uid }}:{{ antares_gid }}
+      -v {{ antarest_dir }}:/antares
+      -w /antares/webapp
+      -e HOME=/antares/webapp/.home
+      -e npm_config_cache=/antares/webapp/.npm
+      -e NODE_OPTIONS=--max-old-space-size=4096
+      node:{{ antarest_node_tag }}{{ antarest_node_image_suffix }}
+      bash -c "npm install --no-audit --no-fund && npm run build"
+  register: antarest_frontend_build
+  when: antarest_rebuild_frontend | bool
+  changed_when: antarest_rebuild_frontend | bool
+
+- name: Check the web application was produced
+  ansible.builtin.stat:
+    path: "{{ antarest_dir }}/webapp/dist/index.html"
+  register: antarest_webapp_dist_after
+
+- name: Fail when the web application is missing
+  ansible.builtin.assert:
+    that: antarest_webapp_dist_after.stat.exists
+    fail_msg: >-
+      webapp/dist/index.html was not produced; nginx would serve nothing.
+      Check the output of the `npm run build` task above.
+    quiet: true
+
+# Written last, so that a failed build is retried on the next run instead of
+# being recorded as done.
+- name: Record what the web application was built from
+  ansible.builtin.copy:
+    content: "{{ antarest_frontend_stamp }}"
+    dest: "{{ antarest_frontend_stamp_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: antarest_rebuild_frontend | bool

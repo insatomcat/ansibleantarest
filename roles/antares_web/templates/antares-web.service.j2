@@ -1,0 +1,19 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Antares-Web
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+TimeoutStartSec=0
+WorkingDirectory={{ antarest_dir }}
+Environment="COMPOSE_PROJECT_NAME={{ antarest_service_name }}"
+ExecStart={{ docker_compose_cmd }} {{ antarest_compose_files }} up -d --remove-orphans
+ExecStop={{ docker_compose_cmd }} {{ antarest_compose_files }} down
+ExecReload={{ docker_compose_cmd }} {{ antarest_compose_files }} restart
+
+[Install]
+WantedBy=multi-user.target

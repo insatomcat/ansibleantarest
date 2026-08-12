@@ -1,0 +1,38 @@
+---
+- name: Locate the Antares-Web server
+  ansible.builtin.set_fact:
+    antares_web_host: "{{ (groups['antares_web'] | default([])) | first | default('') }}"
+
+- name: Check the Antares-Web public key is known
+  ansible.builtin.assert:
+    that:
+      - antares_web_host | length > 0
+      - hostvars[antares_web_host].antares_web_public_key is defined
+    fail_msg: >-
+      The Antares-Web public key is not available. Run the antares_web play in
+      the same invocation (it is what generates the key), or deploy the whole
+      site.yml at once.
+    quiet: true
+
+- name: Create the .ssh directory of the antares user
+  ansible.builtin.file:
+    path: "{{ antares_home }}/.ssh"
+    state: directory
+    owner: "{{ antares_user }}"
+    group: "{{ antares_group }}"
+    mode: "0700"
+
+- name: Authorise the Antares-Web key for the antares user
+  ansible.posix.authorized_key:
+    user: "{{ antares_user }}"
+    key: "{{ hostvars[antares_web_host].antares_web_public_key }}"
+    state: present
+    manage_dir: false
+    path: "{{ antares_home }}/.ssh/authorized_keys"
+
+- name: Enforce the permissions expected by sshd
+  ansible.builtin.file:
+    path: "{{ antares_home }}/.ssh/authorized_keys"
+    owner: "{{ antares_user }}"
+    group: "{{ antares_group }}"
+    mode: "0600"

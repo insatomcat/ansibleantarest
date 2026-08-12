@@ -1,0 +1,6 @@
+---
+# The project compose file plus our override, always passed explicitly so that
+# the result does not depend on the current working directory.
+antarest_compose_files: >-
+  -f {{ antarest_dir }}/docker-compose.yml
+  -f {{ antarest_deploy_dir }}/docker-compose.override.yml

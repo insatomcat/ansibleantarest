@@ -1,0 +1,20 @@
+---
+- name: List the clusters known to the accounting database
+  ansible.builtin.command: sacctmgr --noheader --parsable2 show cluster format=Cluster
+  register: sacctmgr_clusters
+  changed_when: false
+  failed_when: false
+
+- name: Register the cluster in the accounting database
+  ansible.builtin.command: sacctmgr --immediate add cluster {{ slurm_cluster_name }}
+  register: sacctmgr_add
+  when:
+    - sacctmgr_clusters.rc == 0
+    - slurm_cluster_name not in (sacctmgr_clusters.stdout_lines | map('trim') | list)
+  changed_when: sacctmgr_add.rc == 0
+
+- name: Restart slurmctld so it attaches to the freshly created cluster
+  ansible.builtin.systemd:
+    name: slurmctld
+    state: restarted
+  when: sacctmgr_add.changed | default(false)

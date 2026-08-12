@@ -1,0 +1,26 @@
+---
+- name: Install the NFS client
+  ansible.builtin.apt:
+    name: nfs-common
+    state: present
+
+- name: Mount the shared home from the Slurm front-end
+  ansible.posix.mount:
+    src: "{{ slurm_frontend_name | trim }}:{{ nfs_export_path }}"
+    path: "{{ nfs_export_path }}"
+    fstype: nfs
+    opts: "{{ nfs_mount_options }}"
+    state: mounted
+
+- name: Check the shared home is really an NFS mount
+  ansible.builtin.command: findmnt --noheadings --output FSTYPE,SOURCE --target {{ nfs_export_path }}
+  register: nfs_findmnt
+  changed_when: false
+
+- name: Fail when the shared home is not mounted over NFS
+  ansible.builtin.assert:
+    that: "'nfs' in nfs_findmnt.stdout"
+    fail_msg: >-
+      {{ nfs_export_path }} is not an NFS mount on {{ inventory_hostname }}:
+      {{ nfs_findmnt.stdout }}
+    quiet: true

@@ -1,0 +1,35 @@
+---
+- name: Install slurmd
+  ansible.builtin.apt:
+    name: slurmd
+    state: present
+
+- name: Create the slurmd spool directory
+  ansible.builtin.file:
+    path: "{{ slurm_spool_dir }}/d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# The slurm-wlm metapackage may have dragged slurmctld in; only the front-end
+# is supposed to run a controller.
+- name: Make sure no controller runs on a compute node
+  ansible.builtin.systemd:
+    name: slurmctld
+    enabled: false
+    state: stopped
+  failed_when: false
+
+- name: Start and enable slurmd
+  ansible.builtin.systemd:
+    name: slurmd
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Restart slurmd after a configuration change
+  ansible.builtin.systemd:
+    name: slurmd
+    state: restarted
+  when: slurm_conf.changed | default(false)

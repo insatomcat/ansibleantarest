@@ -1,0 +1,6 @@
+---
+- name: Restart Antares-Web
+  ansible.builtin.systemd:
+    name: "{{ antarest_service_name }}"
+    state: restarted
+    daemon_reload: true

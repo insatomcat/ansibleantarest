@@ -1,0 +1,5 @@
+---
+# Directory the solver archives are unpacked into. Must be set by the caller.
+antares_solver_dest: ""
+antares_solver_owner: "{{ antares_user }}"
+antares_solver_group: "{{ antares_group }}"
