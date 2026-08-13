@@ -35,6 +35,14 @@ antarest_image_context: "{{ antarest_base_dir }}/image"
 # still be started, stopped and queried in one command.
 antarest_service_name: antares-web
 
+# Number of gunicorn workers in the backend container. The project's
+# resources/deploy/gunicorn.py falls back to (2 * cpu_count) + 1 when
+# GUNICORN_WORKERS is unset, which on a 24-core machine means 49 processes each
+# loading the whole application: measured at 8.4 GB peak and over 8 minutes of
+# CPU just to come up. Pinned to something a web front-end actually needs; the
+# heavy lifting happens in the solver, not here.
+antarest_gunicorn_workers: 4
+
 # Port the web UI is published on (nginx inside the stack).
 antarest_http_port: 80
 

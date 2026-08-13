@@ -1,0 +1,47 @@
+---
+# The upstream image entrypoint is scripts/start.sh, which launches gunicorn and
+# nothing else. Creating the database schema is the job of scripts/pre-start.sh
+# (`alembic upgrade head`, then a repair pass on tasks interrupted by a previous
+# shutdown), and the project docker-compose.yml never calls it. On a fresh
+# database the backend therefore boots into
+#
+#   psycopg2.errors.UndefinedTable: relation "groups" does not exist
+#
+# on its first write, and gunicorn dies with "Worker failed to boot".
+#
+# So the migration runs here, once, between postgresql and the backend.
+# `alembic upgrade head` is idempotent, so re-running the play costs one no-op
+# container.
+
+- name: Start the database before migrating
+  ansible.builtin.systemd:
+    name: postgresql.service
+    state: started
+
+# postgresql publishes no port on the host, it is only reachable on the podman
+# network, so readiness has to be asked from inside the container.
+- name: Wait for PostgreSQL to accept connections
+  ansible.builtin.command: "{{ container_cmd }} exec postgresql pg_isready -U postgres"
+  register: antarest_pg_ready
+  until: antarest_pg_ready.rc == 0
+  retries: 30
+  delay: 5
+  changed_when: false
+
+- name: Create or upgrade the database schema
+  ansible.builtin.command:
+    cmd: >-
+      {{ container_cmd }} run --rm
+      --network {{ antarest_service_name }}
+      --user {{ antares_uid }}:{{ antares_gid }}
+      --entrypoint /scripts/pre-start.sh
+      {% for volume in antarest_backend_volumes %}
+      -v {{ volume }}
+      {% endfor %}
+      {{ antarest_image }}
+  register: antarest_migration
+  changed_when: true
+
+- name: Report what the migration did
+  ansible.builtin.debug:
+    msg: "{{ antarest_migration.stdout_lines | reject('match', '^\\s*$') | list | last | default('no output') }}"

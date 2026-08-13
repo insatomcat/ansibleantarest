@@ -20,6 +20,9 @@
     quiet: true
   loop: "{{ antarest_quadlet_services }}"
 
+- name: Create the database schema before the backend starts
+  ansible.builtin.include_tasks: migrate.yml
+
 - name: Start and enable the Antares-Web stack
   ansible.builtin.systemd:
     name: "{{ antarest_service_name }}.target"

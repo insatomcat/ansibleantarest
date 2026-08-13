@@ -5,7 +5,17 @@
     state: present
     lock_timeout: "{{ apt_lock_timeout }}"
 
-- name: Create the Antares-Web directories
+- name: Create the Antares-Web base directory
+  ansible.builtin.file:
+    path: "{{ antarest_base_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# These two are written by the containers, which run as antares_uid, so they
+# have to belong to that account. The base directory above does not.
+- name: Create the Antares-Web directories owned by the antares account
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -13,7 +23,6 @@
     group: "{{ antarest_checkout_group }}"
     mode: "0755"
   loop:
-    - "{{ antarest_base_dir }}"
     - "{{ antarest_deploy_dir }}"
     - "{{ antarest_data_dir }}"
 
@@ -30,10 +39,21 @@
     # Nothing here needs the history, and on a fresh machine a full clone of
     # AntaREST is a noticeable part of the run. 0 means a full clone.
     depth: "{{ antarest_clone_depth | int if antarest_clone_depth | int > 0 else omit }}"
-  become: true
-  become_user: "{{ antarest_checkout_owner }}"
+  # git runs as root here while the checkout belongs to the antares account, and
+  # git refuses that as "dubious ownership". Declared through the environment
+  # rather than by writing safe.directory into the machine's /etc/gitconfig: the
+  # exception is scoped to this task and leaves no trace on the host.
+  environment:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: safe.directory
+    GIT_CONFIG_VALUE_0: "{{ antarest_dir }}"
   register: antarest_checkout
 
+# Cloned as root and chowned afterwards rather than cloned as the antares
+# account directly. `become_user` to an unprivileged user needs a sudoers runas
+# spec covering it, and a hardened policy commonly grants NOPASSWD to root only
+# (`admin ALL=NOPASSWD:EXEC: ALL`), which makes sudo to any other user prompt for
+# a password and the play fail. Cloning as root works everywhere.
 - name: Make sure the checkout belongs to the antares user
   ansible.builtin.file:
     path: "{{ antarest_dir }}"
