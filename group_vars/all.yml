@@ -103,6 +103,44 @@ antarest_dir: "{{ antarest_base_dir }}/AntaREST"
 antarest_update: true                  # let the play move the checkout to antarest_version
 antarest_force_rebuild: false          # force front-end + image rebuild even if up to date
 
+# Shallow clone by default: nothing here needs the history, and the checkout is
+# reset on every run anyway. Set to 0 for a full clone.
+antarest_clone_depth: 1
+
+# ---------------------------------------------------------------------------
+#  Where the image and the web application come from
+#
+#  `build`   : the target clones, builds the front-end with node and builds the
+#              image. Self-contained, needs Internet and a few GB of RAM on the
+#              machine that will also run the studies.
+#  `archive` : the target loads a prebuilt image and unpacks a prebuilt
+#              web application from antares_artifacts_dir. Build them once with
+#              `ansible-playbook build.yml`.
+#
+#  `archive` is what makes a destroy-and-replay test loop bearable, and what
+#  guarantees that several servers run the exact same bits: the build uses
+#  `npm install` rather than `npm ci`, so two machines built on different days
+#  do not necessarily produce the same front-end.
+# ---------------------------------------------------------------------------
+antarest_image_source: build
+
+# Controller-side directory holding what build.yml produced. Gitignored.
+antares_artifacts_dir: "{{ playbook_dir }}/artifacts"
+
+# Controller-side cache of the solver tarballs. When a tarball is present here
+# it is pushed to the target instead of being downloaded from GitHub again,
+# which on a fresh machine is one of the longest steps of the whole run.
+# Populated by build.yml.
+antares_solver_cache_dir: "{{ antares_artifacts_dir }}"
+
+# Builder-side paths, used by build.yml only. The build gets a podman store of
+# its own on a chosen volume: a build machine is frequently short of space on /,
+# and this leaves the builder's own podman configuration untouched, the store
+# being passed as a flag rather than written into storage.conf. Set
+# antares_build_root to an empty string to use the machine's normal store.
+antares_build_root: /data/antares-build/store
+antares_build_artifacts: /data/antares-build/artifacts
+
 # Node version used to build the web app. `auto` reads webapp/.nvmrc from the
 # checkout, which is the version the project actually tests against.
 antarest_node_version: auto

@@ -8,15 +8,25 @@
   vars:
     antares_solver_dest: "{{ antarest_solvers_dir }}"
 
+# Either the image and the web application are built here, or they are loaded
+# from what build.yml produced. See antarest_image_source in group_vars/all.yml.
+- name: Load the prebuilt image and web application
+  ansible.builtin.include_tasks: load_artifacts.yml
+  when: antarest_image_source == 'archive'
+
 - name: Patch the web application sources
   ansible.builtin.include_tasks: patch_frontend.yml
-  when: antarest_patch_login_label | bool
+  when:
+    - antarest_image_source == 'build'
+    - antarest_patch_login_label | bool
 
 - name: Build the web application
   ansible.builtin.include_tasks: build_frontend.yml
+  when: antarest_image_source == 'build'
 
 - name: Build the Antares-Web image
   ansible.builtin.include_tasks: build_image.yml
+  when: antarest_image_source == 'build'
 
 - name: Create the SSH key used to reach the Slurm front-end
   ansible.builtin.include_tasks: ssh_key.yml

@@ -50,4 +50,15 @@
     cmd: "{{ container_cmd }} build -t {{ antarest_image }} {{ antarest_image_context }}"
   when: antarest_rebuild_image | bool or antarest_user_dockerfile.changed
   changed_when: true
+  register: antarest_image_built
+
+# The notify lives on its own task rather than on the build above, because
+# build.yml reuses these very tasks on a builder machine, where there is no
+# stack to restart and the handler would fail.
+- name: Request a restart of the stack after an image rebuild
+  ansible.builtin.command: /bin/true
+  when:
+    - antarest_image_built is changed
+    - not (antarest_builder_mode | default(false) | bool)
+  changed_when: true
   notify: Restart Antares-Web

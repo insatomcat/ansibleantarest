@@ -1,0 +1,92 @@
+---
+# ===========================================================================
+#  Build the Antares-Web artefacts once, on a builder machine
+#
+#      ansible-playbook build.yml
+#
+#  Produces, in ./artifacts on the controller:
+#    - antarest-image.tar.gz     the backend image, UID baked in
+#    - thirdparty-*.tar.gz       postgres, redis, nginx
+#    - webapp-dist.tar.gz        the built web application
+#    - antares-*.tar.gz          the solver tarballs
+#    - manifest.yml              what is actually in there
+#
+#  Then deploy without rebuilding anything:
+#
+#      ansible-playbook site.yml -e antarest_image_source=archive
+#
+#  Why bother: a from-scratch run on a target spends most of its time on
+#  `npm install` (which wants ~4 GB of heap), on building the backend image, and
+#  on downloading the solvers. Doing that once instead of once per machine is
+#  the difference between a usable destroy-and-replay loop and a coffee break.
+#
+#  The builder must share the architecture of the targets. Building for amd64
+#  from an arm64 machine means QEMU emulation, which is slow enough to defeat
+#  the purpose.
+#
+#  This reuses the very task files the normal deployment uses, so the artefacts
+#  cannot be built by a different recipe than the one they replace.
+# ===========================================================================
+
+- name: Build the Antares-Web artefacts
+  hosts: builder
+  gather_facts: true
+  vars:
+    # Suppresses the "restart the stack" notify of build_image.yml: there is no
+    # stack on a builder.
+    antarest_builder_mode: true
+
+    # The whole point of overriding this here: the reused build tasks call
+    # container_cmd, so this is what sends their layers to the build store
+    # instead of the builder's default one on /.
+    container_cmd: >-
+      /usr/bin/podman{{ ' --root ' ~ antares_build_root if antares_build_root | length > 0 else '' }}
+
+    # The checkout and the artefacts belong to whoever runs the build; no
+    # antares account is needed on a builder, the UID only ever appears as a
+    # number baked into the image.
+    antares_user: "{{ ansible_user_id }}"
+    antares_group: "{{ ansible_user_id }}"
+    antares_solver_owner: "{{ ansible_user_id }}"
+    antares_solver_group: "{{ ansible_user_id }}"
+  tasks:
+
+    - name: Check podman is available on the builder
+      ansible.builtin.command: "{{ container_cmd }} --version"
+      changed_when: false
+
+    - name: Create the build directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ antares_build_root }}"
+        - "{{ antares_build_artifacts }}"
+        - "{{ antarest_base_dir }}"
+      when: item | length > 0
+
+    - name: Fetch the AntaREST sources
+      ansible.builtin.include_role:
+        name: antares_web
+        tasks_from: checkout
+
+    - name: Patch the web application sources
+      ansible.builtin.include_role:
+        name: antares_web
+        tasks_from: patch_frontend
+      when: antarest_patch_login_label | bool
+
+    - name: Build the web application
+      ansible.builtin.include_role:
+        name: antares_web
+        tasks_from: build_frontend
+
+    - name: Build the Antares-Web image
+      ansible.builtin.include_role:
+        name: antares_web
+        tasks_from: build_image
+
+    - name: Save everything as archives and bring them back
+      ansible.builtin.include_role:
+        name: antares_build

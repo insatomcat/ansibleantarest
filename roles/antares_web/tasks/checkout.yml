@@ -27,6 +27,9 @@
     version: "{{ antarest_version }}"
     update: "{{ antarest_update | bool }}"
     force: true
+    # Nothing here needs the history, and on a fresh machine a full clone of
+    # AntaREST is a noticeable part of the run. 0 means a full clone.
+    depth: "{{ antarest_clone_depth | int if antarest_clone_depth | int > 0 else omit }}"
   become: true
   become_user: "{{ antares_user }}"
   register: antarest_checkout

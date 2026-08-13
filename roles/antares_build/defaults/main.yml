@@ -1,0 +1,15 @@
+---
+# antares_build_root and antares_build_artifacts live in group_vars/all.yml:
+# build.yml needs them in its play vars, to override container_cmd before the
+# reused build tasks run, and role defaults are not visible there.
+
+# Third-party images shipped alongside our own, so that a target with no
+# Internet access can still start the stack. Their names come from the same
+# variables the quadlet units use, so the two can never drift.
+antares_build_thirdparty_images:
+  - "{{ antarest_postgres_image }}"
+  - "{{ antarest_redis_image }}"
+  - "{{ antarest_nginx_image }}"
+
+# Whether to also save the solver tarballs into the artefact directory.
+antares_build_fetch_solvers: true

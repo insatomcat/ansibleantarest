@@ -274,6 +274,56 @@ Toutes les images sont écrites **pleinement qualifiées**
 Ubuntu ne définissent pas `unqualified-search-registries`, donc un nom court
 n'est pas résolu et podman refuse plutôt que de deviner un registre.
 
+## Construire une fois, déployer partout
+
+Par défaut (`antarest_image_source: build`) la cible clone, construit le front
+avec node et construit l'image. C'est autonome, mais ça demande Internet et
+environ 4 Go de tas sur la machine qui fait aussi tourner les études. Sur une
+boucle « détruire la VM et rejouer », ou sur plusieurs serveurs, c'est du
+gaspillage : le build utilise `npm install` et non `npm ci`, donc deux machines
+construites à deux dates ne produisent pas forcément le même front.
+
+```bash
+ansible-playbook build.yml                                  # une fois
+ansible-playbook site.yml -e antarest_image_source=archive  # autant de fois que voulu
+```
+
+`build.yml` tourne sur le groupe d'inventaire `builder` et **réutilise les
+tâches de build du déploiement**, donc les artefacts ne peuvent pas être
+produits par une recette différente de celle qu'ils remplacent. Il dépose dans
+`./artifacts` (gitignoré) :
+
+| Fichier | Contenu |
+|---|---|
+| `antarest-image.tar.gz` | l'image du backend, UID cuit dedans |
+| `thirdparty-*.tar.gz` | postgres, redis, nginx |
+| `webapp-dist.tar.gz` | l'application web construite |
+| `antares-*.tar.gz` | les tarballs des solveurs |
+| `manifest.yml` | version, commit, UID, date |
+
+En mode `archive`, la cible charge les images (idempotent : rien n'est
+retransféré ni rechargé si l'image est déjà là), déplie le front dans le
+checkout où nginx le bind-monte, et prend les solveurs dans le cache local au
+lieu de GitHub. Les archives voyagent en `rsync`, pas avec le module `copy`, qui
+est inadapté à des centaines de mégaoctets.
+
+Trois contraintes à connaître :
+
+- **Le builder doit avoir l'architecture des cibles.** Construire de l'amd64
+  depuis une machine arm64 passe par de l'émulation QEMU, assez lente pour
+  annuler tout le bénéfice.
+- **L'UID est cuit dans l'image** (`antarest_add_container_user`), donc le
+  builder et les cibles doivent s'accorder sur `antares_uid`. C'est justement ce
+  qu'une valeur unique sur tout le parc garantit.
+- **Le build a son propre store podman** (`antares_build_root`, par défaut
+  `/data/antares-build/store`), passé en option et non écrit dans le
+  `storage.conf` du builder : une machine de build manque souvent de place sur
+  `/`, et rien de sa configuration podman n'est modifié.
+
+Sans registre, c'est `N × la taille` à chaque nouvelle version, sans dédup de
+couches. À une poignée de machines c'est confortable ; au-delà, un `registry:2`
+sur une des machines coûte moins cher à maintenir que cette mécanique.
+
 ## Tags utiles
 
 ```bash

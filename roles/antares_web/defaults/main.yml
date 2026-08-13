@@ -21,6 +21,12 @@ antarest_redis_image: "{{ container_registry }}/redis:latest"
 antarest_nginx_image: "{{ container_registry }}/nginx:latest"
 antarest_adminer_image: "{{ container_registry }}/adminer:latest"
 
+# The images that have to be present for the stack to start, beyond our own.
+# Shared with build.yml so the archives and the units cannot drift apart.
+antarest_thirdparty_images: >-
+  {{ [antarest_postgres_image, antarest_redis_image, antarest_nginx_image]
+     + ([antarest_adminer_image] if antarest_enable_adminer | bool else []) }}
+
 # Build context of the derived image. Deliberately a directory of its own,
 # holding nothing but the generated Dockerfile.
 antarest_image_context: "{{ antarest_base_dir }}/image"
