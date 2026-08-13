@@ -19,10 +19,10 @@
   when: antarest_rebuild_image | bool
   changed_when: antarest_rebuild_image | bool
 
-# The containers run as 1000:1000 so that the files they drop in the bind
-# mounts belong to the antares user. The upstream image has no such account,
-# and a few code paths need a real passwd entry with a home directory, so we
-# layer one on top instead of patching the project Dockerfile.
+# The containers run as antares_uid:antares_gid so that the files they drop in
+# the bind mounts belong to the antares user. The upstream image has no such
+# account, and a few code paths need a real passwd entry with a home directory,
+# so we layer one on top instead of patching the project Dockerfile.
 #
 # This lives in a directory of its own: it is the build context, and the
 # deploy directory next door holds the private key and hundreds of megabytes
