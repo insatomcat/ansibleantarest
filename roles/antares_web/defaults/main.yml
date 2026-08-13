@@ -42,6 +42,21 @@ antarest_http_port: 80
 antarest_node_image_suffix: "-bookworm"
 antarest_node_image_repo: "{{ container_registry }}/node"
 
+# UID the front-end build container runs as. It only has to be able to write in
+# the checkout, so on a target it is the antares account that owns it. This is
+# deliberately NOT the same knob as antares_uid, which is the UID baked into the
+# backend image: a builder overrides this one to build as root while still
+# producing an image carrying the fleet's antares_uid.
+antarest_frontend_build_uid: "{{ antares_uid }}"
+antarest_frontend_build_gid: "{{ antares_gid }}"
+
+# Who owns the checkout on this machine. Again deliberately distinct from
+# antares_user: that name is baked into the image as the account to create, so
+# overriding it to build as root would produce a `groupadd root` inside the
+# image. A builder overrides these two instead.
+antarest_checkout_owner: "{{ antares_user }}"
+antarest_checkout_group: "{{ antares_group }}"
+
 # Records what the web application was last built from, so that a re-run does
 # not rebuild the front-end for nothing. Kept out of the checkout because the
 # checkout is reset on every run.
