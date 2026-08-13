@@ -63,14 +63,14 @@
 - name: Build the web application with node {{ antarest_node_tag }}
   ansible.builtin.command:
     cmd: >-
-      docker run --rm
+      {{ container_cmd }} run --rm
       -u {{ antares_uid }}:{{ antares_gid }}
       -v {{ antarest_dir }}:/antares
       -w /antares/webapp
       -e HOME=/antares/webapp/.home
       -e npm_config_cache=/antares/webapp/.npm
       -e NODE_OPTIONS=--max-old-space-size=4096
-      node:{{ antarest_node_tag }}{{ antarest_node_image_suffix }}
+      {{ antarest_node_image_repo }}:{{ antarest_node_tag }}{{ antarest_node_image_suffix }}
       bash -c "npm install --no-audit --no-fund && npm run build"
   register: antarest_frontend_build
   when: antarest_rebuild_frontend | bool

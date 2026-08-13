@@ -1,0 +1,27 @@
+{{ ansible_managed | comment }}
+#
+# Optional database web UI, off by default (antarest_enable_adminer).
+# Published on 127.0.0.1 only: it exposes the whole database and carries no
+# authentication of its own beyond the postgres credentials.
+# Reach it through an SSH tunnel:
+#   ssh -L 8080:127.0.0.1:8080 {{ inventory_hostname }}
+
+[Unit]
+Description=Antares-Web adminer
+Requires=postgresql.service
+After=postgresql.service
+PartOf={{ antarest_service_name }}.target
+
+[Container]
+ContainerName=antarest-adminer
+Image={{ antarest_adminer_image }}
+Network={{ antarest_service_name }}.network
+PublishPort=127.0.0.1:8080:8080
+Exec=php -S 0.0.0.0:8080 -t /var/www/html
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy={{ antarest_service_name }}.target

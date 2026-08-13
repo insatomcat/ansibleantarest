@@ -1,0 +1,15 @@
+---
+# Quadlet units of the accounting database, rendered into
+# /etc/containers/systemd. They carry the MariaDB root password, hence mode 0600
+# on the deployed files.
+slurmdbd_quadlet_units: >-
+  {{ ['slurmdb-data.volume',
+      'slurmdb-mariadb.container']
+     + (['slurmdb-adminer.container'] if slurmdbd_enable_adminer | bool else []) }}
+
+# Everything this role knows how to write; whatever is not currently enabled is
+# actively removed so that turning an option off takes the container down.
+slurmdbd_quadlet_all_units:
+  - slurmdb-data.volume
+  - slurmdb-mariadb.container
+  - slurmdb-adminer.container

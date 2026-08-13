@@ -1,0 +1,32 @@
+{{ ansible_managed | comment }}
+#
+# The API backend. ContainerName must stay `antarest`: the nginx configuration
+# shipped by the project proxies to http://antarest:5000/.
+#
+# UVICORN_ROOT_PATH mirrors the `root_path: api` of config.prod.yaml, which is
+# what makes the API work behind the nginx /api/ prefix.
+
+[Unit]
+Description=Antares-Web backend
+Requires=postgresql.service redis.service
+After=postgresql.service redis.service
+PartOf={{ antarest_service_name }}.target
+
+[Container]
+ContainerName=antarest
+Image={{ antarest_image }}
+Network={{ antarest_service_name }}.network
+User={{ antares_uid }}:{{ antares_gid }}
+Environment=UVICORN_ROOT_PATH=/api
+{% for volume in antarest_backend_volumes %}
+Volume={{ volume }}
+{% endfor %}
+
+[Service]
+Restart=always
+RestartSec=5
+# The first start migrates the database schema, which is not instant.
+TimeoutStartSec=300
+
+[Install]
+WantedBy={{ antarest_service_name }}.target

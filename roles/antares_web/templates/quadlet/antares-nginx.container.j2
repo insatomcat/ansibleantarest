@@ -1,0 +1,30 @@
+{{ ansible_managed | comment }}
+#
+# Serves the built web application from /www and proxies /api/ to the backend.
+#
+# Named antares-nginx rather than upstream's `nginx`: nothing resolves it by
+# name, and a generic `nginx` container name collides with anything else the
+# machine may already run. It keeps the default root user, since it binds port
+# 80 inside the container.
+
+[Unit]
+Description=Antares-Web nginx
+Requires=antarest.service
+After=antarest.service
+PartOf={{ antarest_service_name }}.target
+
+[Container]
+ContainerName=antares-nginx
+Image={{ antarest_nginx_image }}
+Network={{ antarest_service_name }}.network
+PublishPort={{ antarest_http_port }}:80
+{% for volume in antarest_nginx_volumes %}
+Volume={{ volume }}
+{% endfor %}
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy={{ antarest_service_name }}.target

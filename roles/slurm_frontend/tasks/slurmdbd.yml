@@ -13,36 +13,90 @@
     group: root
     mode: "0750"
 
-- name: Deploy the MariaDB compose file
+# The stack used to be a compose file driven by a wrapper systemd unit. Leaving
+# that unit behind would keep a second, competing copy of MariaDB fighting for
+# port 3306.
+#
+# The old docker named volume is deliberately NOT removed: it holds the
+# accounting history. Migrating a live database means dumping it and restoring
+# it into the podman volume, see the README.
+- name: Stop the pre-quadlet compose unit if it is still there
+  ansible.builtin.systemd:
+    name: slurmdb
+    state: stopped
+    enabled: false
+  failed_when: false
+
+- name: Remove the pre-quadlet compose files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/slurmdb.service
+    - "{{ slurmdbd_dir }}/docker-compose.yml"
+  register: slurmdbd_legacy_removed
+
+- name: Deploy the accounting database quadlet units
   ansible.builtin.template:
-    src: slurmdb-compose.yml.j2
-    dest: "{{ slurmdbd_dir }}/docker-compose.yml"
+    src: "quadlet/{{ item }}.j2"
+    dest: "/etc/containers/systemd/{{ item }}"
     owner: root
     group: root
     mode: "0600"
-  register: slurmdb_compose
+  loop: "{{ slurmdbd_quadlet_units }}"
+  register: slurmdbd_quadlet
 
-- name: Deploy the MariaDB systemd unit
+- name: Remove the quadlet units of disabled components
+  ansible.builtin.file:
+    path: "/etc/containers/systemd/{{ item }}"
+    state: absent
+  loop: "{{ slurmdbd_quadlet_all_units | difference(slurmdbd_quadlet_units) }}"
+  register: slurmdbd_quadlet_removed
+
+- name: Deploy the systemd target grouping the accounting database
   ansible.builtin.template:
-    src: slurmdb.service.j2
-    dest: /etc/systemd/system/slurmdb.service
+    src: slurmdb.target.j2
+    dest: /etc/systemd/system/slurmdb.target
     owner: root
     group: root
     mode: "0644"
-  register: slurmdb_unit
+  register: slurmdbd_target
+
+- name: Reload systemd so the quadlet generator picks the units up
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: >-
+    slurmdbd_quadlet.changed
+    or slurmdbd_quadlet_removed.changed
+    or slurmdbd_target.changed
+    or slurmdbd_legacy_removed.changed
+
+- name: Validate the quadlet units
+  ansible.builtin.command: /usr/lib/systemd/system-generators/podman-system-generator -dryrun
+  register: slurmdbd_quadlet_check
+  changed_when: false
+
+- name: Check the MariaDB service was generated
+  ansible.builtin.assert:
+    that: "'---slurmdb-mariadb.service---' in slurmdbd_quadlet_check.stdout"
+    fail_msg: >-
+      The quadlet generator did not produce slurmdb-mariadb.service. Units it
+      did produce:
+      {{ slurmdbd_quadlet_check.stdout | regex_findall('---(.+?)---') | join(', ') }}
+    quiet: true
 
 - name: Start and enable the accounting database
   ansible.builtin.systemd:
-    name: slurmdb
+    name: slurmdb.target
     enabled: true
     state: started
     daemon_reload: true
 
 - name: Restart the accounting database after a change
   ansible.builtin.systemd:
-    name: slurmdb
+    name: slurmdb.target
     state: restarted
-  when: slurmdb_compose.changed or slurmdb_unit.changed
+  when: slurmdbd_quadlet.changed or slurmdbd_target.changed
 
 - name: Wait for MariaDB to accept connections
   ansible.builtin.wait_for:
@@ -50,14 +104,14 @@
     port: 3306
     timeout: 180
 
-# MariaDB accepts TCP connections a few seconds before it is done
-# initialising the data directory on a first start.
+# MariaDB accepts TCP connections a few seconds before it is done initialising
+# the data directory on a first start.
 # `mariadb-admin` only exists from MariaDB 10.5 on, hence the fallback.
 - name: Wait for MariaDB to finish its initialisation
   ansible.builtin.shell:
     cmd: >-
-      {{ docker_compose_cmd }} -f {{ slurmdbd_dir }}/docker-compose.yml
-      exec -T -e MYSQL_PWD={{ slurmdbd_db_password | quote }} db
+      {{ container_cmd }} exec
+      -e MYSQL_PWD={{ slurmdbd_db_password | quote }} slurmdb-mariadb
       sh -c 'mariadb-admin ping --silent -uroot 2>/dev/null
              || mysqladmin ping --silent -uroot'
     executable: /bin/bash

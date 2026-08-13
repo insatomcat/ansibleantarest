@@ -10,20 +10,31 @@ antarest_data_dir: "{{ antarest_base_dir }}/data"
 antarest_solvers_dir: "{{ antarest_deploy_dir }}/solvers"
 antarest_ssh_key: "{{ antarest_deploy_dir }}/id_rsa"
 
-antarest_image: "antarest:latest"
-antarest_base_image: "antarest:base"
+# Our own images, so they carry the localhost/ prefix podman gives to anything
+# built on the machine.
+antarest_image: "{{ container_local_prefix }}/antarest:latest"
+antarest_base_image: "{{ container_local_prefix }}/antarest:base"
+
+# Third-party images, fully qualified because podman will not guess a registry.
+antarest_postgres_image: "{{ container_registry }}/postgres:latest"
+antarest_redis_image: "{{ container_registry }}/redis:latest"
+antarest_nginx_image: "{{ container_registry }}/nginx:latest"
+antarest_adminer_image: "{{ container_registry }}/adminer:latest"
 
 # Build context of the derived image. Deliberately a directory of its own,
 # holding nothing but the generated Dockerfile.
 antarest_image_context: "{{ antarest_base_dir }}/image"
 
+# Name of the systemd target that groups the stack, so that the whole thing can
+# still be started, stopped and queried in one command.
 antarest_service_name: antares-web
 
 # Port the web UI is published on (nginx inside the stack).
 antarest_http_port: 80
 
-# Node container used to build the web application.
+# Node image used to build the web application, fully qualified for podman.
 antarest_node_image_suffix: "-bookworm"
+antarest_node_image_repo: "{{ container_registry }}/node"
 
 # Records what the web application was last built from, so that a re-run does
 # not rebuild the front-end for nothing. Kept out of the checkout because the

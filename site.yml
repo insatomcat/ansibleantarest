@@ -66,7 +66,7 @@
   become: true
   tags: slurm
   roles:
-    - role: docker
+    - role: podman
       when: slurm_enabled | bool and slurmdbd_enabled | bool
     - role: slurm_frontend
       when: slurm_enabled | bool
@@ -104,7 +104,7 @@
   become: true
   tags: antares_web
   roles:
-    - docker
+    - podman
     - antares_web
 
 - name: Authorise Antares-Web to submit jobs on the Slurm front-end

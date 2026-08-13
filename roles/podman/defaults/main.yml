@@ -1,0 +1,31 @@
+---
+# Podman comes from the distribution: 5.x on Debian 13, 4.9 on Ubuntu 24.04.
+# There is no upstream Podman repository to speak of, and quadlet (which is what
+# the deployment relies on) has been part of podman since 4.4, so the
+# distribution packages are enough on every release in supported_distros.
+podman_packages:
+  - podman
+  - podman-docker
+
+# `podman-docker` provides a /usr/bin/docker shim. Off by default for a concrete
+# reason: it owns /usr/bin/docker, so apt refuses to install it on a machine
+# where docker-ce is still present, which is exactly the case when migrating a
+# host that ran the previous, docker-based version of this playbook. Nothing
+# here needs it either, every task calls podman directly. Turn it on for the
+# convenience of whoever types `docker ps` out of habit, once docker is gone.
+podman_install_docker_shim: false
+
+# Debian and Ubuntu ship no unqualified-search-registries, so a short image name
+# such as `postgres:16` cannot be resolved and podman fails rather than guessing
+# (short-name-mode defaults to prompting, which never succeeds unattended).
+# The playbook itself always writes fully qualified names; this is here so that
+# an operator typing `podman pull postgres` on the machine gets what they mean.
+podman_unqualified_search_registries:
+  - docker.io
+
+# Membership in no group is required: the containers are managed by the system
+# systemd instance as root (rootful). Rootless would map container UIDs through
+# /etc/subuid, so a container running as antares_uid would NOT create files
+# owned by antares_uid on the host, which is exactly what the shared /home and
+# the bind mounts depend on.
+podman_rootful: true

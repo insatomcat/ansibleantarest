@@ -1,0 +1,22 @@
+{{ ansible_managed | comment }}
+#
+# Groups the stack so that it can still be handled in one command, the way
+# `docker compose up/down` used to:
+#
+#   systemctl start   {{ antarest_service_name }}.target
+#   systemctl stop    {{ antarest_service_name }}.target
+#   systemctl restart {{ antarest_service_name }}.target
+#   systemctl status  '{{ antarest_service_name }}.target' 'antarest*'
+#
+# Each container declares PartOf= on this target, which is what propagates a
+# stop or a restart down to the members; a plain Wants= would not. This is an
+# ordinary systemd unit, not a quadlet file: quadlet generates the services,
+# and this only aggregates them.
+
+[Unit]
+Description=Antares-Web stack
+After=network-online.target
+Wants=network-online.target
+
+[Install]
+WantedBy=multi-user.target
