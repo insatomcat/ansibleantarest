@@ -40,8 +40,16 @@
       {% endfor %}
       {{ antarest_image }}
   register: antarest_migration
-  changed_when: true
+  # alembic announces "Running upgrade <from> -> <to>" only when it actually
+  # applies a revision, and says nothing when the database is already at head.
+  # Reporting changed unconditionally would make every no-op run look like it
+  # touched the schema.
+  changed_when: >-
+    'Running upgrade' in (antarest_migration.stdout ~ antarest_migration.stderr)
 
 - name: Report what the migration did
   ansible.builtin.debug:
-    msg: "{{ antarest_migration.stdout_lines | reject('match', '^\\s*$') | list | last | default('no output') }}"
+    msg: >-
+      {{ (antarest_migration.stdout ~ antarest_migration.stderr)
+         | regex_findall('Running upgrade [^\n]*') | join('; ')
+         | default('schema already at head', true) }}
