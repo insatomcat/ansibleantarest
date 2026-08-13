@@ -8,22 +8,35 @@
 #  The UID/GID must match between the Antares-Web containers, the NFS share
 #  and the Slurm nodes, otherwise the studies pushed over SSH are unreadable.
 #
-#  1000 is the first UID handed out by the installers, so it is often already
-#  taken: `ubuntu` on the Ubuntu cloud and server images, `debian` or `admin`
-#  on the Debian cloud images, the account created at install time on a manual
-#  install. The play stops with the name of the offending account when that
-#  happens; pick a free pair here instead, for example:
+#  Deliberately not 1000. login.defs hands out human accounts from UID_MIN
+#  (1000) upwards, sequentially, so 1000 is already taken on most images:
+#  `ubuntu` on the Ubuntu cloud and server images, `debian` or `admin` on the
+#  Debian cloud ones, the account created at install time on a manual install.
+#  9000 sits well clear of that allocation path and well under UID_MAX (60000),
+#  so it needs no useradd flag and stays free without coordination. It is also
+#  baked into the derived backend image, so a single value across the fleet
+#  means a single image (see antarest_add_container_user below).
 #
-#    antares_uid: 1500
-#    antares_gid: 1500
+#  The play reads the passwd and group databases before creating anything and
+#  stops with the name of the account in the way, so a wrong guess here is
+#  loud rather than subtle. Run with --check to validate the pair across every
+#  machine without installing anything.
 #
-#  Do not change this on a machine that has already been deployed: the files
-#  under antarest_base_dir and in the shared /home belong to the old UID.
+#  Two caveats:
+#    - it has to be free on the Slurm nodes and the NFS server too, since the
+#      point is UID coherence across the shared /home,
+#    - on machines joined to a central directory (LDAP, AD via SSSD), have the
+#      value reserved: nsswitch makes an existing collision visible here, but
+#      not a future directory account handed the same UID.
+#
+#  Changing this on a machine that has already been deployed renumbers the
+#  antares account and orphans everything it owns; the files under
+#  antarest_base_dir and in the shared /home then need a chown -R.
 # ---------------------------------------------------------------------------
 antares_user: antares
 antares_group: antares
-antares_uid: 1000
-antares_gid: 1000
+antares_uid: 9000
+antares_gid: 9000
 antares_home: "/home/{{ antares_user }}"
 
 # ---------------------------------------------------------------------------
@@ -94,10 +107,15 @@ antarest_force_rebuild: false          # force front-end + image rebuild even if
 # checkout, which is the version the project actually tests against.
 antarest_node_version: auto
 
-# Add a uid/gid 1000 account inside the backend image. The containers run as
-# `user: 1000:1000` so that the files they create in the bind mounts belong to
-# the antares user; without a matching passwd entry some code paths that need
-# a home directory fail.
+# Add an antares_uid/antares_gid account inside the backend image. The
+# containers run as that pair so that the files they create in the bind mounts
+# belong to the antares user; without a matching passwd entry some code paths
+# that need a home directory fail.
+#
+# Note that this bakes antares_uid into the image, so a prebuilt image is only
+# reusable across machines that agree on the value. Setting HOME in the compose
+# environment instead would decouple the two, at the cost of losing the passwd
+# entry.
 antarest_add_container_user: true
 
 # Secrets - CHANGE THESE.

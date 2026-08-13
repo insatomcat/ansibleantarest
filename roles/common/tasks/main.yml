@@ -21,21 +21,24 @@
     cache_valid_time: 3600
     lock_timeout: "{{ apt_lock_timeout }}"
 
-# 1000 is the first UID the installers hand out, so it is frequently taken
-# already (`ubuntu` on the Ubuntu images, `debian` on the Debian cloud images).
-# Both the group and the user task would fail on such a host, with a message
-# that says nothing about which account is in the way, so name it here.
+# The group and the user task would both fail on a host where the pair is
+# taken, with a message that says nothing about which account is in the way, so
+# name it here. `check_mode: false` so that a --check run validates the pair
+# across the whole inventory without installing anything, which is the cheap
+# way to pick a UID before a multi-machine rollout.
 - name: Look for an account already holding the target UID
   ansible.builtin.command: "getent passwd {{ antares_uid }}"
   register: common_uid_holder
   changed_when: false
   failed_when: false
+  check_mode: false
 
 - name: Look for a group already holding the target GID
   ansible.builtin.command: "getent group {{ antares_gid }}"
   register: common_gid_holder
   changed_when: false
   failed_when: false
+  check_mode: false
 
 - name: Check the target UID and GID are free
   ansible.builtin.assert:
@@ -48,10 +51,10 @@
       "{{ common_uid_holder.stdout | default('') | trim | default('free', true) }}",
       group says
       "{{ common_gid_holder.stdout | default('') | trim | default('free', true) }}".
-      That is the normal state on the Ubuntu images, where uid/gid 1000 is the
-      `ubuntu` account. Set antares_uid and antares_gid in group_vars/all.yml
-      to a pair that is free on every machine (1500 for instance), or free 1000
-      there. Do not change them on a deployment that already holds data.
+      Pick a pair that is free on every machine of the inventory in
+      group_vars/all.yml, high enough to stay clear of the accounts login.defs
+      hands out from 1000 upwards. Beware that changing it on a machine that
+      already holds data orphans everything the antares account owns.
     quiet: true
 
 - name: Create the antares group
@@ -70,15 +73,19 @@
     create_home: true
     state: present
 
+# Skipped under --check: the account was not created, so there is nothing to
+# read back. The preflight above is what a --check run relies on, and it does
+# run there.
 - name: Read back the antares account
   ansible.builtin.getent:
     database: passwd
     key: "{{ antares_user }}"
+  when: not ansible_check_mode
 
-# The whole deployment relies on UID/GID 1000 being the antares account: the
-# containers run as 1000:1000 and write into bind mounts and, over SSH, into
-# the shared /home. A mismatch produces permission errors that are painful to
-# diagnose later, so fail early and loudly.
+# The whole deployment relies on antares_uid/antares_gid being the antares
+# account: the containers run as that pair and write into bind mounts and, over
+# SSH, into the shared /home. A mismatch produces permission errors that are
+# painful to diagnose later, so fail early and loudly.
 - name: Check the antares account owns the expected UID
   ansible.builtin.assert:
     that:
@@ -89,6 +96,7 @@
       {{ antares_uid }}. Another account probably already owns that UID on
       {{ inventory_hostname }}; free it or change antares_uid/antares_gid.
     quiet: true
+  when: not ansible_check_mode
 
 - name: Set the hostname
   ansible.builtin.hostname:
