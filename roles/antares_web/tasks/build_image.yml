@@ -1,6 +1,6 @@
 ---
 - name: Look for an existing Antares-Web image
-  ansible.builtin.command: docker image inspect {{ antarest_image }}
+  ansible.builtin.command: "{{ container_cmd }} image inspect {{ antarest_image }}"
   register: antarest_image_present
   changed_when: false
   failed_when: false
@@ -14,7 +14,7 @@
 
 - name: Build the AntaREST image from the project Dockerfile
   ansible.builtin.command:
-    cmd: docker build -t {{ antarest_base_image }} .
+    cmd: "{{ container_cmd }} build -t {{ antarest_base_image }} ."
     chdir: "{{ antarest_dir }}"
   when: antarest_rebuild_image | bool
   changed_when: antarest_rebuild_image | bool
@@ -47,7 +47,7 @@
 
 - name: Build the final Antares-Web image
   ansible.builtin.command:
-    cmd: docker build -t {{ antarest_image }} {{ antarest_image_context }}
+    cmd: "{{ container_cmd }} build -t {{ antarest_image }} {{ antarest_image_context }}"
   when: antarest_rebuild_image | bool or antarest_user_dockerfile.changed
   changed_when: true
   notify: Restart Antares-Web

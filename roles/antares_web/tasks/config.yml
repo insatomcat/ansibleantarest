@@ -1,21 +1,4 @@
 ---
-# The compose override uses the `!override` tag to replace the project's
-# volume and port lists instead of concatenating with them.
-- name: Read the Docker Compose version
-  ansible.builtin.command: "{{ docker_compose_cmd }} version --short"
-  register: antarest_compose_version
-  changed_when: false
-
-- name: Check Docker Compose is recent enough for the override tags
-  ansible.builtin.assert:
-    that:
-      - (antarest_compose_version.stdout | trim | regex_replace('^v', '')) is version('2.24.0', '>=')
-    fail_msg: >-
-      Docker Compose {{ antarest_compose_version.stdout | trim }} is too old:
-      the `!override` tag needs 2.24.0 or later. Keep
-      docker_use_upstream_repo enabled to get a current compose plugin.
-    quiet: true
-
 - name: Create the Antares-Web data directories
   ansible.builtin.file:
     path: "{{ item }}"
@@ -45,26 +28,50 @@
     mode: "0640"
   notify: Restart Antares-Web
 
-- name: Deploy the compose override
+# One .container (or .network) file per container, which systemd turns into
+# services through the podman quadlet generator at every daemon-reload. This is
+# what replaces the project docker-compose.yml and the override that used to be
+# layered on top of it: nothing is inherited any more, every mount and every
+# dependency is written out explicitly.
+- name: Deploy the quadlet units
   ansible.builtin.template:
-    src: docker-compose.override.yml.j2
-    dest: "{{ antarest_deploy_dir }}/docker-compose.override.yml"
+    src: "quadlet/{{ item }}.j2"
+    dest: "/etc/containers/systemd/{{ item }}"
     owner: root
     group: root
     mode: "0644"
+  loop: "{{ antarest_quadlet_units }}"
+  register: antarest_quadlet
   notify: Restart Antares-Web
 
-- name: Deploy the Antares-Web systemd unit
+# Turning an option such as antarest_enable_adminer back off has to take the
+# container down, not leave a live unit behind.
+- name: Remove the quadlet units of disabled components
+  ansible.builtin.file:
+    path: "/etc/containers/systemd/{{ item }}"
+    state: absent
+  loop: "{{ antarest_quadlet_all_units | difference(antarest_quadlet_units) }}"
+  register: antarest_quadlet_removed
+  notify: Restart Antares-Web
+
+# An ordinary systemd unit, not a quadlet one: it only aggregates the generated
+# services so the stack keeps a single start/stop handle.
+- name: Deploy the systemd target grouping the stack
   ansible.builtin.template:
-    src: antares-web.service.j2
-    dest: "/etc/systemd/system/{{ antarest_service_name }}.service"
+    src: antares-web.target.j2
+    dest: "/etc/systemd/system/{{ antarest_service_name }}.target"
     owner: root
     group: root
     mode: "0644"
-  register: antarest_unit
+  register: antarest_target
   notify: Restart Antares-Web
 
-- name: Reload systemd
+# The generator only runs on daemon-reload, so until this happens the units
+# above simply do not exist as services.
+- name: Reload systemd so the quadlet generator picks the units up
   ansible.builtin.systemd:
     daemon_reload: true
-  when: antarest_unit.changed
+  when: >-
+    antarest_quadlet.changed
+    or antarest_quadlet_removed.changed
+    or antarest_target.changed

@@ -1,0 +1,12 @@
+{{ ansible_managed | comment }}
+#
+# A named podman volume rather than a bind mount, for one practical reason:
+# podman initialises it from the image, so the MariaDB data directory gets the
+# ownership the image expects without any chown gymnastics on the host.
+#
+# It survives the container being recreated, which is the whole point: the
+# reference procedure declared no volume at all, so the accounting history
+# disappeared the first time the container was replaced.
+
+[Volume]
+VolumeName=slurmdb-data

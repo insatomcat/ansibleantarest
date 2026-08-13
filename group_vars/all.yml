@@ -130,15 +130,28 @@ antarest_default_launcher: "{{ 'slurm' if slurm_enabled | bool else 'local' }}"
 antarest_enable_adminer: false
 
 # ---------------------------------------------------------------------------
-#  Docker
+#  Containers
 #
-#  Debian's own docker.io / docker-compose packages ship compose v1, which is
-#  end-of-life. By default we use Docker's APT repository and the compose v2
-#  plugin (`docker compose`). Set to false to use the distribution packages,
-#  and then adjust docker_compose_cmd.
+#  The stack runs on podman, driven by quadlet: each container is a systemd
+#  unit generated from a .container file in /etc/containers/systemd, and
+#  systemd owns the ordering, the restarts and the logs. There is no compose
+#  file and no daemon.
+#
+#  Podman runs rootful, so `User=` inside a container maps straight to the host
+#  UID exactly as it did with Docker. Rootless would remap it through
+#  /etc/subuid and break the UID coherence the shared /home relies on.
 # ---------------------------------------------------------------------------
-docker_use_upstream_repo: true
-docker_compose_cmd: "/usr/bin/docker compose"
+container_cmd: /usr/bin/podman
+
+# Images are always written fully qualified: Debian and Ubuntu ship no
+# unqualified-search-registries, so a short name cannot be resolved and podman
+# refuses rather than guessing a registry.
+container_registry: docker.io/library
+
+# Podman prefixes images built locally with `localhost/`. Both forms resolve
+# for a local lookup, but the explicit one keeps podman from ever reaching out
+# to a registry for our own image.
+container_local_prefix: localhost
 
 # ---------------------------------------------------------------------------
 #  Slurm cluster
@@ -170,7 +183,8 @@ slurm_launch_script: "{{ antares_home }}/launchAntares.sh"
 slurmdbd_enabled: true
 slurmdbd_db_password: "changeme-slurm-acct"
 slurmdbd_dir: /var/slurmdb
-slurmdbd_mariadb_image: "mariadb:11"
+slurmdbd_mariadb_image: "{{ container_registry }}/mariadb:11"
+slurmdbd_adminer_image: "{{ container_registry }}/adminer:latest"
 # The reference procedure uses 12G, which does not fit a small front-end VM.
 slurmdbd_innodb_buffer_pool_size: "1G"
 slurmdbd_enable_adminer: false

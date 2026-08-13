@@ -1,0 +1,29 @@
+{{ ansible_managed | comment }}
+#
+# ContainerName is postgresql, not postgres: config.prod.yaml points the
+# database URL at `postgresql:5432`, which is the compose *service* name.
+# Compose resolved both the service name and the container name; podman only
+# resolves the container name and the aliases, hence the alias below for
+# upstream's `postgres`.
+
+[Unit]
+Description=Antares-Web PostgreSQL
+PartOf={{ antarest_service_name }}.target
+
+[Container]
+ContainerName=postgresql
+Image={{ antarest_postgres_image }}
+Network={{ antarest_service_name }}.network
+NetworkAlias=postgres
+User={{ antares_uid }}:{{ antares_gid }}
+Environment=POSTGRES_PASSWORD={{ antarest_db_password }}
+Environment=PGDATA=/var/lib/postgresql/data/pgdata
+Volume={{ antarest_data_dir }}/db:/var/lib/postgresql/data
+Exec=postgres -c log_statement=all -c log_destination=stderr
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy={{ antarest_service_name }}.target

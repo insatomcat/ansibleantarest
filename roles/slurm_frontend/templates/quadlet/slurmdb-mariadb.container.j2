@@ -1,0 +1,29 @@
+{{ ansible_managed | comment }}
+#
+# MariaDB backing the Slurm accounting database (slurmdbd).
+#
+# The port is published on the loopback only: slurmdbd runs on this very host
+# and there is no reason to expose the database root account to the network.
+# Quadlet adds the dependency on slurmdb-data-volume.service by itself.
+
+[Unit]
+Description=Slurm accounting database (MariaDB)
+PartOf=slurmdb.target
+
+[Container]
+ContainerName=slurmdb-mariadb
+Image={{ slurmdbd_mariadb_image }}
+Volume=slurmdb-data.volume:/var/lib/mysql
+PublishPort=127.0.0.1:3306:3306
+Environment=MARIADB_ROOT_PASSWORD={{ slurmdbd_db_password }}
+Environment=MARIADB_DATABASE=slurm_acct_db
+Exec=--innodb-buffer-pool-size={{ slurmdbd_innodb_buffer_pool_size }} --innodb-lock-wait-timeout=900 --innodb-flush-log-at-trx-commit=2 --max-connections=4096
+
+[Service]
+Restart=always
+RestartSec=5
+# A first start initialises the data directory, which takes a while.
+TimeoutStartSec=300
+
+[Install]
+WantedBy=slurmdb.target

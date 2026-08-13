@@ -1,0 +1,28 @@
+{{ ansible_managed | comment }}
+#
+# Scans the study workspaces. Same image as the backend, started with the
+# `watcher` argument, which is what the compose file expressed as
+# `command: watcher`.
+
+[Unit]
+Description=Antares-Web study watcher
+Requires=antarest.service
+After=antarest.service
+PartOf={{ antarest_service_name }}.target
+
+[Container]
+ContainerName=antarest-watcher
+Image={{ antarest_image }}
+Network={{ antarest_service_name }}.network
+User={{ antares_uid }}:{{ antares_gid }}
+{% for volume in antarest_shared_volumes %}
+Volume={{ volume }}
+{% endfor %}
+Exec=watcher
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy={{ antarest_service_name }}.target
