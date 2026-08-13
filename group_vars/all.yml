@@ -7,12 +7,47 @@
 #  Unprivileged account, identical on every machine.
 #  The UID/GID must match between the Antares-Web containers, the NFS share
 #  and the Slurm nodes, otherwise the studies pushed over SSH are unreadable.
+#
+#  1000 is the first UID handed out by the installers, so it is often already
+#  taken: `ubuntu` on the Ubuntu cloud and server images, `debian` or `admin`
+#  on the Debian cloud images, the account created at install time on a manual
+#  install. The play stops with the name of the offending account when that
+#  happens; pick a free pair here instead, for example:
+#
+#    antares_uid: 1500
+#    antares_gid: 1500
+#
+#  Do not change this on a machine that has already been deployed: the files
+#  under antarest_base_dir and in the shared /home belong to the old UID.
 # ---------------------------------------------------------------------------
 antares_user: antares
 antares_group: antares
 antares_uid: 1000
 antares_gid: 1000
 antares_home: "/home/{{ antares_user }}"
+
+# ---------------------------------------------------------------------------
+#  Distributions
+#
+#  Everything here goes through apt, so the playbook covers the Debian family.
+#  The package names, the systemd unit names and /etc/slurm are identical on
+#  Debian 12/13 and Ubuntu 22.04/24.04, and the Docker repository is derived
+#  from the facts of the target.
+#
+#  One caveat: the Slurm version differs between releases (23.11 on Ubuntu
+#  24.04, 24.11 on Debian 13) and the daemons only interoperate across a
+#  couple of majors, so a single cluster must run a single distribution.
+# ---------------------------------------------------------------------------
+supported_distros:
+  - "Debian 12"
+  - "Debian 13"
+  - "Ubuntu 22"
+  - "Ubuntu 24"
+distro_check_enabled: true
+
+# The Ubuntu images run apt-daily and unattended-upgrades on boot, which holds
+# the dpkg lock for a few minutes. Wait for it instead of failing.
+apt_lock_timeout: 300
 
 # ---------------------------------------------------------------------------
 #  Slurm on / off

@@ -8,6 +8,7 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
+    lock_timeout: "{{ apt_lock_timeout }}"
   when: docker_use_upstream_repo | bool
 
 - name: Add the Docker repository
@@ -27,6 +28,7 @@
 - name: Refresh the package lists
   ansible.builtin.apt:
     update_cache: true
+    lock_timeout: "{{ apt_lock_timeout }}"
   when: docker_repo.changed | default(false)
 
 - name: Install Docker
@@ -35,6 +37,7 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
+    lock_timeout: "{{ apt_lock_timeout }}"
 
 - name: Start and enable Docker
   ansible.builtin.systemd:

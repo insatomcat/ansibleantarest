@@ -8,9 +8,12 @@ docker_packages:
   - docker-buildx-plugin
   - docker-compose-plugin
 
-# Used when docker_use_upstream_repo is false. Note that Debian's
-# docker-compose is compose v1, so docker_compose_cmd must then be set to
-# /usr/bin/docker-compose.
+# Used when docker_use_upstream_repo is false, and then the compose command has
+# to be adjusted: Debian ships `docker-compose`, which is compose v1, so
+# docker_compose_cmd must become /usr/bin/docker-compose. Ubuntu 24.04 has a
+# `docker-compose-v2` package instead, whose version may still be below the
+# 2.24 the compose override needs (see roles/antares_web/tasks/config.yml).
+# Keeping the upstream repository is the supported path on both.
 docker_distro_packages:
   - docker.io
   - docker-compose

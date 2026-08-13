@@ -3,6 +3,7 @@
   ansible.builtin.apt:
     name: slurmd
     state: present
+    lock_timeout: "{{ apt_lock_timeout }}"
 
 - name: Create the slurmd spool directory
   ansible.builtin.file:

@@ -3,6 +3,7 @@
   ansible.builtin.apt:
     name: "{{ antares_web_packages }}"
     state: present
+    lock_timeout: "{{ apt_lock_timeout }}"
 
 - name: Create the Antares-Web directories
   ansible.builtin.file:

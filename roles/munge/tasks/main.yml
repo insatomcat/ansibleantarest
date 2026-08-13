@@ -6,9 +6,10 @@
       - libmunge2
       - libmunge-dev
     state: present
+    lock_timeout: "{{ apt_lock_timeout }}"
 
-# The Debian package already generates a key at install time; this only kicks
-# in on a host where the key is missing.
+# The distribution package already generates a key at install time; this only
+# kicks in on a host where the key is missing.
 - name: Generate the munge key on the front-end
   ansible.builtin.command:
     cmd: dd if=/dev/urandom bs=1 count=1024 of=/etc/munge/munge.key
