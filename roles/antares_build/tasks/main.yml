@@ -1,0 +1,100 @@
+---
+# Runs on the builder, after the antares_web build tasks have produced the image
+# and webapp/dist in the checkout. Its only job is to turn those into archives
+# the controller can hand to any number of targets.
+
+- name: Create the artefact directory on the builder
+  ansible.builtin.file:
+    path: "{{ antares_build_artifacts }}"
+    state: directory
+    mode: "0755"
+
+- name: Save the Antares-Web image
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      {{ container_cmd }} save --format docker-archive {{ antarest_image }}
+      | gzip -1 > {{ antares_build_artifacts }}/antarest-image.tar.gz
+    executable: /bin/bash
+  changed_when: true
+
+# Pulled and saved here so that a target with no Internet access still gets
+# them. gzip -1 because these are already-compressed layers: the extra CPU of a
+# higher level buys almost nothing.
+- name: Pull the third-party images
+  ansible.builtin.command: "{{ container_cmd }} pull {{ item }}"
+  loop: "{{ antares_build_thirdparty_images }}"
+  changed_when: true
+
+- name: Save the third-party images
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      {{ container_cmd }} save --format docker-archive {{ item }}
+      | gzip -1 > {{ antares_build_artifacts }}/thirdparty-{{ item | regex_replace('[^a-zA-Z0-9]', '-') }}.tar.gz
+    executable: /bin/bash
+  loop: "{{ antares_build_thirdparty_images }}"
+  changed_when: true
+
+- name: Archive the built web application
+  ansible.builtin.command:
+    cmd: >-
+      tar -czf {{ antares_build_artifacts }}/webapp-dist.tar.gz -C {{ antarest_dir }}/webapp dist
+  changed_when: true
+
+- name: Download the solver tarballs
+  ansible.builtin.get_url:
+    url: "{{ antares_solver_base_url }}/v{{ item.version }}/antares-{{ item.version }}-{{ antares_solver_os }}.tar.gz"
+    dest: "{{ antares_build_artifacts }}/antares-{{ item.version }}-{{ antares_solver_os }}.tar.gz"
+    mode: "0644"
+  loop: "{{ antares_solvers }}"
+  loop_control:
+    label: "antares-{{ item.version }}"
+  when: antares_build_fetch_solvers | bool
+
+# Recorded for whoever has to answer "what is actually in these archives", which
+# is the question a fixed set of file names cannot answer on its own.
+- name: Write a manifest next to the archives
+  ansible.builtin.copy:
+    content: |
+      # Produced by build.yml on {{ inventory_hostname }}
+      antarest_version: "{{ antarest_version }}"
+      antarest_commit: "{{ antarest_checkout.after | default('unknown') }}"
+      node_version: "{{ antarest_node_tag | default('unknown') }}"
+      antares_uid: {{ antares_uid }}
+      antares_gid: {{ antares_gid }}
+      image: "{{ antarest_image }}"
+      built_at: "{{ ansible_date_time.iso8601 | default('unknown') }}"
+    dest: "{{ antares_build_artifacts }}/manifest.yml"
+    mode: "0644"
+
+- name: List what was produced
+  ansible.builtin.find:
+    paths: "{{ antares_build_artifacts }}"
+    patterns: ["*.tar.gz", "manifest.yml"]
+  register: antares_build_produced
+
+- name: Create the artefact directory on the controller
+  ansible.builtin.file:
+    path: "{{ antares_artifacts_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  run_once: true
+
+- name: Fetch the artefacts back to the controller
+  ansible.builtin.fetch:
+    src: "{{ item.path }}"
+    dest: "{{ antares_artifacts_dir }}/"
+    flat: true
+  loop: "{{ antares_build_produced.files }}"
+  loop_control:
+    label: "{{ item.path | basename }} ({{ (item.size / 1048576) | round(1) }} MB)"
+
+- name: Report the artefacts
+  ansible.builtin.debug:
+    msg: >-
+      {{ antares_build_produced.files | length }} archives in
+      {{ antares_artifacts_dir }},
+      {{ (antares_build_produced.files | map(attribute='size') | sum / 1048576) | round(1) }} MB total.
+      Deploy them with `-e antarest_image_source=archive`.
