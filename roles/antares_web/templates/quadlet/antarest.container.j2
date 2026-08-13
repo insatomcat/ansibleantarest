@@ -18,6 +18,7 @@ Image={{ antarest_image }}
 Network={{ antarest_service_name }}.network
 User={{ antares_uid }}:{{ antares_gid }}
 Environment=UVICORN_ROOT_PATH=/api
+Environment=GUNICORN_WORKERS={{ antarest_gunicorn_workers }}
 {% for volume in antarest_backend_volumes %}
 Volume={{ volume }}
 {% endfor %}
