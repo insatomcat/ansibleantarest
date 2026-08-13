@@ -27,8 +27,8 @@
     path: "{{ antarest_dir }}/{{ item }}"
     regexp: 'label="NNI"'
     replace: "label={{ antarest_login_username_label }}"
-    owner: "{{ antares_user }}"
-    group: "{{ antares_group }}"
+    owner: "{{ antarest_checkout_owner }}"
+    group: "{{ antarest_checkout_group }}"
   loop: "{{ antarest_nni_files.stdout_lines }}"
 
 - name: Check no "NNI" label survived the patch

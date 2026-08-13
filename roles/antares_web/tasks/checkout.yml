@@ -9,8 +9,8 @@
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: "{{ antares_user }}"
-    group: "{{ antares_group }}"
+    owner: "{{ antarest_checkout_owner }}"
+    group: "{{ antarest_checkout_group }}"
     mode: "0755"
   loop:
     - "{{ antarest_base_dir }}"
@@ -31,14 +31,14 @@
     # AntaREST is a noticeable part of the run. 0 means a full clone.
     depth: "{{ antarest_clone_depth | int if antarest_clone_depth | int > 0 else omit }}"
   become: true
-  become_user: "{{ antares_user }}"
+  become_user: "{{ antarest_checkout_owner }}"
   register: antarest_checkout
 
 - name: Make sure the checkout belongs to the antares user
   ansible.builtin.file:
     path: "{{ antarest_dir }}"
     state: directory
-    owner: "{{ antares_user }}"
-    group: "{{ antares_group }}"
+    owner: "{{ antarest_checkout_owner }}"
+    group: "{{ antarest_checkout_group }}"
     recurse: true
   when: antarest_checkout.changed

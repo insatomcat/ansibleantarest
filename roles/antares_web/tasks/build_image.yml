@@ -45,9 +45,14 @@
     mode: "0644"
   register: antarest_user_dockerfile
 
+# --pull=never is required, not cosmetic: the Dockerfile does
+# `FROM localhost/antarest:base`, and podman reads `localhost/` there as a
+# registry named localhost rather than as a local image, so it tries to pull
+# over HTTP from 127.0.0.1:80 and fails. Forbidding the pull outright makes it
+# resolve the image from local storage, where the previous task just put it.
 - name: Build the final Antares-Web image
   ansible.builtin.command:
-    cmd: "{{ container_cmd }} build -t {{ antarest_image }} {{ antarest_image_context }}"
+    cmd: "{{ container_cmd }} build --pull=never -t {{ antarest_image }} {{ antarest_image_context }}"
   when: antarest_rebuild_image | bool or antarest_user_dockerfile.changed
   changed_when: true
   register: antarest_image_built
