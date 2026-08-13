@@ -3,6 +3,7 @@
   ansible.builtin.apt:
     name: "{{ slurm_common_packages }}"
     state: present
+    lock_timeout: "{{ apt_lock_timeout }}"
 
 - name: Create the Slurm log directory
   ansible.builtin.file:

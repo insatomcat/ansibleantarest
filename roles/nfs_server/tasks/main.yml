@@ -5,6 +5,7 @@
       - nfs-kernel-server
       - nfs-common
     state: present
+    lock_timeout: "{{ apt_lock_timeout }}"
 
 - name: Export the shared home
   ansible.builtin.lineinfile:

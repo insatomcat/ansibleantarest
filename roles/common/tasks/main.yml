@@ -1,11 +1,17 @@
 ---
-- name: Check the distribution is Debian based
+- name: Check the distribution is supported
   ansible.builtin.assert:
-    that: ansible_os_family == "Debian"
+    that:
+      - ansible_os_family == "Debian"
+      - (ansible_distribution ~ ' ' ~ ansible_distribution_major_version) in supported_distros
     fail_msg: >-
-      This playbook targets Debian (the reference procedure uses Debian).
-      Detected: {{ ansible_distribution }} {{ ansible_distribution_version }}.
+      {{ inventory_hostname }} runs {{ ansible_distribution }}
+      {{ ansible_distribution_version }}, which is not in supported_distros
+      ({{ supported_distros | join(', ') }}). Every task installs packages with
+      apt, so only the Debian family can work at all. Add the release to
+      supported_distros to try it anyway, or set distro_check_enabled: false.
     quiet: true
+  when: distro_check_enabled | bool
 
 - name: Install the base packages
   ansible.builtin.apt:
@@ -13,6 +19,40 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
+    lock_timeout: "{{ apt_lock_timeout }}"
+
+# 1000 is the first UID the installers hand out, so it is frequently taken
+# already (`ubuntu` on the Ubuntu images, `debian` on the Debian cloud images).
+# Both the group and the user task would fail on such a host, with a message
+# that says nothing about which account is in the way, so name it here.
+- name: Look for an account already holding the target UID
+  ansible.builtin.command: "getent passwd {{ antares_uid }}"
+  register: common_uid_holder
+  changed_when: false
+  failed_when: false
+
+- name: Look for a group already holding the target GID
+  ansible.builtin.command: "getent group {{ antares_gid }}"
+  register: common_gid_holder
+  changed_when: false
+  failed_when: false
+
+- name: Check the target UID and GID are free
+  ansible.builtin.assert:
+    that:
+      - common_uid_holder.rc != 0 or common_uid_holder.stdout.split(':')[0] == antares_user
+      - common_gid_holder.rc != 0 or common_gid_holder.stdout.split(':')[0] == antares_group
+    fail_msg: >-
+      UID {{ antares_uid }} / GID {{ antares_gid }} are not free on
+      {{ inventory_hostname }}: passwd says
+      "{{ common_uid_holder.stdout | default('') | trim | default('free', true) }}",
+      group says
+      "{{ common_gid_holder.stdout | default('') | trim | default('free', true) }}".
+      That is the normal state on the Ubuntu images, where uid/gid 1000 is the
+      `ubuntu` account. Set antares_uid and antares_gid in group_vars/all.yml
+      to a pair that is free on every machine (1500 for instance), or free 1000
+      there. Do not change them on a deployment that already holds data.
+    quiet: true
 
 - name: Create the antares group
   ansible.builtin.group:
