@@ -4,13 +4,35 @@
 #  on/off switches. What follows is the tuning.
 # ===========================================================================
 
-hardening_packages:
-  - nftables
-  # fail2ban only *recommends* python3-systemd, and without it the systemd
-  # backend cannot read the journal at all: on a machine installed with
-  # --no-install-recommends every jail would come up dead.
-  - python3-systemd
-  - fail2ban
+hardening_packages: "{{ _hardening_packages_by_family[ansible_os_family] }}"
+_hardening_packages_by_family:
+  Debian:
+    - nftables
+    # fail2ban only *recommends* python3-systemd, and without it the systemd
+    # backend cannot read the journal at all: on a machine installed with
+    # --no-install-recommends every jail would come up dead.
+    - python3-systemd
+    - fail2ban
+  RedHat:
+    - nftables
+    - python3-systemd
+    # EPEL splits fail2ban up. `fail2ban-server` is the daemon and the client;
+    # `fail2ban-systemd` is what lets the jails read the journal, which is the
+    # only backend used here. Deliberately not the `fail2ban` metapackage: it
+    # drags in fail2ban-firewalld, whose jail.d drop-in sets banaction to
+    # firewalld, and this deployment bans in the prerouting hook instead - see
+    # the action template.
+    - fail2ban-server
+    - fail2ban-systemd
+
+# ---------------------------------------------------------------------------
+#  Service names that differ between the families
+# ---------------------------------------------------------------------------
+# `ssh` on Debian and Ubuntu, `sshd` on the RHEL rebuilds. Both the reload
+# handler and the socket-activation check need the right one; reloading a unit
+# that does not exist is a failed play, and missing the socket unit means
+# reloading a daemon that is not running.
+hardening_ssh_service: "{{ 'ssh' if ansible_os_family == 'Debian' else 'sshd' }}"
 
 # ---------------------------------------------------------------------------
 #  Firewall
@@ -53,6 +75,29 @@ hardening_firewall_allow_icmp: true
 # Log what the policy drops, rate-limited. Off by default: an internet-facing
 # machine gets scanned continuously and this fills the journal.
 hardening_firewall_log_drops: false
+
+# ---------------------------------------------------------------------------
+#  firewalld (RedHat family)
+#
+#  The RHEL rebuilds boot with firewalld enabled and a default zone that drops
+#  everything but SSH, so a deployment that ignored it would come up with an
+#  Antares-Web nobody can reach and a cluster whose NFS mount times out.
+#
+#  With hardening_firewall_enabled on, firewalld is taken out of the way and
+#  the nftables table above is the whole policy: two filters that both have to
+#  say yes is one place too many for a rule to go missing. With it off,
+#  firewalld keeps the machine and this opens in it what the nftables table
+#  would have opened.
+#
+#  Set to false to be left alone with whatever firewalld is doing.
+# ---------------------------------------------------------------------------
+hardening_manage_firewalld: true
+
+# Zone the other machines of the inventory are added to when firewalld is the
+# one filtering. `trusted` accepts everything from those addresses, which is
+# what NFS, Slurm and the submission path need and what the nftables ruleset
+# grants them too.
+hardening_firewalld_peer_zone: trusted
 
 # ---------------------------------------------------------------------------
 #  fail2ban
@@ -115,13 +160,23 @@ hardening_ssh_extra_ports: []
 # ---------------------------------------------------------------------------
 #  Unattended upgrades
 # ---------------------------------------------------------------------------
-# The distribution ships an origins list restricted to the security pocket, and
-# it is left alone: this only turns the thing on.
-hardening_unattended_packages:
-  - unattended-upgrades
+# unattended-upgrades on the Debian family, dnf-automatic on the RedHat one.
+# In both cases the distribution ships the mechanism already restricted to
+# security updates and this only turns it on.
+hardening_unattended_packages: "{{ _hardening_unattended_packages_by_family[ansible_os_family] }}"
+_hardening_unattended_packages_by_family:
+  Debian:
+    - unattended-upgrades
+  RedHat:
+    - dnf-automatic
 # Rebooting a machine that may be running an eight-hour study is a decision for
 # an operator, not for a timer.
 hardening_unattended_reboot: false
+
+# What dnf-automatic is allowed to install. `security` matches the origins list
+# Debian's 50unattended-upgrades ships, so both families do the same thing.
+# `default` would install every available update instead.
+hardening_dnf_automatic_upgrade_type: security
 
 # ---------------------------------------------------------------------------
 #  Secrets

@@ -1,27 +1,31 @@
 ---
-# Podman comes from the distribution: 5.x on Debian 13, 4.9 on Ubuntu 24.04.
-# There is no upstream Podman repository to speak of, and quadlet (which is what
-# the deployment relies on) has been part of podman since 4.4, so the
-# distribution packages are enough on every release in supported_distros.
+# Podman comes from the distribution: 5.x on Debian 13, 4.9 on Ubuntu 24.04,
+# 4.9 or 5.x on EL 9 depending on the minor. There is no upstream Podman
+# repository to speak of, and quadlet (which is what the deployment relies on)
+# has been part of podman since 4.4, so the distribution packages are enough on
+# every release in supported_distros.
+#
+# The package names happen to be identical on both families; only the reason
+# aardvark-dns has to be named explicitly differs, see below.
 podman_packages:
   - podman
   # netavark is a hard dependency of podman, but aardvark-dns is only a
-  # *recommendation*, so it is absent from any machine installed with
-  # --no-install-recommends. Without it podman logs "aardvark-dns binary not
-  # found, container dns will not be enabled" and containers cannot resolve each
-  # other by name, which is precisely how antarest reaches postgresql and redis.
-  # The stack then fails several minutes later, in the health check, with nothing
-  # pointing at the cause.
+  # *recommendation* on the Debian family, so it is absent from any machine
+  # installed with --no-install-recommends. Without it podman logs "aardvark-dns
+  # binary not found, container dns will not be enabled" and containers cannot
+  # resolve each other by name, which is precisely how antarest reaches
+  # postgresql and redis. The stack then fails several minutes later, in the
+  # health check, with nothing pointing at the cause.
   - netavark
   - aardvark-dns
   - podman-docker
 
 # `podman-docker` provides a /usr/bin/docker shim. Off by default for a concrete
-# reason: it owns /usr/bin/docker, so apt refuses to install it on a machine
-# where docker-ce is still present, which is exactly the case when migrating a
-# host that ran the previous, docker-based version of this playbook. Nothing
-# here needs it either, every task calls podman directly. Turn it on for the
-# convenience of whoever types `docker ps` out of habit, once docker is gone.
+# reason: it owns /usr/bin/docker, so the package manager refuses to install it
+# on a machine where docker-ce is still present, which is exactly the case when
+# migrating a host that ran the previous, docker-based version of this playbook.
+# Nothing here needs it either, every task calls podman directly. Turn it on for
+# the convenience of whoever types `docker ps` out of habit, once docker is gone.
 podman_install_docker_shim: false
 
 # Debian and Ubuntu ship no unqualified-search-registries, so a short image name
@@ -29,8 +33,14 @@ podman_install_docker_shim: false
 # (short-name-mode defaults to prompting, which never succeeds unattended).
 # The playbook itself always writes fully qualified names; this is here so that
 # an operator typing `podman pull postgres` on the machine gets what they mean.
+#
+# The RHEL rebuilds do ship such a list, with Red Hat's own registries ahead of
+# Docker Hub, so there the drop-in is not written at all: overriding a
+# distribution default nothing here depends on would only surprise whoever
+# reads `podman info` later.
 podman_unqualified_search_registries:
   - docker.io
+podman_write_unqualified_registries: "{{ ansible_os_family == 'Debian' }}"
 
 # Membership in no group is required: the containers are managed by the system
 # systemd instance as root (rootful). Rootless would map container UIDs through

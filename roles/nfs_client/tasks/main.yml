@@ -1,9 +1,19 @@
 ---
 - name: Install the NFS client
-  ansible.builtin.apt:
-    name: nfs-common
+  ansible.builtin.package:
+    name: "{{ nfs_client_packages }}"
     state: present
-    lock_timeout: "{{ apt_lock_timeout }}"
+
+# /home comes over NFS on a compute node, and with SELinux enforcing the
+# default policy does not let anything read a home directory there: sshd cannot
+# read authorized_keys, and a job cannot read the study it was given. The
+# symptom is a permission denied that the file modes flatly contradict.
+- name: Allow SELinux to use home directories over NFS
+  ansible.posix.seboolean:
+    name: use_nfs_home_dirs
+    state: true
+    persistent: true
+  when: (ansible_facts.selinux.status | default('disabled')) == 'enabled'
 
 - name: Mount the shared home from the Slurm front-end
   ansible.posix.mount:

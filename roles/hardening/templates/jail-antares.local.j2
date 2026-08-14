@@ -2,13 +2,14 @@
 #
 # Read after every .conf of /etc/fail2ban/jail.d (the .local suffix is what
 # gives it the last word), so this also overrides the [sshd] jail Debian
-# enables in defaults-debian.conf.
+# enables in defaults-debian.conf and the banaction the EPEL packaging sets in
+# 00-firewalld.conf.
 
 [DEFAULT]
-# Read the journal rather than /var/log/auth.log: the Ubuntu images ship no
-# rsyslog at all, so that file does not exist and a jail pointed at it starts
-# dead. It is also the only way to see the nginx log, which lives in the
-# journal of the container.
+# Read the journal rather than /var/log/auth.log or /var/log/secure: the Ubuntu
+# images ship no rsyslog at all, so that file does not exist and a jail pointed
+# at it starts dead. It is also the only way to see the nginx log, which lives
+# in the journal of the container.
 backend = systemd
 
 # See /etc/fail2ban/action.d/{{ hardening_fail2ban_action }}.conf: the stock

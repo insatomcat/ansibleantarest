@@ -1,9 +1,8 @@
 ---
 - name: Install the Slurm controller
-  ansible.builtin.apt:
-    name: slurmctld
+  ansible.builtin.package:
+    name: "{{ slurm_controller_packages }}"
     state: present
-    lock_timeout: "{{ apt_lock_timeout }}"
 
 - name: Create the controller state directory
   ansible.builtin.file:

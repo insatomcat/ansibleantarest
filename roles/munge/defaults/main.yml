@@ -1,0 +1,14 @@
+---
+# munge and its shared library. The development headers are in the list on the
+# Debian side because the reference procedure had them there; on EL 9
+# munge-devel lives in CRB and nothing here compiles against it, so it is left
+# out rather than made a reason to need that repository.
+munge_packages: "{{ _munge_packages_by_family[ansible_os_family] }}"
+_munge_packages_by_family:
+  Debian:
+    - munge
+    - libmunge2
+    - libmunge-dev
+  RedHat:
+    - munge
+    - munge-libs

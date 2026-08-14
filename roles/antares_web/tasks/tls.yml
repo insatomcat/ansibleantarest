@@ -69,15 +69,51 @@
     mode: "0755"
   loop: "{{ [antarest_tls_dir] + ([antarest_tls_webroot] if antarest_tls_provider == 'letsencrypt' else []) }}"
 
-# openssl is a dependency of nothing installed so far, and Debian cloud images
-# built with --no-install-recommends do without it.
+# ---------------------------------------------------------------------------
+#  SELinux and the Let's Encrypt tree
+#
+#  The nginx container mounts /etc/letsencrypt, and the `z` flag on that mount
+#  relabels it container_file_t when the container starts. That is enough for
+#  the files that are there at the time, and not enough afterwards: every
+#  renewal writes new files under archive/, the policy gives them cert_t, and
+#  the container - which is only reloaded, not restarted - can no longer read
+#  the certificate it was just handed.
+#
+#  Recording the context with semanage is what makes it stick: the renewal hook
+#  then only has to run restorecon, and any file created there from now on gets
+#  the right label.
+# ---------------------------------------------------------------------------
+- name: Look for the recorded SELinux context of the Let's Encrypt tree
+  ansible.builtin.command: semanage fcontext --list --noheading
+  register: antarest_tls_fcontext
+  changed_when: false
+  check_mode: false
+  when: antarest_tls_selinux | bool
+
+- name: Record the SELinux context the nginx container needs on the certificates
+  ansible.builtin.command: >-
+    semanage fcontext -a -t container_file_t '/etc/letsencrypt(/.*)?'
+  register: antarest_tls_fcontext_added
+  when:
+    - antarest_tls_selinux | bool
+    - antarest_tls_fcontext.stdout is not search('/etc/letsencrypt\(/\.\*\)\?')
+  changed_when: true
+
+# Tolerant on purpose: on a first run /etc/letsencrypt does not exist yet, it
+# is certbot that creates it a few tasks later, and the deploy hook relabels it
+# as soon as there is a certificate in there.
+- name: Apply it to what is already there
+  ansible.builtin.command: restorecon -R /etc/letsencrypt
+  when: antarest_tls_fcontext_added is changed
+  changed_when: true
+  failed_when: false
+
+# openssl is a dependency of nothing installed so far, and the minimal cloud
+# images of both families do without the command-line tool.
 - name: Install openssl
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name: openssl
     state: present
-    update_cache: true
-    cache_valid_time: 3600
-    lock_timeout: "{{ apt_lock_timeout }}"
   when: antarest_tls_provider == 'selfsigned'
 
 # Ten years: this certificate exists to encrypt an internal deployment whose

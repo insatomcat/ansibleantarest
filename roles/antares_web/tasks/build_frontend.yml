@@ -65,7 +65,7 @@
     cmd: >-
       {{ container_cmd }} run --rm
       -u {{ antarest_frontend_build_uid }}:{{ antarest_frontend_build_gid }}
-      -v {{ antarest_dir }}:/antares
+      -v {{ antarest_dir }}:/antares:rw{{ container_volume_opts | trim }}
       -w /antares/webapp
       -e HOME=/antares/webapp/.home
       -e npm_config_cache=/antares/webapp/.npm

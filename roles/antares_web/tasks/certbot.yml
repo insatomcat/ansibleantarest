@@ -9,18 +9,16 @@
 # certbot package can do it unattended.
 
 - name: Install certbot
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name: "{{ antarest_certbot_packages }}"
     state: present
-    update_cache: true
-    cache_valid_time: 3600
-    lock_timeout: "{{ apt_lock_timeout }}"
 
-# The package ships certbot.timer, which runs `certbot -q renew` twice a day
-# and does nothing until a certificate is within 30 days of expiry.
+# The package ships a timer that runs `certbot -q renew` twice a day and does
+# nothing until a certificate is within 30 days of expiry. Debian calls it
+# certbot.timer, the EPEL packaging certbot-renew.timer.
 - name: Enable the renewal timer
   ansible.builtin.systemd:
-    name: certbot.timer
+    name: "{{ antarest_certbot_timer | trim }}"
     enabled: true
     state: started
 

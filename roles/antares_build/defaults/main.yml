@@ -13,3 +13,16 @@ antares_build_thirdparty_images: "{{ antarest_thirdparty_images }}"
 
 # Whether to also save the solver tarballs into the artefact directory.
 antares_build_fetch_solvers: true
+
+# Which builds of each solver to cache. The default is the one the builder's
+# own family needs, which is the right answer when the fleet is homogeneous.
+# The Ubuntu 22.04 build does not run on EL 9 and the Oracle Linux 8 one runs
+# everywhere, so a mixed fleet - or a Debian builder feeding Oracle Linux
+# targets - wants both:
+#
+#   antares_build_solver_os: ["Ubuntu-22.04", "OracleServer-8.10"]
+#
+# A target that finds no tarball for its own family in the cache falls back to
+# downloading it from GitHub, so getting this wrong costs time, not a failure.
+antares_build_solver_os:
+  - "{{ antares_solver_os | trim }}"

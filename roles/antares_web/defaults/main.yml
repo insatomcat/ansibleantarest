@@ -148,6 +148,11 @@ antarest_tls_hsts_max_age: 15768000
 antarest_certbot_packages:
   - certbot
 
+# Name of the renewal timer the certbot package ships: certbot.timer on the
+# Debian family, certbot-renew.timer in the EPEL packaging.
+antarest_certbot_timer: >-
+  {{ 'certbot-renew.timer' if ansible_os_family == 'RedHat' else 'certbot.timer' }}
+
 # Checksum of the resources/deploy/nginx.conf the TLS template was derived
 # from (AntaREST v2.33.0). With TLS on, that file is no longer mounted, so a
 # change upstream would go unnoticed: the deployment compares and warns.
@@ -157,6 +162,14 @@ antarest_nginx_upstream_sha1: 48204a956d1dc69ef5c5b8b4585a0cb517e8f9d8
 # hand: it is what keeps nginx from being told to serve a certificate that the
 # first run has not obtained yet.
 antarest_tls_active: false
+
+# Whether the certificate tree needs SELinux attention. Only the letsencrypt
+# provider does: it is the one whose files are rewritten behind the deployment's
+# back, at every renewal, with the label the policy gives them rather than the
+# one the nginx container can read. See tasks/tls.yml.
+antarest_tls_selinux: >-
+  {{ (ansible_facts.selinux.status | default('disabled')) == 'enabled'
+     and antarest_tls_provider == 'letsencrypt' }}
 
 # Whose X-Forwarded-* headers gunicorn believes. Its default is 127.0.0.1, and
 # nginx reaches the backend from the podman network, so without this the

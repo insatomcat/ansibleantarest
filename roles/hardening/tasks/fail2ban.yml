@@ -1,11 +1,8 @@
 ---
 - name: Install fail2ban
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name: "{{ hardening_packages }}"
     state: present
-    update_cache: true
-    cache_valid_time: 3600
-    lock_timeout: "{{ apt_lock_timeout }}"
   when: hardening_fail2ban_enabled | bool
 
 - name: Deploy the ban action
