@@ -41,9 +41,5 @@ Volume={{ volume }}
 {% endfor %}
 Exec=celery-worker
 
-[Service]
-Restart=always
-RestartSec=5
-
 [Install]
 WantedBy={{ antarest_service_name }}.target

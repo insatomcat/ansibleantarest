@@ -31,8 +31,6 @@ Volume={{ volume }}
 {% endfor %}
 
 [Service]
-Restart=always
-RestartSec=5
 # The first start migrates the database schema, which is not instant.
 TimeoutStartSec=300
 

@@ -21,9 +21,5 @@ Environment=PGDATA=/var/lib/postgresql/data/pgdata
 Volume={{ antarest_data_dir }}/db:/var/lib/postgresql/data
 Exec=postgres -c log_statement=all -c log_destination=stderr
 
-[Service]
-Restart=always
-RestartSec=5
-
 [Install]
 WantedBy={{ antarest_service_name }}.target

@@ -30,9 +30,5 @@ Volume={{ volume }}
 # that default ever moves, so it is pinned rather than assumed.
 LogDriver=journald
 
-[Service]
-Restart=always
-RestartSec=5
-
 [Install]
 WantedBy={{ antarest_service_name }}.target
