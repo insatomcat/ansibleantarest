@@ -21,8 +21,8 @@ ContainerName=antarest-celery-beat
 Image={{ antarest_image }}
 Network={{ antarest_service_name }}.network
 User={{ antares_uid }}:{{ antares_gid }}
-Volume={{ antarest_deploy_dir }}/config.prod.yaml:/resources/application.yaml:ro
-Volume={{ antarest_data_dir }}/celerybeat:{{ antarest_celerybeat_dir }}
+Volume={{ antarest_deploy_dir }}/config.prod.yaml:/resources/application.yaml:ro{{ container_volume_opts | trim }}
+Volume={{ antarest_data_dir }}/celerybeat:{{ antarest_celerybeat_dir }}:rw{{ container_volume_opts | trim }}
 # Two podman flags instead of a plain Exec=, for one reason: celery beat keeps
 # the last run time of every task in a shelve file whose default name,
 # `celerybeat-schedule`, is *relative* to the working directory. The image

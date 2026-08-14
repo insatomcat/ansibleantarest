@@ -21,7 +21,13 @@ NetworkAlias=postgres
 User={{ antares_uid }}:{{ antares_gid }}
 Environment=POSTGRES_PASSWORD={{ antarest_db_password }}
 Environment=PGDATA=/var/lib/postgresql/data/pgdata
-Volume={{ antarest_data_dir }}/db:/var/lib/postgresql/data
+# The only mount of the stack written outside vars/main.yml, so it carries
+# container_volume_opts by hand. Without the `z` that variable holds on an
+# SELinux machine, the cluster directory keeps its host label, the container
+# cannot write to it, and the image entrypoint dies on
+# "mkdir: cannot create directory '/var/lib/postgresql/data/pgdata':
+# Permission denied" before postgres is ever started.
+Volume={{ antarest_data_dir }}/db:/var/lib/postgresql/data:rw{{ container_volume_opts | trim }}
 Exec=postgres -c log_statement=all -c log_destination=stderr
 
 [Service]
