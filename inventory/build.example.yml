@@ -1,0 +1,103 @@
+---
+# ===========================================================================
+#  Example inventory: one builder VM, nothing else.
+#
+#      ansible-playbook -i inventory/build.example.yml build.yml -K
+#
+#  Produces in ./artifacts on the controller: the backend image, the built web
+#  application, the third-party images and the solver tarballs. Deploy them
+#  afterwards with
+#
+#      ansible-playbook -i inventory/antares-web.example.yml site.yml \
+#          -e antarest_image_source=archive -K
+#
+#  The builder needs nothing installed beforehand. The play installs podman on
+#  it, clones AntaREST, builds the front-end in a node container and the
+#  backend image, and brings the archives back. It never starts the stack, so
+#  a builder is not an Antares-Web server and does not need to be one.
+#
+#  Two things it does need:
+#    - the architecture of the machines that will run the artefacts (building
+#      amd64 on arm64 goes through QEMU and takes hours),
+#    - disk space and RAM: the front-end build asks for about 4 GB of heap, and
+#      the image plus the archives are several GB.
+#
+#  -K asks for the sudo password. Drop it if the account has NOPASSWD, or set
+#  ansible_become_password below (better: in an ansible-vault file).
+#
+#  Note on precedence: everything written under a *host* overrides
+#  group_vars/all.yml, while a `vars:` block on a group does not (playbook
+#  group_vars outrank inventory group vars). So per-deployment settings belong
+#  where they are below, on the host.
+# ===========================================================================
+
+all:
+  children:
+
+    # `build.yml` runs on this group and on no other.
+    builder:
+      hosts:
+
+        # Any name; it is what appears in the Ansible output.
+        antares-builder:
+
+          # ---------------------------------------------------------------
+          #  Connection
+          # ---------------------------------------------------------------
+          ansible_host: 203.0.113.10
+          ansible_user: ubuntu           # or admin, or debian
+          # ansible_port: 22
+          # ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+          # ansible_become_password: "..."   # only if sudo asks for one
+
+          # ---------------------------------------------------------------
+          #  Where the build happens on the builder
+          #
+          #  The build gets a podman store of its own, passed as a flag rather
+          #  than written into the machine's storage.conf, because a build
+          #  machine is usually short of space on /. Point both at a volume
+          #  with room to spare, or set antares_build_root to "" to use the
+          #  builder's normal podman store.
+          # ---------------------------------------------------------------
+          antares_build_root: /data/antares-build/store
+          antares_build_artifacts: /data/antares-build/artifacts
+
+          # ---------------------------------------------------------------
+          #  What is being built
+          #
+          #  These have to match the deployment that will consume the
+          #  artefacts, on two points that fail loudly and one that does not:
+          #    - antares_uid/antares_gid are baked into the image, so a target
+          #      with another pair would run its containers as the wrong user,
+          #    - antarest_enable_adminer decides whether the adminer image is
+          #      saved, and a target with adminer on and no archive for it
+          #      cannot start it offline,
+          #    - antarest_version is simply what you get.
+          # ---------------------------------------------------------------
+          antarest_version: "v2.33.0"
+          antares_uid: 9000
+          antares_gid: 9000
+          antarest_enable_adminer: false
+
+          # Rebuild the image and the front-end even when the checkout has not
+          # moved. Normally passed on the command line for a one-off.
+          # antarest_force_rebuild: false
+
+          # Node version used to build the web application. `auto` reads
+          # webapp/.nvmrc from the checkout, which is what the project tests
+          # against.
+          # antarest_node_version: auto
+
+          # Replace the "NNI" label of the login form, which is RTE's internal
+          # employee number, with the project's own translation key.
+          # antarest_patch_login_label: true
+
+          # Also download the solver tarballs into ./artifacts, so the targets
+          # take them from the controller instead of GitHub. Turn off when the
+          # controller already has them: they are a version-keyed cache and are
+          # never deleted by a build that did not produce them.
+          # antares_build_fetch_solvers: true
+
+          # The solver list itself lives in group_vars/all.yml
+          # (antares_solvers, antares_solver_os) and is shared with the
+          # deployment, which is the point: the same list feeds both.
