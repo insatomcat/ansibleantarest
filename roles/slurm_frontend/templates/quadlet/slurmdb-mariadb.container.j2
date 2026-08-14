@@ -20,8 +20,6 @@ Environment=MARIADB_DATABASE=slurm_acct_db
 Exec=--innodb-buffer-pool-size={{ slurmdbd_innodb_buffer_pool_size }} --innodb-lock-wait-timeout=900 --innodb-flush-log-at-trx-commit=2 --max-connections=4096
 
 [Service]
-Restart=always
-RestartSec=5
 # A first start initialises the data directory, which takes a while.
 TimeoutStartSec=300
 

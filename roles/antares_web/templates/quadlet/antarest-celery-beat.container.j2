@@ -35,9 +35,5 @@ Volume={{ antarest_data_dir }}/celerybeat:{{ antarest_celerybeat_dir }}
 PodmanArgs=--workdir={{ antarest_celerybeat_dir }} --entrypoint=/scripts/start.sh
 Exec=celery-beat
 
-[Service]
-Restart=always
-RestartSec=5
-
 [Install]
 WantedBy={{ antarest_service_name }}.target
