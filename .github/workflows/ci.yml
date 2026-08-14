@@ -128,9 +128,14 @@ jobs:
           ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519_ci
           cat ~/.ssh/id_ed25519_ci.pub >> ~/.ssh/authorized_keys
           chmod 600 ~/.ssh/authorized_keys
+          # The name ansible connects to, and not 127.0.0.1 written out:
+          # ansible.posix.synchronize takes that literal address as "same
+          # machine, no SSH needed" and then rsyncs without the sudo that
+          # writing under /var needs. See inventory/ci.yml.
+          echo '127.0.0.1 ci-target' | sudo tee -a /etc/hosts
           # Fails the step rather than the playbook if either half is missing.
           ssh -i ~/.ssh/id_ed25519_ci -o StrictHostKeyChecking=no \
-              runner@127.0.0.1 'id; sudo -n id'
+              runner@ci-target 'id; sudo -n id'
 
       - name: Build the artefacts
         run: ansible-playbook -i inventory/ci.yml build.yml
