@@ -10,12 +10,21 @@ Description=Slurm accounting database web UI
 Requires=slurmdb-mariadb.service
 After=slurmdb-mariadb.service
 PartOf=slurmdb.target
+# Start budget for the Restart= below: five attempts, then the unit gives up.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 ContainerName=slurmdb-adminer
 Image={{ slurmdbd_adminer_image }}
 PublishPort=127.0.0.1:8080:8080
 Exec=php -S 0.0.0.0:8080 -t /var/www/html
+
+[Service]
+# on-failure, not always: a container that keeps dying exhausts the budget in
+# [Unit] and stays `failed` instead of looping out of sight. See the README.
+Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy=slurmdb.target

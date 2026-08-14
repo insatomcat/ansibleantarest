@@ -19,6 +19,9 @@ Description=Antares-Web maintenance worker (celery)
 Requires=postgresql.service redis.service
 After=postgresql.service redis.service
 PartOf={{ antarest_service_name }}.target
+# Start budget for the Restart= below: five attempts, then the unit gives up.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 ContainerName=antarest-celery-worker
@@ -40,6 +43,12 @@ Environment=CELERY_CONCURRENCY={{ antarest_celery_concurrency }}
 Volume={{ volume }}
 {% endfor %}
 Exec=celery-worker
+
+[Service]
+# on-failure, not always: a container that keeps dying exhausts the budget in
+# [Unit] and stays `failed` instead of looping out of sight. See the README.
+Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy={{ antarest_service_name }}.target

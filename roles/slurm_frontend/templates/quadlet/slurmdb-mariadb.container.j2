@@ -9,6 +9,9 @@
 [Unit]
 Description=Slurm accounting database (MariaDB)
 PartOf=slurmdb.target
+# Start budget for the Restart= below: five attempts, then the unit gives up.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 ContainerName=slurmdb-mariadb
@@ -22,6 +25,10 @@ Exec=--innodb-buffer-pool-size={{ slurmdbd_innodb_buffer_pool_size }} --innodb-l
 [Service]
 # A first start initialises the data directory, which takes a while.
 TimeoutStartSec=300
+# on-failure, not always: a container that keeps dying exhausts the budget in
+# [Unit] and stays `failed` instead of looping out of sight. See the README.
+Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy=slurmdb.target
