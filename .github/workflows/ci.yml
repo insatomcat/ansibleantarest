@@ -202,8 +202,12 @@ jobs:
           set -euo pipefail
           ansible-playbook -i inventory/ci.yml site.yml \
             -e antarest_image_source=archive --diff | tee /tmp/second-run.log
+          # ANSIBLE_FORCE_COLOR paints the recap, so the host name in the log
+          # starts with an escape sequence rather than with `ci-runner`. Strip
+          # them for the grep and keep the coloured copy for whoever reads it.
+          sed -r 's/\x1b\[[0-9;]*m//g' /tmp/second-run.log > /tmp/second-run.txt
           if ! grep -qE '^ci-runner[[:space:]]+:.*[[:space:]]changed=0[[:space:]]' \
-                 /tmp/second-run.log; then
+                 /tmp/second-run.txt; then
             echo "::error::the second run of site.yml reported changes, see the recap above"
             exit 1
           fi
