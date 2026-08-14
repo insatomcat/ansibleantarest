@@ -89,21 +89,15 @@ all:
       antares_build_root: /mnt/antares-build/store
       antares_build_artifacts: /mnt/antares-build/artifacts
 
-      # ---------------------------------------------------------------
-      #  And the controller's artefact directory is the builder's own,
-      #  because they are the same machine. "Fetch the artefacts back to
-      #  the controller" then finds the file it is about to pull already
-      #  there with the right checksum and copies nothing, rather than
-      #  dragging a couple of gigabytes through sftp to the machine they
-      #  came from. That transfer is what the first CI run spent fifteen
-      #  minutes on.
-      #
-      #  Nothing is skipped by this: site.yml still ships the archives to
-      #  the target with synchronize and loads them, which is the path
-      #  being tested. Only the round trip that a real deployment makes
-      #  between two different machines collapses, correctly, to nothing.
-      # ---------------------------------------------------------------
-      antares_artifacts_dir: /mnt/antares-build/artifacts
+      # antares_artifacts_dir is left at its default, ./artifacts in the
+      # checkout: the round trip through a directory of its own is what a
+      # deployment does, and it now costs seconds. It was pointed at the
+      # builder's own directory while "Fetch the artefacts back to the
+      # controller" still used ansible.builtin.fetch, in the belief that
+      # the seventeen minutes it took were the transfer. They were not,
+      # they were fetch slurping the archives through a module result
+      # whatever the destination, so that override bought nothing and hid
+      # the real cause.
 
       # ---------------------------------------------------------------
       #  Not the shipped defaults, so the secrets check of the hardening

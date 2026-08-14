@@ -122,14 +122,30 @@
   become: false
   run_once: true
 
+# rsync rather than ansible.builtin.fetch, and not as a matter of taste: with
+# become in effect, fetch never takes its checksum shortcut. It skips the stat
+# entirely ("don't bother if using become as slurp will be used") and pulls
+# every archive base64-encoded through a module result, which means the whole
+# file in memory on both ends. Measured on the same 720 MB, on one machine:
+# 1006 seconds that way, 4.5 seconds for the rsync that ships the very same
+# archives back out in load_artifacts.yml.
+#
+# The same include/exclude as that task, so the two directions carry the same
+# thing. No --delete: the task above is what prunes, deliberately sparing the
+# solver cache.
 - name: Fetch the artefacts back to the controller
-  ansible.builtin.fetch:
-    src: "{{ item.path }}"
+  ansible.posix.synchronize:
+    mode: pull
+    src: "{{ antares_build_artifacts }}/"
     dest: "{{ antares_artifacts_dir }}/"
-    flat: true
-  loop: "{{ antares_build_produced.files }}"
-  loop_control:
-    label: "{{ item.path | basename }} ({{ (item.size / 1048576) | round(1) }} MB)"
+    # The controller is not root, so preserving the builder's ownership is
+    # both impossible and beside the point.
+    owner: false
+    group: false
+    rsync_opts:
+      - "--include=*.tar.gz"
+      - "--include=manifest.yml"
+      - "--exclude=*"
 
 - name: Report the artefacts
   ansible.builtin.debug:
