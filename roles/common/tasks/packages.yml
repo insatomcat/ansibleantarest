@@ -18,15 +18,13 @@
 # fifteen, and it also covers the apt commands this playbook does not run
 # itself, unattended-upgrades included.
 - name: Make apt wait for the dpkg lock instead of failing
-  ansible.builtin.copy:
-    content: |
-      {{ ansible_managed | comment('c') }}
-      DPkg::Lock::Timeout "{{ apt_lock_timeout }}";
+  ansible.builtin.template:
+    src: 80-antares-lock-timeout.j2
     dest: /etc/apt/apt.conf.d/80-antares-lock-timeout
     owner: root
     group: root
     mode: "0644"
-  when: ansible_os_family == 'Debian'
+  when: ansible_facts['os_family'] == 'Debian'
 
 # Once per run rather than once per install task. cache_valid_time keeps a
 # second play on the same machine from refreshing it again.
@@ -34,7 +32,7 @@
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 3600
-  when: ansible_os_family == 'Debian'
+  when: ansible_facts['os_family'] == 'Debian'
 
 # ---------------------------------------------------------------------------
 #  RedHat family
@@ -50,14 +48,14 @@
   ansible.builtin.dnf:
     name: dnf-plugins-core
     state: present
-  when: ansible_os_family == 'RedHat'
+  when: ansible_facts['os_family'] == 'RedHat'
 
 - name: List the repositories currently enabled
   ansible.builtin.command: dnf repolist --enabled
   register: common_dnf_repolist
   changed_when: false
   check_mode: false
-  when: ansible_os_family == 'RedHat'
+  when: ansible_facts['os_family'] == 'RedHat'
 
 # `dnf config-manager` rather than a repo file of our own: the repository is
 # already defined by the distribution, merely disabled, and rewriting its
@@ -65,12 +63,12 @@
 - name: Enable the CodeReady Builder repository
   ansible.builtin.command: "dnf config-manager --set-enabled {{ common_crb_repo }}"
   when:
-    - ansible_os_family == 'RedHat'
+    - ansible_facts['os_family'] == 'RedHat'
     - common_crb_repo | length > 0
     - common_crb_repo not in common_dnf_repolist.stdout
   changed_when: true
 
-- name: Enable EPEL
+- name: Install the EPEL release package
   ansible.builtin.dnf:
     name: "{{ common_epel_release }}"
     state: present
@@ -80,5 +78,29 @@
     # ship it in a repository that is already trusted.
     disable_gpg_check: "{{ common_epel_release is search('://') }}"
   when:
-    - ansible_os_family == 'RedHat'
+    - ansible_facts['os_family'] == 'RedHat'
     - common_epel_release | length > 0
+
+# The list above was taken before that package existed, so it cannot tell
+# whether Oracle left the new repository disabled or Fedora already enabled it.
+- name: List the repositories currently enabled
+  ansible.builtin.command: dnf repolist --enabled
+  register: common_dnf_repolist
+  changed_when: false
+  check_mode: false
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - common_epel_release | length > 0
+
+# Oracle ships the repository disabled (`ol9_developer_EPEL`). Fedora's
+# epel-release enables `epel` itself, and this is then skipped because the
+# name is already in the enabled list. Same config-manager as CRB: the
+# definition is the distribution's, we only flip the flag.
+- name: Enable the EPEL repository
+  ansible.builtin.command: "dnf config-manager --set-enabled {{ common_epel_repo }}"
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - common_epel_repo | length > 0
+    - common_epel_release | length > 0
+    - common_epel_repo not in common_dnf_repolist.stdout
+  changed_when: true

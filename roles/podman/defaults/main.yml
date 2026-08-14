@@ -40,7 +40,7 @@ podman_install_docker_shim: false
 # reads `podman info` later.
 podman_unqualified_search_registries:
   - docker.io
-podman_write_unqualified_registries: "{{ ansible_os_family == 'Debian' }}"
+podman_write_unqualified_registries: "{{ ansible_facts['os_family'] == 'Debian' }}"
 
 # Membership in no group is required: the containers are managed by the system
 # systemd instance as root (rootful). Rootless would map container UIDs through
@@ -48,3 +48,12 @@ podman_write_unqualified_registries: "{{ ansible_os_family == 'Debian' }}"
 # owned by antares_uid on the host, which is exactly what the shared /home and
 # the bind mounts depend on.
 podman_rootful: true
+
+# When firewalld is the filter, the podman bridge has to be in a zone that
+# accepts everything, for the same reason the nftables table accepts
+# `iifname "podman*"`. 10.88.0.0/16 is the default `podman` network, 10.89.0.0/16
+# is what netavark hands to named networks such as antares-web.
+podman_firewalld_trusted_zone: trusted
+podman_firewalld_trusted_sources:
+  - 10.88.0.0/16
+  - 10.89.0.0/16

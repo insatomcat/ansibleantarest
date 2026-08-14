@@ -1,0 +1,8 @@
+{{ ansible_managed | comment('c') }}
+//
+// The Ubuntu images run apt-daily and unattended-upgrades on boot, which holds
+// the dpkg lock for a few minutes; an install that meets it fails immediately
+// with "Could not get lock". Written here rather than passed as lock_timeout
+// of every install task: one place instead of fifteen, and it also covers the
+// apt commands this playbook does not run itself, unattended-upgrades included.
+DPkg::Lock::Timeout "{{ apt_lock_timeout }}";

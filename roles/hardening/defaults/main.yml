@@ -4,7 +4,7 @@
 #  on/off switches. What follows is the tuning.
 # ===========================================================================
 
-hardening_packages: "{{ _hardening_packages_by_family[ansible_os_family] }}"
+hardening_packages: "{{ _hardening_packages_by_family[ansible_facts['os_family']] }}"
 _hardening_packages_by_family:
   Debian:
     - nftables
@@ -32,7 +32,7 @@ _hardening_packages_by_family:
 # handler and the socket-activation check need the right one; reloading a unit
 # that does not exist is a failed play, and missing the socket unit means
 # reloading a daemon that is not running.
-hardening_ssh_service: "{{ 'ssh' if ansible_os_family == 'Debian' else 'sshd' }}"
+hardening_ssh_service: "{{ 'ssh' if ansible_facts['os_family'] == 'Debian' else 'sshd' }}"
 
 # ---------------------------------------------------------------------------
 #  Firewall
@@ -99,6 +99,13 @@ hardening_manage_firewalld: true
 # grants them too.
 hardening_firewalld_peer_zone: trusted
 
+# Zone the public interface lives in. Empty: look it up with
+# `firewall-cmd --get-zone-of-interface` on the default IPv4 NIC, and fall
+# back to firewalld's default zone. Ports and masquerade have to land in that
+# zone, not an assumed `public`: an Oracle Linux cloud image often puts the
+# VNIC in a different one, and a rule added to the wrong zone is a closed port.
+hardening_firewalld_zone: ""
+
 # ---------------------------------------------------------------------------
 #  fail2ban
 # ---------------------------------------------------------------------------
@@ -163,7 +170,7 @@ hardening_ssh_extra_ports: []
 # unattended-upgrades on the Debian family, dnf-automatic on the RedHat one.
 # In both cases the distribution ships the mechanism already restricted to
 # security updates and this only turns it on.
-hardening_unattended_packages: "{{ _hardening_unattended_packages_by_family[ansible_os_family] }}"
+hardening_unattended_packages: "{{ _hardening_unattended_packages_by_family[ansible_facts['os_family']] }}"
 _hardening_unattended_packages_by_family:
   Debian:
     - unattended-upgrades

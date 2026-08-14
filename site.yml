@@ -14,9 +14,16 @@
 
 - name: Gather facts from every machine
   hosts: all
-  gather_facts: true
+  # gather_facts is a no-op whenever the jsonfile cache is still valid,
+  # including after the machine behind this name has been rebuilt as a
+  # different distribution. The setup module always talks to the host and
+  # refreshes the cache; hosts not in this play (--limit) keep theirs, which
+  # is what the firewall needs for peer addresses.
+  gather_facts: false
   tags: always
-  tasks: []
+  tasks:
+    - name: Gather facts
+      ansible.builtin.setup:
 
 - name: Base configuration
   hosts: all

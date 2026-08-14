@@ -1,0 +1,64 @@
+---
+# Counterpart of `iifname "podman*"` in the nftables table, for when firewalld
+# is the one filtering (the default: hardening_firewall_enabled is off).
+#
+# Two things break without this, both of which look like "the container is up
+# and nothing can reach it":
+#   - aardvark-dns listens on the bridge address, which is the *host*. A
+#     lookup of `postgresql` from another container is input traffic on
+#     podman1, and firewalld's default zone drops it
+#     (`Temporary failure in name resolution`).
+#   - PublishPort is a DNAT then a forward onto that same bridge. Masquerade
+#     on the public zone is not enough if the destination interface is in no
+#     zone at all.
+#
+# The default netavark ranges are trusted as sources so this still helps
+# before the bridge exists; the interfaces themselves are added once `ip
+# link` can see them. Safe to run more than once: migrate.yml does it again
+# after postgresql has created the network.
+
+- name: Check whether firewalld is filtering
+  ansible.builtin.command: systemctl is-active firewalld.service
+  register: podman_firewalld_active
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# Drop-in from an earlier attempt to point netavark at firewalld: that split
+# the NAT rules from the filter and broke both DNS and published ports.
+- name: Remove the netavark firewalld driver drop-in
+  ansible.builtin.file:
+    path: /etc/containers/containers.conf.d/50-antares-firewall.conf
+    state: absent
+  when: (podman_firewalld_active.stdout | default('') | trim) == 'active'
+
+- name: Trust the container networks in firewalld
+  ansible.posix.firewalld:
+    source: "{{ item }}"
+    zone: "{{ podman_firewalld_trusted_zone }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ podman_firewalld_trusted_sources }}"
+  when: (podman_firewalld_active.stdout | default('') | trim) == 'active'
+
+- name: List the podman bridge interfaces
+  ansible.builtin.command: ip -j link show
+  register: podman_links
+  changed_when: false
+  check_mode: false
+  when: (podman_firewalld_active.stdout | default('') | trim) == 'active'
+
+- name: Trust the podman bridges in firewalld
+  ansible.posix.firewalld:
+    interface: "{{ item }}"
+    zone: "{{ podman_firewalld_trusted_zone }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: >-
+    {{ (podman_links.stdout | default('[]') | from_json)
+       | map(attribute='ifname')
+       | select('match', '^podman')
+       | list }}
+  when: (podman_firewalld_active.stdout | default('') | trim) == 'active'

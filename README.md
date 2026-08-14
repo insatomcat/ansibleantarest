@@ -82,7 +82,7 @@ One thing to know when editing these files: settings written **under a host** ov
 
 ### Supported distributions
 
-Two families are supported: Debian (Debian and Ubuntu, `apt`) and RedHat (Oracle Linux and the other RHEL rebuilds, `dnf`). Every install goes through `ansible.builtin.package`, and everything that actually differs between the two (package names, service names, repositories) is resolved from `ansible_os_family` in one place per role, so no task exists twice.
+Two families are supported: Debian (Debian and Ubuntu, `apt`) and RedHat (Oracle Linux and the other RHEL rebuilds, `dnf`). Every install goes through `ansible.builtin.package`, and everything that actually differs between the two (package names, service names, repositories) is resolved from `ansible_facts['os_family']` in one place per role, so no task exists twice.
 
 ```yaml
 supported_distros:      # group_vars/all.yml
@@ -111,11 +111,11 @@ Everything below is done by the playbook. It is listed because it changes the ma
 
 | Topic | What happens |
 |---|---|
-| **Repositories** | The `common` role installs `dnf-plugins-core`, enables **CRB** (`ol9_codeready_builder` on Oracle Linux, `crb` on the other rebuilds) and installs **EPEL**. Both are needed: `htop`, `fail2ban` and `certbot` come from EPEL, which is built against CRB. |
+| **Repositories** | The `common` role installs `dnf-plugins-core`, enables **CRB** (`ol9_codeready_builder` on Oracle Linux, `crb` on the other rebuilds) and **EPEL** (`ol9_developer_EPEL` on Oracle Linux, which the release package ships disabled, `epel` on the other rebuilds). Both are needed: `htop`, `fail2ban` and `certbot` come from EPEL, which is built against CRB. |
 | **Slurm** | No EL 9 repository ships Slurm, neither the base repositories nor EPEL. It comes from **OpenHPC 3** instead (`slurm_repo: openhpc`, release rpm in `slurm_openhpc_release`). Package names carry an `-ohpc` suffix; `/etc/slurm`, the systemd units and the `slurm` account are where they are everywhere else. Set `slurm_repo: distro` if you install Slurm yourself. |
 | **Solver binaries** | The Ubuntu 22.04 build of Antares Simulator is linked against glibc 2.35 and does not start on EL 9, which has 2.34. `antares_solver_os` therefore follows the family and picks the project's **Oracle Linux 8** build there. |
 | **SELinux** | Left enforcing. Container bind mounts carry the `z` relabelling flag (`container_volume_opts`), the booleans `nfs_export_all_rw` and `use_nfs_home_dirs` are set on the NFS server and the clients, and the Let's Encrypt tree gets a `semanage fcontext` entry so that a renewal does not silently produce a certificate the nginx container cannot read. |
-| **firewalld** | Enabled out of the box, and it would drop the interface. See "Hardening" below: the role either takes it out of the way or hands it the ports. |
+| **firewalld** | Enabled out of the box, dropping everything but SSH. The hardening role either takes it out of the way (`hardening_firewall_enabled`) or stays with it: it opens the interface ports and enables masquerade on the zone of the public NIC. The podman role then puts the `podman*` bridges in the `trusted` zone, without which aardvark-dns (container name resolution) and `PublishPort` (DNAT then forward) are both dropped. Ubuntu never hits this because there is no firewalld. |
 | **Unattended updates** | `dnf-automatic` with `upgrade_type = security` instead of `unattended-upgrades`, with the same policy: security updates only, no automatic reboot. |
 
 ### The antares account: choosing UID/GID
@@ -162,7 +162,7 @@ The `hardening` role reports any of these still holding the shipped value, and r
 
 ```yaml
 # Ubuntu-22.04 on the Debian family, OracleServer-8.10 on the RedHat one
-antares_solver_os: "{{ 'OracleServer-8.10' if ansible_os_family == 'RedHat' else 'Ubuntu-22.04' }}"
+antares_solver_os: "{{ 'OracleServer-8.10' if ansible_facts['os_family'] == 'RedHat' else 'Ubuntu-22.04' }}"
 antares_solvers:
   - version: "8.8.17"      # Antares_Simulator release tag
     study_version: "8.8"   # major.minor string used by Antares-Web
@@ -379,7 +379,7 @@ Bans are dropped in the `prerouting` hook at priority `raw`, not in `input` like
 **firewalld (RedHat family).** The RHEL rebuilds boot with firewalld enabled and a default zone that accepts SSH and nothing else, so a deployment that ignored it would come up with an Antares-Web nobody can reach and a cluster whose NFS mount times out. The role picks one filter rather than leaving two in place:
 
 - with `hardening_firewall_enabled: true`, firewalld is stopped, disabled and **masked**, and the nftables table above is the whole policy. `systemctl unmask firewalld` puts it back;
-- with it `false` (the default), firewalld stays in charge and the role opens in it what the nftables table would have opened: the interface ports on an `antares_web` machine, the SSH ports read from `sshd -T`, and the other machines of the inventory added to the `trusted` zone, which is the counterpart of the `trusted_v4`/`trusted_v6` sets of the ruleset.
+- with it `false` (the default), firewalld stays in charge and the role opens in it what the nftables table would have opened: the interface ports on an `antares_web` machine, the SSH ports read from `sshd -T`, and the other machines of the inventory added to the `trusted` zone. It also enables **masquerade** on the zone of the public interface. The podman role then adds the `podman*` bridges to `trusted`, which is the counterpart of `iifname "podman*"` in the nftables table: aardvark-dns and `PublishPort` both go through that bridge.
 
 Set `hardening_manage_firewalld: false` to be left alone with it.
 

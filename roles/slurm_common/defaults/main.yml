@@ -8,12 +8,12 @@
 # package; OpenHPC and the EL packaging both ship everything in one.
 slurm_common_packages: >-
   {{ _slurm_client_packages_by_repo[slurm_repo]
-     + _slurm_build_packages_by_family[ansible_os_family] }}
+     + _slurm_build_packages_by_family[ansible_facts['os_family']] }}
 
 _slurm_client_packages_by_repo:
   distro: >-
     {{ ['slurm-client', 'slurm-wlm-basic-plugins']
-       if ansible_os_family == 'Debian' else ['slurm'] }}
+       if ansible_facts['os_family'] == 'Debian' else ['slurm'] }}
   openhpc:
     - slurm-ohpc
 

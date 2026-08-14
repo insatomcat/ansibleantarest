@@ -45,7 +45,7 @@ antares_home: "/home/{{ antares_user }}"
 #  Two families are supported: Debian (Debian and Ubuntu, apt) and RedHat
 #  (Oracle Linux and the other RHEL rebuilds, dnf). Package names, service
 #  names and a handful of habits differ between the two; everything that does
-#  is resolved from `ansible_os_family`, either here or in the defaults of the
+#  is resolved from `ansible_facts['os_family']`, either here or in the defaults of the
 #  role concerned, so a role never carries the same task twice.
 #
 #  What a RHEL-compatible target additionally needs, and what the playbook
@@ -115,7 +115,7 @@ slurm_enabled: true
 #  driving an Oracle Linux cluster gets the right binary on both.
 # ---------------------------------------------------------------------------
 antares_solver_os: >-
-  {{ 'OracleServer-8.10' if ansible_os_family == 'RedHat' else 'Ubuntu-22.04' }}
+  {{ 'OracleServer-8.10' if ansible_facts['os_family'] == 'RedHat' else 'Ubuntu-22.04' }}
 antares_solver_base_url: "https://github.com/AntaresSimulatorTeam/Antares_Simulator/releases/download"
 antares_solvers:
   - version: "8.8.17"
@@ -307,7 +307,7 @@ slurm_partition: antares
 # The default follows the family. Point slurm_openhpc_release at another
 # release rpm to pin a different OpenHPC version, or set this to `distro` on a
 # RedHat machine whose Slurm you install yourself.
-slurm_repo: "{{ 'openhpc' if ansible_os_family == 'RedHat' else 'distro' }}"
+slurm_repo: "{{ 'openhpc' if ansible_facts['os_family'] == 'RedHat' else 'distro' }}"
 slurm_openhpc_release: "http://repos.openhpc.community/OpenHPC/3/EL_9/x86_64/ohpc-release-3-1.el9.x86_64.rpm"
 
 # Paths and system account used by the Slurm daemons. Defined here rather
@@ -393,7 +393,9 @@ manage_hostname: false
 #      masked, and the nftables table below is the whole filtering policy;
 #    - with it off, firewalld stays in charge and the role opens in it what the
 #      nftables table would have opened - the interface on an antares_web
-#      machine, and the other machines of the inventory as a trusted source.
+#      machine, and the other machines of the inventory as a trusted source -
+#      and enables masquerade on the zone of the public NIC, without which
+#      PublishPort (a DNAT, then a forward) is dropped even with the port open.
 #  Set hardening_manage_firewalld to false to be left alone with it.
 # ---------------------------------------------------------------------------
 hardening_enabled: true
@@ -428,7 +430,7 @@ slurm_frontend_name: >-
 
 slurm_frontend_ip: >-
   {{ (hostvars[_slurm_frontend_host].slurm_node_ip
-      | default(hostvars[_slurm_frontend_host].ansible_default_ipv4.address
+      | default(hostvars[_slurm_frontend_host].ansible_facts.default_ipv4.address
       | default(hostvars[_slurm_frontend_host].ansible_host | default('')))) if _slurm_frontend_host else '' }}
 
 # Number of cores offered in the Antares-Web launch dialog for Slurm jobs.
@@ -436,8 +438,9 @@ slurm_frontend_ip: >-
 # for more cores than any node owns stay pending forever.
 _slurm_compute_vcpus: >-
   {{ (groups['slurm_compute'] | default([]))
-     | map('extract', hostvars, 'ansible_processor_vcpus')
-     | select('defined') | select('integer') | list }}
+     | map('extract', hostvars)
+     | map(attribute='ansible_facts.processor_vcpus', default=None)
+     | select('integer') | list }}
 slurm_launcher_nb_cores_min: 1
 slurm_launcher_nb_cores_max: "{{ (_slurm_compute_vcpus | min) if (_slurm_compute_vcpus | length) > 0 else 2 }}"
 slurm_launcher_nb_cores_default: "{{ [2, slurm_launcher_nb_cores_max | int] | min }}"

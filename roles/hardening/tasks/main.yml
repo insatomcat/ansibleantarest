@@ -19,7 +19,7 @@
 - name: Settle what to do with firewalld
   ansible.builtin.include_tasks: firewalld.yml
   when:
-    - ansible_os_family == 'RedHat'
+    - ansible_facts['os_family'] == 'RedHat'
     - hardening_manage_firewalld | bool
 
 - name: Configure fail2ban
