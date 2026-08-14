@@ -1,65 +1,52 @@
-# Déploiement Ansible d'Antares-Web (+ cluster Slurm optionnel)
+# Ansible deployment of Antares-Web (optional Slurm cluster)
 
-Playbook Ansible qui automatise la procédure « Basic Antares-Web and Slurm
-deployment » (`antares-slurm-1.3.pdf`), remise à jour pour les versions
-actuelles d'[AntaREST](https://github.com/AntaresSimulatorTeam/AntaREST) et
-d'[Antares Simulator](https://github.com/AntaresSimulatorTeam/Antares_Simulator).
+This Ansible playbook automates the "Basic Antares-Web and Slurm deployment" procedure (see `antares-slurm-1.3.pdf`), updated for current releases of
+[AntaREST](https://github.com/AntaresSimulatorTeam/AntaREST) and
+[Antares Simulator](https://github.com/AntaresSimulatorTeam/Antares_Simulator).
 
-Trois types de machines :
+Three types of machines are used:
 
-| Groupe d'inventaire | Rôle |
+| Inventory group     | Role |
 |---|---|
-| `antares_web` | Construit et exécute Antares-Web (podman + quadlet) |
-| `slurm_frontend` | Contrôleur Slurm, base de comptabilité, serveur NFS du `/home` |
-| `slurm_compute` | Nœuds de calcul, montent le `/home` partagé en NFS |
+| `antares_web`       | Builds and runs Antares-Web (podman + quadlet) |
+| `slurm_frontend`    | Slurm controller, accounting database, NFS server for `/home` |
+| `slurm_compute`     | Compute nodes, mounting the shared `/home` via NFS |
 
-Slurm est **optionnel** : avec `slurm_enabled: false` seul Antares-Web est
-déployé et les études tournent avec le solveur local, sur la machine web.
-Quand Slurm est activé, les deux lanceurs sont exposés dans l'interface et
-`antarest_default_launcher` choisit celui proposé par défaut.
+Slurm is optional: with `slurm_enabled: false` only Antares-Web is deployed and studies run with the local solver on the web machine. When Slurm is enabled, both launchers are shown in the UI and `antarest_default_launcher` selects the default one.
 
-## Démarrage rapide
+## Quick start
 
 ```bash
 ansible-galaxy collection install -r requirements.yml
 
-# adapter l'inventaire et les variables
+# edit the inventory and variables
 $EDITOR inventory/hosts.yml
-$EDITOR group_vars/all.yml      # au minimum les secrets, voir plus bas
+$EDITOR group_vars/all.yml      # at least set the secrets (see below)
 
 ansible-playbook site.yml
 ```
 
-L'interface répond ensuite sur `http://<antares_web>/` (identifiants par
-défaut : `admin` / `admin`).
+The interface will then be available at `http://<antares_web>/` (default credentials: `admin` / `admin`).
 
-Sans cluster :
+Without a cluster:
 
 ```bash
 ansible-playbook site.yml -e slurm_enabled=false
 ```
 
-L'inventaire ne contient alors que le groupe `antares_web`.
+The inventory should then contain only the `antares_web` group.
 
-## Prérequis
+## Requirements
 
-- Une distribution de la famille Debian sur toutes les machines (voir
-  ci-dessous), accès `root` via `sudo`, Python 3 présent.
-- La machine `antares_web` a besoin d'un accès Internet (images de conteneurs,
-  paquets npm et Python, binaires du solveur).
-- Le front-end Slurm télécharge lui aussi les solveurs depuis GitHub.
-- Un UID/GID libre et identique partout pour le compte `antares`, `9000` par
-  défaut. Le playbook s'arrête en nommant le compte en place si la paire est
-  déjà prise.
-- Ansible ≥ 2.15 sur la machine de contrôle, `ansible.posix` installé.
+- A Debian-family distribution on all target machines (see supported distros below), root access via `sudo`, and Python 3 installed.
+- The `antares_web` machine needs Internet access (container images, npm and Python packages, solver binaries).
+- The Slurm frontend also downloads solvers from GitHub.
+- A free UID/GID that is identical on all machines for the `antares` account: `9000` by default. The playbook will refuse to continue if the UID/GID are already taken.
+- Ansible ≥ 2.15 on the control machine, and `ansible.posix` available.
 
-### Distributions supportées
+### Supported distributions
 
-Toutes les installations passent par `apt`, donc le périmètre est la famille
-Debian. Les noms de paquets, les noms d'unités systemd et `/etc/slurm` sont
-identiques sur les versions listées, et podman vient de la distribution (5.x sur
-Debian 13, 4.9 sur Ubuntu 24.04, quadlet étant présent depuis la 4.4), donc rien
-n'est à adapter pour passer de l'une à l'autre :
+All installs use `apt`, so supported systems are Debian/Ubuntu family. Package names, systemd unit names and `/etc/slurm` layout are the same across the supported releases below; podman is provided by the distribution (Debian 13 ships podman 5.x, Ubuntu 24.04 ships 4.9, quadlet is present since 4.4), so no special adaptation is required:
 
 ```yaml
 supported_distros:      # group_vars/all.yml
@@ -69,372 +56,227 @@ supported_distros:      # group_vars/all.yml
   - "Ubuntu 24"
 ```
 
-Le playbook refuse de démarrer ailleurs, avec un message qui indique la
-variable à étendre. `distro_check_enabled: false` désactive complètement le
-contrôle.
+The playbook aborts on unsupported distros and prints the variable to extend. Set `distro_check_enabled: false` to disable the check entirely.
 
-Un point d'attention en dehors de Debian 13, la cible de la procédure de
-référence : **un cluster, une distribution.** La version de Slurm empaquetée
-diffère (23.11 sur Ubuntu 24.04, 24.11 sur Debian 13) et les démons
-`slurmctld` / `slurmd` / `slurmdbd` ne s'interopèrent que sur quelques versions
-majeures. Le `slurm.conf` généré convient aux deux, mais il ne faut pas mélanger
-un front-end Debian 13 avec des nœuds de calcul Ubuntu 24.04 dans le même
-cluster. La machine `antares_web` n'est pas concernée : elle ne parle au
-front-end qu'en SSH.
+Important cluster note: use one distribution per cluster. Packaged Slurm versions differ (e.g., 23.11 on Ubuntu 24.04 vs 24.11 on Debian 13) and the daemons `slurmctld` / `slurmd` / `slurmdbd` interoperate only across certain major versions. The generated `slurm.conf` works for both, but do not mix a front-end on Debian 13 with compute nodes on Ubuntu 24.04 in the same cluster. The `antares_web` machine is unaffected: it talks to the Slurm frontend only via SSH.
 
-Le verrou `apt` est attendu jusqu'à `apt_lock_timeout` secondes (300 par
-défaut), les images Ubuntu lançant `apt-daily` et `unattended-upgrades` au
-démarrage.
+The apt lock is tolerated up to `apt_lock_timeout` seconds (default 300) because Ubuntu images often run `apt-daily` and `unattended-upgrades` on boot.
 
-### Compte antares : le choix de l'UID/GID
+### The antares account: choosing UID/GID
 
 ```yaml
 antares_uid: 9000       # group_vars/all.yml
 antares_gid: 9000
 ```
 
-La paire doit être **libre et identique sur toutes les machines**, serveur web,
-front-end Slurm et nœuds de calcul compris : c'est ce qui rend les études
-lisibles de part et d'autre du `/home` partagé en NFS.
+This UID/GID pair must be free and identical on all machines (web server, Slurm frontend and compute nodes) so that study files remain readable across the NFS-shared `/home`.
 
-Le défaut n'est volontairement pas 1000. `login.defs` distribue les comptes
-humains à partir de `UID_MIN` (1000) et séquentiellement, donc 1000 est déjà
-pris sur la plupart des images : `ubuntu` sur les images Ubuntu, `debian` ou
-`admin` sur les images cloud Debian, le compte créé à l'installation sur une
-install manuelle. 9000 est franchement hors de ce chemin d'allocation et très
-en dessous de `UID_MAX` (60000).
+The default intentionally avoids 1000 (commonly used by distribution images). 9000 is well outside the usual allocation and below `UID_MAX`.
 
-Le playbook lit `passwd` et `group` avant de créer quoi que ce soit et s'arrête
-en nommant le compte en place. Pour valider le choix sur tout un parc sans rien
-installer :
+The playbook reads `/etc/passwd` and `/etc/group` before creating accounts and will stop if the UID/GID are already claimed. To validate the choice across your inventory without making changes:
 
 ```bash
 ansible-playbook site.yml --tags common --check
 ```
 
-Deux réserves :
+Two caveats:
+- For machines joined to a central directory service (LDAP, AD via SSSD), reserve the value in the directory. `nsswitch` reveals existing collisions but not a future directory account that may be assigned the same UID.
+- Changing the UID on an already deployed machine renumbers the `antares` account and leaves its files orphaned: you must `chown -R` `/var/antares-web` and the shared `/home`.
 
-- Sur des machines jointes à un annuaire central (LDAP, AD via SSSD), faire
-  réserver la valeur. `nsswitch` rend visible une collision existante, mais pas
-  un futur compte d'annuaire à qui le même UID serait attribué.
-- Changer la valeur sur une machine déjà déployée renumérote le compte
-  `antares` et orpheline tout ce qu'il possède : il faut alors un `chown -R`
-  assumé sur `/var/antares-web` et sur le `/home` partagé.
+The UID is also baked into the backend-derived image (`antarest_add_container_user`), so using one unique UID across the fleet means building a single image.
 
-L'UID est aussi cuit dans l'image dérivée du backend
-(`antarest_add_container_user`), donc une valeur unique sur tout le parc signifie
-une seule image à construire.
+## Before production
 
-## À changer avant la mise en production
+Set secrets in `group_vars/all.yml` (or an ansible-vault encrypted file):
 
-Dans `group_vars/all.yml` (ou dans un fichier chiffré avec `ansible-vault`) :
+| Variable | Default | Notes |
+|---|---:|---|
+| `antarest_jwt_key` | `secretkeytochange` | JWT signing key |
+| `antarest_admin_password` | `admin` | admin user password |
+| `antarest_db_password` | `somepass` | PostgreSQL password |
+| `slurmdbd_db_password` | `changeme-slurm-acct` | MariaDB password for Slurm accounting |
 
-| Variable | Défaut | Remarque |
-|---|---|---|
-| `antarest_jwt_key` | `secretkeytochange` | clé de signature des jetons |
-| `antarest_admin_password` | `admin` | mot de passe du compte admin |
-| `antarest_db_password` | `somepass` | mot de passe PostgreSQL |
-| `slurmdbd_db_password` | `changeme-slurm-acct` | mot de passe MariaDB de la compta Slurm |
+The PostgreSQL password is read only at the first initialization of the data volume; changing it later requires clearing `/var/antares-web/data/db`.
 
-Le mot de passe PostgreSQL n'est lu qu'à la première initialisation du volume :
-le changer ensuite impose de vider `/var/antares-web/data/db`.
+## Main variables
 
-## Variables principales
-
-### Solveurs
+### Solvers
 
 ```yaml
 antares_solver_os: "Ubuntu-22.04"
 antares_solvers:
-  - version: "8.8.17"      # version de la release Antares_Simulator
-    study_version: "8.8"   # clé « major.minor » utilisée par Antares-Web
+  - version: "8.8.17"      # Antares_Simulator release tag
+    study_version: "8.8"   # major.minor string used by Antares-Web
     bin: "antares-8.8-solver"
   - version: "9.2.0"
     study_version: "9.2"
     bin: "antares-solver"
 ```
 
-Le nom de l'exécutable change selon la génération : `antares-<X>.<Y>-solver`
-jusqu'à la 8.x, `antares-solver` à partir de la 9.x. Chaque entrée de cette
-liste est installée à la fois sur la machine web (lanceur local) et dans le
-`/home` partagé (lanceur Slurm), et alimente automatiquement la table des
-binaires de `config.prod.yaml` ainsi que le `case` de `launchAntares.sh`.
+Executable names changed across generations: `antares-<X>.<Y>-solver` for the 8.x line and `antares-solver` from 9.x onward. Each entry in this list is installed on both the web machine (local launcher) and in the shared `/home` (Slurm launcher), and populates the binaries table in `config.prod.yaml` and the `case` in `launchAntares.sh`.
 
 ### Antares-Web
 
 ```yaml
-antarest_version: "v2.33.0"   # tag, branche ou commit du dépôt AntaREST
+antarest_version: "v2.33.0"   # tag, branch or commit of the AntaREST repo
 antarest_http_port: 80
-antarest_force_rebuild: false # force la reconstruction front + image
+antarest_force_rebuild: false # force rebuild of frontend + image
 ```
 
-### Libellé du champ de connexion
+### Login label for the username field
 
-Le formulaire de connexion intitule son champ identifiant `NNI`, le numéro
-d'identification interne RTE, codé en dur dans le source. Le playbook le
-remplace avant de construire le front :
+The login form labels its identifier field "NNI" (the internal RTE identifier) hard-coded in upstream sources. The playbook replaces that label before building the frontend:
 
 ```yaml
 antarest_patch_login_label: true
 antarest_login_username_label: '{t("global.username")}'
 ```
 
-La valeur par défaut réutilise la clé de traduction du projet, donc le champ
-s'affiche « Username » ou « Nom » selon la langue du navigateur, au lieu de
-figer une chaîne. Pour un libellé fixe, mettre un littéral entre guillemets :
-`'"Identifiant"'`.
+The default reuses the project's translation key so the field displays "Username" or the localized equivalent according to the browser language, instead of a fixed string. For a fixed literal label put a quoted string: `"'Login ID'"`.
 
-Le fichier concerné a changé de place entre les versions
-(`webapp/src/components/wrappers/LoginWrapper.tsx` jusqu'à la 2.19,
-`webapp/src/routes/login/index.tsx` en 2.33), il est donc localisé par son
-contenu et non par son chemin. Si une version future supprime le libellé, la
-tâche le signale et ne fait rien.
+The target file changed location between releases (`webapp/src/components/wrappers/LoginWrapper.tsx` up to 2.19, `webapp/src/routes/login/index.tsx` in 2.33), so the task locates it by content rather than a fixed path. If a future version removes the label the task reports it and does nothing.
 
 ### Slurm
 
 ```yaml
 slurm_cluster_name: antares
 slurm_partition: antares
-slurm_select_type: "select/cons_tres"   # select/linear pour des nœuds exclusifs
+slurm_select_type: "select/cons_tres"   # use select/linear for exclusive nodes
 slurmdbd_innodb_buffer_pool_size: "1G"
 ```
 
-Les caractéristiques des nœuds de calcul (`CPUs`, `SocketsPerBoard`,
-`CoresPerSocket`, `ThreadsPerCore`, `RealMemory`) sont déduites des facts
-Ansible. Elles se surchargent par hôte dans l'inventaire avec
-`slurm_node_cpus`, `slurm_node_sockets`, `slurm_node_cores_per_socket`,
-`slurm_node_threads_per_core` et `slurm_node_real_memory`.
+Compute node characteristics (`CPUs`, `SocketsPerBoard`, `CoresPerSocket`, `ThreadsPerCore`, `RealMemory`) are derived from Ansible facts and can be overridden per-host in the inventory using `slurm_node_cpus`, `slurm_node_sockets`, `slurm_node_cores_per_socket`, `slurm_node_threads_per_core` and `slurm_node_real_memory`.
 
-Le nombre maximum de cœurs proposé dans la fenêtre de lancement est plafonné
-au plus petit nœud de calcul, sinon un job demandant plus de cœurs qu'aucun
-nœud n'en possède reste en attente indéfiniment.
+The maximum cores selectable in the job submission UI is capped to the smallest compute node, otherwise jobs requesting more cores than any node has will remain pending forever.
 
-## Arborescence sur le serveur Antares-Web
+## Antares-Web server directory layout
 
 ```
 /var/antares-web/
-├── AntaREST/     dépôt git, jetable : rien de généré n'y est écrit
-├── deploy/       config.prod.yaml, id_rsa, solveurs
-├── image/        contexte de build de l'image dérivée
-└── data/         état persistant : études, matrices, base PostgreSQL, logs
+├── AntaREST/     git checkout, disposable: nothing generated is written here
+├── deploy/       config.prod.yaml, id_rsa, solvers
+├── image/        derived image build context
+└── data/         persistent state: studies, matrices, PostgreSQL, logs
 
-/etc/containers/systemd/     unités quadlet des conteneurs
+/etc/containers/systemd/     quadlet container units
 /etc/systemd/system/antares-web.target
 ```
 
-La configuration et les données vivent hors du dépôt : changer
-`antarest_version` puis relancer le playbook met à jour l'application sans
-toucher aux données.
+Configuration and data live outside the git checkout: changing `antarest_version` and re-running the playbook updates the application without touching the data.
 
-## Conteneurs : podman et quadlet
+## Containers: podman and quadlet
 
-Il n'y a **ni démon docker, ni fichier compose**. Chaque conteneur est décrit par
-une unité quadlet dans `/etc/containers/systemd`, que le générateur
-`podman-system-generator` transforme en service systemd à chaque
-`daemon-reload`. systemd possède donc l'ordonnancement, les redémarrages et les
-journaux.
+There is no Docker daemon or compose file. Each container is defined by a quadlet unit in `/etc/containers/systemd`, which `podman-system-generator` converts to systemd services at each `daemon-reload`. systemd provides scheduling, restart behavior and logs.
 
-Podman tourne en **rootful**, ce qui n'est pas un détail : en rootless les UID du
-conteneur sont remappés à travers `/etc/subuid`, donc un conteneur tournant en
-`antares_uid` n'écrirait pas des fichiers appartenant à `antares_uid` sur
-l'hôte, et toute la cohérence d'UID avec le `/home` NFS s'effondrerait.
+Podman runs rootful: this matters because rootless podman remaps container UIDs via `/etc/subuid`. A container running as `antares_uid` would not produce host files owned by `antares_uid` when rootless, breaking UID coherence with the NFS `/home`.
 
-Le stack est groupé par un `.target`, ce qui remplace `compose up/down` :
+The stack is grouped by a `.target`, replacing `compose up/down`:
 
 ```bash
 systemctl start   antares-web.target
 systemctl stop    antares-web.target
-systemctl restart antares-web.target     # propagé aux conteneurs via PartOf=
+systemctl restart antares-web.target     # propagated to containers via PartOf=
 systemctl status  antares-web.target
 podman ps
 journalctl -u antarest.service -f
 ```
 
-Les services générés sont `antarest`, `antarest-watcher`,
-`antarest-matrix-gc`, `postgresql`, `redis`, `antares-nginx` et
-`antares-web-network`. Sur le front-end Slurm, la base de comptabilité suit le
-même schéma sous `slurmdb.target` (`slurmdb-mariadb`, plus `slurmdb-adminer` si
-activé).
+On the web server the generated services are `antarest`, `antarest-watcher`, `antarest-matrix-gc`, `postgresql`, `redis`, `antares-nginx` and `antares-web-network`. On the Slurm frontend, the accounting DB follows the same pattern under `slurmdb.target` (`slurmdb-mariadb`, and `slurmdb-adminer` if enabled).
 
-Trois noms de conteneurs sont porteurs, ce sont les noms DNS sur le réseau
-podman, et les renommer casse le stack silencieusement :
+Three container names are significant (they become DNS names on the podman network). Renaming them silently breaks the stack:
 
-| Conteneur | Qui en dépend |
+| Container | Who depends on it |
 |---|---|
-| `antarest` | `nginx.conf` amont proxifie vers `http://antarest:5000/` |
-| `postgresql` | `config.prod.yaml` pointe la base sur `postgresql:5432` |
-| `redis` | `config.prod.yaml` pointe le cache sur `redis` |
+| `antarest`   | upstream `nginx.conf` proxies to `http://antarest:5000/` |
+| `postgresql` | `config.prod.yaml` points DB to `postgresql:5432` |
+| `redis`      | `config.prod.yaml` points cache to `redis` |
 
-`postgresql` porte en plus l'alias réseau `postgres`, qui est le `container_name`
-du compose amont. Compose résolvait à la fois le nom de service et le nom de
-conteneur ; podman ne résout que le nom du conteneur et ses alias.
+`postgresql` also has the alias `postgres` (the upstream compose container_name). Compose resolved both service and container names; podman resolves only the container name and aliases.
 
-Toutes les images sont écrites **pleinement qualifiées**
-(`docker.io/library/postgres:latest`, `localhost/antarest:latest`) : Debian et
-Ubuntu ne définissent pas `unqualified-search-registries`, donc un nom court
-n'est pas résolu et podman refuse plutôt que de deviner un registre.
+All images are fully qualified (`docker.io/library/postgres:latest`, `localhost/antarest:latest`): Debian/Ubuntu don't set `unqualified-search-registries`, so short names are not resolved by podman and will be rejected.
 
-## Construire une fois, déployer partout
+## Build once, deploy everywhere
 
-Par défaut (`antarest_image_source: build`) la cible clone, construit le front
-avec node et construit l'image. C'est autonome, mais ça demande Internet et
-environ 4 Go de tas sur la machine qui fait aussi tourner les études. Sur une
-boucle « détruire la VM et rejouer », ou sur plusieurs serveurs, c'est du
-gaspillage : le build utilise `npm install` et non `npm ci`, donc deux machines
-construites à deux dates ne produisent pas forcément le même front.
+By default (`antarest_image_source: build`) the target clones, builds the frontend with node and produces the image. This is standalone but requires Internet and about 4 GB of heap on the build machine. For repeated destroy/recreate cycles or multiple servers this is wasteful because the build uses `npm install` (not `npm ci`) so builds at different times may produce different artifacts.
 
 ```bash
-ansible-playbook build.yml                                  # une fois
-ansible-playbook site.yml -e antarest_image_source=archive  # autant de fois que voulu
+ansible-playbook build.yml                                  # once
+ansible-playbook site.yml -e antarest_image_source=archive  # many times
 ```
 
-`build.yml` tourne sur le groupe d'inventaire `builder` et **réutilise les
-tâches de build du déploiement**, donc les artefacts ne peuvent pas être
-produits par une recette différente de celle qu'ils remplacent. Il dépose dans
-`./artifacts` (gitignoré) :
+`build.yml` runs on the `builder` inventory group and reuses the deployment build tasks, so artifacts are produced exactly by the same recipe that the deployment uses. It drops artifacts into `./artifacts` (gitignored):
 
-| Fichier | Contenu |
+| File | Content |
 |---|---|
-| `antarest-image.tar.gz` | l'image du backend, UID cuit dedans |
+| `antarest-image.tar.gz` | backend image, UID baked in |
 | `thirdparty-*.tar.gz` | postgres, redis, nginx |
-| `webapp-dist.tar.gz` | l'application web construite |
-| `antares-*.tar.gz` | les tarballs des solveurs |
+| `webapp-dist.tar.gz` | built web application |
+| `antares-*.tar.gz` | solver tarballs |
 | `manifest.yml` | version, commit, UID, date |
 
-En mode `archive`, la cible charge les images (idempotent : rien n'est
-retransféré ni rechargé si l'image est déjà là), déplie le front dans le
-checkout où nginx le bind-monte, et prend les solveurs dans le cache local au
-lieu de GitHub. Les archives voyagent en `rsync`, pas avec le module `copy`, qui
-est inadapté à des centaines de mégaoctets.
+In `archive` mode the target loads images idempotently (no retransfer if present), unpacks the frontend in the checked-out tree where nginx bind-mounts it, and takes solvers from the local cache instead of GitHub. Archives are transported with `rsync`, not the `copy` module, which is unsuitable for hundreds of megabytes.
 
-Trois contraintes à connaître :
+Three constraints to know:
+- The builder must share the target architecture. Building amd64 on arm64 requires QEMU emulation which is slow and defeats the benefit.
+- UID is baked into the image (`antarest_add_container_user`), so builder and targets must agree on `antares_uid`.
+- The build uses its own podman store (`antares_build_root`, default `/data/antares-build/store`) passed as an option and not written into the builder's `storage.conf`: build machines often lack space on `/`, and nothing changes in the system podman config.
 
-- **Le builder doit avoir l'architecture des cibles.** Construire de l'amd64
-  depuis une machine arm64 passe par de l'émulation QEMU, assez lente pour
-  annuler tout le bénéfice.
-- **L'UID est cuit dans l'image** (`antarest_add_container_user`), donc le
-  builder et les cibles doivent s'accorder sur `antares_uid`. C'est justement ce
-  qu'une valeur unique sur tout le parc garantit.
-- **Le build a son propre store podman** (`antares_build_root`, par défaut
-  `/data/antares-build/store`), passé en option et non écrit dans le
-  `storage.conf` du builder : une machine de build manque souvent de place sur
-  `/`, et rien de sa configuration podman n'est modifié.
+Without a registry, each new version means `N × size` copies with no layer deduplication. For a small fleet this is fine; beyond that adding a `registry:2` instance is easier to maintain.
 
-Sans registre, c'est `N × la taille` à chaque nouvelle version, sans dédup de
-couches. À une poignée de machines c'est confortable ; au-delà, un `registry:2`
-sur une des machines coûte moins cher à maintenir que cette mécanique.
-
-## Tags utiles
+## Useful tags
 
 ```bash
-ansible-playbook site.yml --tags antares_web     # redéployer l'application
-ansible-playbook site.yml --tags slurm           # cluster seulement
-ansible-playbook site.yml --tags solver          # (re)poser les solveurs
-ansible-playbook site.yml -e antarest_force_rebuild=true   # rebuild complet
+ansible-playbook site.yml --tags antares_web     # redeploy application
+ansible-playbook site.yml --tags slurm           # cluster only
+ansible-playbook site.yml --tags solver          # (re)install solvers
+ansible-playbook site.yml -e antarest_force_rebuild=true   # full rebuild
 ```
 
-`slurm.conf` est généré à partir des facts de **tous** les nœuds de calcul :
-éviter `--limit` sur un sous-ensemble de `slurm_compute` sans avoir figé les
-variables `slurm_node_*` dans l'inventaire.
+`slurm.conf` is generated from facts of all compute nodes: avoid using `--limit` on a subset of `slurm_compute` unless you have fixed `slurm_node_*` variables in the inventory.
 
-## Écarts par rapport au PDF
+## Differences from the PDF
 
-La procédure de référence date de septembre 2025 ; plusieurs points ont changé
-en amont depuis.
+The reference procedure dates from September 2025; several upstream changes have been made since then.
 
-- **Format des lanceurs.** `launcher.local` / `launcher.slurm` a été remplacé
-  par une liste `launcher.launchers`, chaque entrée portant ses propres `id`,
-  `name` et `type`, `launcher.default` désignant un `id`. L'ancien format n'est
-  plus lu du tout.
-- **Version passée au script de lancement.** antares-launcher transmet
-  désormais la version au format `major.minor` (`8.8`) et non plus au format
-  compact (`910`). Le `case` généré accepte les deux formes, donc le test
-  `if [ "$ANTARES_VERSION" = "910" ]` du PDF ne matcherait plus rien
-  aujourd'hui.
-- **Image de build du front.** Le `Dockerfile_build_frontend` du PDF installe
-  `requirements.txt` avec Python 3.9 et nvm ; le projet est passé à `uv` et
-  `pyproject.toml`, `requirements.txt` n'existe plus. Le playbook construit le
-  front dans une image `node` officielle, à la version épinglée par
-  `webapp/.nvmrc` (22.13.0 pour la 2.33.0).
-- **Compte dans l'image.** Le PDF édite le `Dockerfile` du projet pour y
-  ajouter `useradd`. Le playbook laisse le dépôt intact et empile une image
-  dérivée, ce qui survit aux évolutions du `Dockerfile` amont (la ligne
-  `ENV ANTARES_CONF` visée par le PDF s'appelle maintenant `ENV ANTAREST_CONF`).
-- **Pas de compose du tout.** Le PDF s'appuie sur `docker-compose` v1, en fin de
-  vie. Le playbook ne remplace pas cela par compose v2 mais par podman et
-  quadlet : chaque conteneur est une unité systemd, et le `docker-compose.yml`
-  amont n'est plus utilisé (voir la section podman plus haut). Cela supprime au
-  passage la dépendance à compose ≥ 2.24 dont les tags `!override` avaient
-  besoin, puisque plus rien n'est fusionné : chaque montage est écrit
-  explicitement dans son unité.
-- **`ControlMachine` / `ControlAddr`** sont remplacés par `SlurmctldHost`.
-- **Persistance de la base de comptabilité.** Le `docker-compose.yml` du PDF
-  ne déclare aucun volume pour MariaDB : la comptabilité disparaît à la
-  moindre recréation du conteneur. Ici un volume nommé la conserve.
-- **Exposition réseau.** Le PDF publie MariaDB sur `0.0.0.0:3306` avec le
-  compte `root`. Le playbook la publie sur `127.0.0.1` uniquement, slurmdbd
-  tournant sur la même machine. Idem pour adminer, désactivé par défaut.
-- **`archive_dir`.** La configuration pointe sur `/studies/archives`, chemin
-  qu'aucun montage du `docker-compose.yml` amont ne fournit. Le playbook ajoute
-  le montage correspondant dans l'unité du backend.
-- **Répertoire de scratch.** Comme dans le PDF il est placé dans le `/home`
-  partagé, mais sous `~/scratch/` créé par le playbook.
-- **Champ « NNI ».** Toujours présent en 2.33.0, mais déplacé de
-  `webapp/src/components/wrappers/LoginWrapper.tsx` ligne 170 vers
-  `webapp/src/routes/login/index.tsx` ligne 149. Le playbook le repère par son
-  contenu et le remplace par la clé de traduction du projet (voir plus haut).
+- Launcher format. The old `launcher.local` / `launcher.slurm` format was replaced by `launcher.launchers`: a list of entries each with `id`, `name` and `type`, and `launcher.default` points to an `id`. The old format is no longer read.
+- Version passed to the launcher script. antares-launcher now receives a `major.minor` (`8.8`) version string, not the compact integer (`910`). The generated `case` accepts both forms, so tests like `if [ "$ANTARES_VERSION" = "910" ]` from the PDF no longer match.
+- Frontend build image. The PDF's `Dockerfile_build_frontend` installed `requirements.txt` with Python 3.9 and nvm; the project moved to `uv` and `pyproject.toml` (no `requirements.txt`). The playbook builds the frontend in an official Node image pinned to the Node version in `webapp/.nvmrc` (22.13.0 for 2.33.0).
+- Account in the image. The PDF edits the project's `Dockerfile` to add `useradd`. The playbook leaves upstream checkout intact and stacks a derived image on top, surviving upstream Dockerfile changes (the env var `ANTARES_CONF` was previously `ANTARES` vs `ANTAREST_CONF` now).
+- No compose at all. The PDF relied on `docker-compose` v1 (end of life). The playbook replaces compose with podman + quadlet: each container is a systemd unit, the upstream `docker-compose.yml` is not used anymore. This removes the dependency on compose ≥ 2.24 and its `!override` tags.
+- `ControlMachine` / `ControlAddr` replaced by `SlurmctldHost`.
+- Accounting persistence. The PDF's compose left MariaDB without a declared volume so accounting would vanish on container recreation. The playbook uses a named volume to keep accounting data persistent.
+- Network exposure. The PDF published MariaDB on `0.0.0.0:3306` with root account; the playbook binds it only to `127.0.0.1` because `slurmdbd` runs on the same host. Adminer is disabled by default.
+- `archive_dir`. The PDF used `/studies/archives`, a path not provided by the upstream compose, so the playbook adds the corresponding mount in the backend unit.
+- Scratch directory. As in the PDF it is placed in the shared `/home`, but the playbook creates `~/scratch/`.
+- The "NNI" field. Still present in 2.33.0 but moved from `webapp/src/components/wrappers/LoginWrapper.tsx` line 170 to `webapp/src/routes/login/index.tsx` line 149. The playbook finds it by content and replaces it with the translation key (see above).
 
-## Versions majeures des bases de données
+## Major database versions
 
-Les images tierces sont épinglées sur une majeure (`postgres:18`, `mariadb:11`,
-`redis:8`, `nginx:1.31`, `adminer:5`) et non sur `latest`, pour une raison qui
-n'est pas cosmétique.
+Third-party images are pinned to majors (`postgres:18`, `mariadb:11`, `redis:8`, `nginx:1.31`, `adminer:5`) rather than `latest` to avoid accidental major upgrades.
 
-Le répertoire `data/db` contient un cluster PostgreSQL d'une majeure donnée, et
-PostgreSQL **refuse de démarrer** sur un répertoire écrit par une autre majeure
-sans `pg_upgrade`. Avec `latest`, le jour où le tag passe à la majeure suivante,
-une simple relance du playbook tire la nouvelle image et le stack s'arrête, sans
-que rien n'ait changé de votre côté. Le mode `archive` ne protège pas, il
-déplace seulement la panne au prochain `build.yml`, à un moment sans rapport
-apparent avec la cause.
+The `data/db` directory contains a PostgreSQL cluster of a given major version. PostgreSQL refuses to start on data written by a different major without `pg_upgrade`. If you use `latest`, a future major bump in the tag could silently stop your stack on the next playbook run. `archive` mode does not avoid this risk, it only postpones the problem to the next `build.yml`.
 
-Changer de majeure est donc une opération volontaire :
+Changing major versions is therefore an explicit operation:
 
 ```bash
-# sauvegarder avec l'ancienne image encore en place
+# dump the database while the old image is still present
 podman exec postgresql pg_dumpall -U postgres > antarest-db.sql
 systemctl stop antares-web.target
 
-# relever antarest_postgres_image, vider le repertoire de donnees, redeployer
+# update antarest_postgres_image, move aside data dir, redeploy
 mv /var/antares-web/data/db/pgdata /var/antares-web/data/db/pgdata.old
-ansible-playbook site.yml --limit <hote> --tags antares_web
+ansible-playbook site.yml --limit <host> --tags antares_web
 
-# recharger
+# reload
 podman exec -i postgresql psql -U postgres < antarest-db.sql
 ```
 
-Même logique pour MariaDB sur le front-end Slurm, avec `mariadb-dump` et le
-volume `slurmdb-data`.
+Same idea for MariaDB on the Slurm frontend (use `mariadb-dump` and the `slurmdb-data` volume).
 
-## Limites connues
+## Known limitations
 
-- Xpansion n'est pas couvert : le script de lancement dérive du modèle
-  `launchAntares_v1.1.2.sh`, qui attend un environnement R et des
-  *environment modules* absents ici.
-- Aucun pare-feu n'est configuré. Les machines sont supposées être sur un
-  réseau de confiance, comme dans la procédure de référence.
-- Pas de TLS devant l'interface web. Placer un reverse proxy devant si
-  l'exposition dépasse le réseau interne.
-- **Migration depuis une version docker de ce playbook.** Le rôle
-  `slurm_frontend` arrête et supprime l'ancienne unité `slurmdb.service` et son
-  `docker-compose.yml`, mais **ne touche pas au volume docker `slurmdb_data`** :
-  il contient l'historique de comptabilité. Reprendre une base vivante demande
-  un `mariadb-dump` depuis l'ancien volume puis une restauration dans le volume
-  podman `slurmdb-data`. Sur le serveur web, les données sous
-  `/var/antares-web/data` sont des bind mounts et sont reprises telles quelles.
-- Le patch du libellé « NNI » modifie le source avant build. Le checkout étant
-  réinitialisé à chaque exécution (`git force`), le patch est réappliqué à
-  chaque fois ; c'est une empreinte de build
-  (`deploy/.frontend-build-stamp`) qui évite de reconstruire le front pour
-  autant. Changer `antarest_login_username_label` déclenche bien une
-  reconstruction.
+- Xpansion is not covered: the launcher script derives from `launchAntares_v1.1.2.sh`, which expects an R environment and environment modules that are not provided here.
+- No firewall is configured. Machines are assumed to be on a trusted network, as in the reference procedure.
+- No TLS in front of the web UI. Put a reverse proxy with TLS if you expose the interface beyond your internal network.
+- Migration from a Docker-based version of this playbook: the `slurm_frontend` role stops and removes the old `slurmdb.service` unit and its `docker-compose.yml` but does not touch the docker volume `slurmdb_data`: it contains accounting history. Reusing a live DB requires a `mariadb-dump` from the old volume and restoration into the podman volume `slurmdb-data`. On the web server, data under `/var/antares-web/data` are bind mounts and are reused as-is.
+- The NNI label patch modifies source before the build. The checkout is reset each run (`git force`), so the patch is reapplied every time; a build stamp (`deploy/.frontend-build-stamp`) prevents rebuilding the frontend if nothing changed. Changing `antarest_login_username_label` triggers a rebuild.
