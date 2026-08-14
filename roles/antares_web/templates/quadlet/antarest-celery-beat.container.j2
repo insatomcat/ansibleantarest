@@ -1,0 +1,43 @@
+{{ ansible_managed | comment }}
+#
+# The scheduler. It pushes the periodic maintenance tasks on the `maintenance`
+# queue that antarest-celery-worker consumes, and does nothing else: it needs
+# the configuration file to read the intervals, and redis to reach the broker.
+#
+# Exactly one beat may run against a deployment. A second one does not share
+# the work, it schedules every task a second time.
+
+[Unit]
+Description=Antares-Web maintenance scheduler (celery beat)
+Requires=redis.service
+After=redis.service
+PartOf={{ antarest_service_name }}.target
+
+[Container]
+ContainerName=antarest-celery-beat
+Image={{ antarest_image }}
+Network={{ antarest_service_name }}.network
+User={{ antares_uid }}:{{ antares_gid }}
+Volume={{ antarest_deploy_dir }}/config.prod.yaml:/resources/application.yaml:ro
+Volume={{ antarest_data_dir }}/celerybeat:{{ antarest_celerybeat_dir }}
+# Two podman flags instead of a plain Exec=, for one reason: celery beat keeps
+# the last run time of every task in a shelve file whose default name,
+# `celerybeat-schedule`, is *relative* to the working directory. The image
+# declares no WORKDIR, so that is `/`, which the container cannot write to since
+# it runs as {{ antares_uid }} rather than root. --workdir moves it onto the bind mount
+# above, where it also survives a restart, and --entrypoint then becomes
+# mandatory: the image entrypoint is itself the relative path
+# ./scripts/start.sh, which no longer resolves once the working directory has
+# moved.
+#
+# Both go through PodmanArgs= rather than the WorkingDir= and Entrypoint=
+# quadlet keys, which only exist from podman 5.0: Ubuntu 24.04 ships 4.9.
+PodmanArgs=--workdir={{ antarest_celerybeat_dir }} --entrypoint=/scripts/start.sh
+Exec=celery-beat
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy={{ antarest_service_name }}.target

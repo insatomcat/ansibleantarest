@@ -208,7 +208,7 @@ podman ps
 journalctl -u antarest.service -f
 ```
 
-On the web server the generated services are `antarest`, `antarest-watcher`, `antarest-matrix-gc`, `postgresql`, `redis`, `antares-nginx` and `antares-web-network`. On the Slurm frontend, the accounting DB follows the same pattern under `slurmdb.target` (`slurmdb-mariadb`, and `slurmdb-adminer` if enabled).
+On the web server the generated services are `antarest`, `antarest-celery-beat`, `antarest-celery-worker`, `postgresql`, `redis`, `antares-nginx` and `antares-web-network`. On the Slurm frontend, the accounting DB follows the same pattern under `slurmdb.target` (`slurmdb-mariadb`, and `slurmdb-adminer` if enabled).
 
 Three container names are significant (they become DNS names on the podman network). Renaming them silently breaks the stack:
 
@@ -221,6 +221,51 @@ Three container names are significant (they become DNS names on the podman netwo
 `postgresql` also has the alias `postgres` (the upstream compose container_name). Compose resolved both service and container names; podman resolves only the container name and aliases.
 
 All images are fully qualified (`docker.io/library/postgres:latest`, `localhost/antarest:latest`): Debian/Ubuntu don't set `unqualified-search-registries`, so short names are not resolved by podman and will be rejected.
+
+## Background maintenance tasks
+
+Everything periodic runs in two containers, `antarest-celery-beat` (the scheduler) and `antarest-celery-worker` (which executes). The API process starts no background service: `server.services` is left unset in `config.prod.yaml`, which is what the application defaults to anyway.
+
+This is not what the upstream `docker-compose.yml` does. That file still declares a `watcher` and a `matrix_gc` container, which are `IService` singletons, the mechanism the project documents as the fallback for non-Celery environments (the desktop build). Celery is the deployment schema the project favours, [stated on PR #3360](https://github.com/AntaresSimulatorTeam/AntaREST/pull/3360), and the compose file is explicitly not a production reference any more. It also covers two of the eight periodic tasks, where the celery pair covers all eight:
+
+| Task | Default interval | Reclaims |
+|---|---|---|
+| `watcher_scan` | 15 min | nothing (registers studies found in the workspaces) |
+| `matrices_cleaner` | 1 h | orphaned matrices |
+| `blobs_cleaner` | 24 h | unreferenced blobs |
+| `variable_view_cleaner` | 1 h | `output_variables_views` rows, which pin matrices |
+| `tasks_cleaner` | 24 h | task rows older than 30 days |
+| `auto_archiver` | cron, nightly | archives studies untouched for 60 days |
+| `disk_usage` | cron, hourly | nothing (reporting) |
+| `disk_space_analyzer` | cron, nightly | nothing (reporting) |
+
+The broker is Redis, on database 1 (the event bus uses 0). The application derives the broker and result-backend URLs from the `redis` section of `config.prod.yaml`, so there is no separate broker to configure.
+
+Upgrading a deployment made before this change takes the `antarest-watcher` and `antarest-matrix-gc` containers down: they stay listed in `antarest_quadlet_all_units`, which is the list of units the role stops and removes once it no longer writes them. Never run both mechanisms at once, two watchers scan the workspaces twice.
+
+**The collectors start in dry run.** Upstream defaults them to destructive from the first run; here all four write only what they *would* delete, which matters because an instance deployed from the compose file has never reclaimed anything and the first real run has a lot of catching up to do.
+
+```yaml
+antarest_matrix_gc_dry_run: true         # roles/antares_web/defaults/main.yml
+antarest_blob_gc_dry_run: true
+antarest_variable_view_gc_dry_run: true
+antarest_auto_archive_dry_run: true
+```
+
+```bash
+journalctl -u antarest-celery-worker -f    # what the tasks did, or would have done
+journalctl -u antarest-celery-beat -f      # what was scheduled
+```
+
+Read a few cycles before switching one off. `auto_archive` is the one to be careful with: it is not a collector, it moves studies users can see into the archive directory.
+
+Order matters between two of them. Every `output_variables_views` row pins its matrix, so `matrices_cleaner` reclaims almost nothing until `variable_view_cleaner` has run for real.
+
+The worker runs celery's `solo` pool, one task at a time. That is not a conservative default but the correct one: the worker builds its SQLAlchemy engine in the `worker_init` signal, before `prefork` would fork its children, and the children would inherit the same database sockets. `antarest_celery_pool` and `antarest_celery_concurrency` are there for whoever has a reason to change it.
+
+The beat container is the one oddity in the stack. It keeps its "last run" state in a shelve file whose default name is relative to the working directory, which in this image is `/`, not writable by a container running as `antares_uid`. Its unit therefore carries `PodmanArgs=--workdir=/celerybeat --entrypoint=/scripts/start.sh`: the working directory moves onto a bind mount under `data/celerybeat`, and the entrypoint has to be given absolutely because the image declares it as the relative path `./scripts/start.sh`. Both go through `PodmanArgs=` because the `WorkingDir=` and `Entrypoint=` quadlet keys only exist from podman 5.0 and Ubuntu 24.04 ships 4.9.
+
+Intervals are not exposed as Ansible variables. Every `*_sleeping_time` and `*_cron` of the upstream `docs/configuration.md` can be added to `roles/antares_web/templates/config.prod.yaml.j2` under `storage:`. One trap: `auto_archive_sleeping_time` and `auto_archive_cron` are mutually exclusive, setting both makes the application refuse to start.
 
 ## Hardening
 
@@ -323,6 +368,7 @@ The reference procedure dates from September 2025; several upstream changes have
 - Frontend build image. The PDF's `Dockerfile_build_frontend` installed `requirements.txt` with Python 3.9 and nvm; the project moved to `uv` and `pyproject.toml` (no `requirements.txt`). The playbook builds the frontend in an official Node image pinned to the Node version in `webapp/.nvmrc` (22.13.0 for 2.33.0).
 - Account in the image. The PDF edits the project's `Dockerfile` to add `useradd`. The playbook leaves upstream checkout intact and stacks a derived image on top, surviving upstream Dockerfile changes (the env var `ANTARES_CONF` was previously `ANTARES` vs `ANTAREST_CONF` now).
 - No compose at all. The PDF relied on `docker-compose` v1 (end of life). The playbook replaces compose with podman + quadlet: each container is a systemd unit, the upstream `docker-compose.yml` is not used anymore. This removes the dependency on compose ≥ 2.24 and its `!override` tags.
+- Background tasks. The PDF, like the upstream compose file, runs a `watcher` and a `matrix_gc` container. The playbook runs `celery-beat` and `celery-worker` instead: that is the schema the project now favours, and the only one that also runs the blob, variable-view and task collectors. See "Background maintenance tasks".
 - `ControlMachine` / `ControlAddr` replaced by `SlurmctldHost`.
 - Accounting persistence. The PDF's compose left MariaDB without a declared volume so accounting would vanish on container recreation. The playbook uses a named volume to keep accounting data persistent.
 - Network exposure. The PDF published MariaDB on `0.0.0.0:3306` with root account; the playbook binds it only to `127.0.0.1` because `slurmdbd` runs on the same host. Adminer is disabled by default.

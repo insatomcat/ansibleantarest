@@ -15,6 +15,10 @@
     - "{{ antarest_data_dir }}/archives"
     - "{{ antarest_data_dir }}/logs"
     - "{{ antarest_data_dir }}/blobstore"
+    # Working directory of the celery beat container, which writes its
+    # `celerybeat-schedule` state file there. See the unit for why it cannot
+    # simply stay in the container.
+    - "{{ antarest_data_dir }}/celerybeat"
     - "{{ antarest_data_dir }}/db"
     - "{{ antarest_data_dir }}/local_workspace"
     - "{{ antarest_data_dir }}/local_workspace/local"
@@ -51,13 +55,33 @@
 - name: Deploy the nginx configuration and its unit
   ansible.builtin.include_tasks: nginx.yml
 
-# Turning an option such as antarest_enable_adminer back off has to take the
-# container down, not leave a live unit behind.
+# Turning an option such as antarest_enable_adminer back off, or replacing the
+# watcher and matrix-gc containers with the celery pair, has to take the old
+# container down. Deleting the unit file is not enough: the next daemon-reload
+# makes the service unknown to systemd, but the container it started keeps
+# running, and `PartOf=` no longer carries the restart to something systemd has
+# forgotten. So stop first, while the service still exists, then remove.
+- name: Look for the quadlet units this run must take down
+  ansible.builtin.stat:
+    path: "/etc/containers/systemd/{{ item }}"
+  loop: "{{ antarest_quadlet_stale_units }}"
+  register: antarest_quadlet_stale
+
+- name: Stop the containers of disabled components
+  ansible.builtin.systemd:
+    name: >-
+      {{ item | regex_replace('\.container$', '.service')
+              | regex_replace('\.network$', '-network.service') }}
+    state: stopped
+  loop: >-
+    {{ antarest_quadlet_stale.results
+       | selectattr('stat.exists') | map(attribute='item') | list }}
+
 - name: Remove the quadlet units of disabled components
   ansible.builtin.file:
     path: "/etc/containers/systemd/{{ item }}"
     state: absent
-  loop: "{{ antarest_quadlet_all_units | difference(antarest_quadlet_units) }}"
+  loop: "{{ antarest_quadlet_stale_units }}"
   register: antarest_quadlet_removed
   notify: Restart Antares-Web
 

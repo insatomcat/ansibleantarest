@@ -27,7 +27,24 @@ storage:
   # `PermissionError: [Errno 13] Permission denied: 'blobstore'`, since the
   # containers do not run as root.
   blobstore: /blobstore
-  matrix_gc_dry_run: true
+
+  # -------------------------------------------------------------------------
+  # Background maintenance tasks
+  #
+  # Read by the antarest-celery-beat and antarest-celery-worker containers, and
+  # by nothing else: the API process starts no background service, since
+  # `server.services` is left unset.
+  #
+  # Only the destructive switches are written here. Every interval keeps its
+  # upstream default, see docs/configuration.md for the `*_sleeping_time` and
+  # `*_cron` keys. Note that auto_archive_sleeping_time and auto_archive_cron
+  # are mutually exclusive: setting both makes the application refuse to start.
+  # -------------------------------------------------------------------------
+  matrix_gc_dry_run: {{ antarest_matrix_gc_dry_run | bool | lower }}
+  blob_gc_dry_run: {{ antarest_blob_gc_dry_run | bool | lower }}
+  variable_view_gc_dry_run: {{ antarest_variable_view_gc_dry_run | bool | lower }}
+  auto_archive_dry_run: {{ antarest_auto_archive_dry_run | bool | lower }}
+
   workspaces:
     # required, no filter applied, this folder is not watched
     default:
@@ -95,7 +112,10 @@ logging:
   level: INFO
 
 # Redis is required when the application runs with several workers in a
-# preforked model, which is what gunicorn does here.
+# preforked model, which is what gunicorn does here. It is also, on database 1,
+# the celery broker and result backend of the maintenance containers: the
+# application derives those URLs from this section, so there is no `celery:`
+# block to write.
 redis:
   host: redis
   port: 6379
