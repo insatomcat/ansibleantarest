@@ -135,10 +135,12 @@ jobs:
       - name: Build the artefacts
         run: ansible-playbook -i inventory/ci.yml build.yml
 
+      # antares_artifacts_dir in inventory/ci.yml, which is the builder's own
+      # directory here rather than ./artifacts.
       - name: Report what the build produced
         run: |
-          ls -lh artifacts/
-          cat artifacts/manifest.yml
+          ls -lh /mnt/antares-build/artifacts/
+          cat /mnt/antares-build/artifacts/manifest.yml
 
       - name: Deploy from the artefacts
         run: |
