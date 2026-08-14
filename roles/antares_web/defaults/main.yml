@@ -15,11 +15,24 @@ antarest_ssh_key: "{{ antarest_deploy_dir }}/id_rsa"
 antarest_image: "{{ container_local_prefix }}/antarest:latest"
 antarest_base_image: "{{ container_local_prefix }}/antarest:base"
 
-# Third-party images, fully qualified because podman will not guess a registry.
-antarest_postgres_image: "{{ container_registry }}/postgres:latest"
-antarest_redis_image: "{{ container_registry }}/redis:latest"
-antarest_nginx_image: "{{ container_registry }}/nginx:latest"
-antarest_adminer_image: "{{ container_registry }}/adminer:latest"
+# Third-party images, fully qualified because podman will not guess a registry,
+# and pinned to a major rather than `latest`.
+#
+# Pinning postgres is not housekeeping, it is the difference between a working
+# stack and a broken one: the data directory under antarest_data_dir/db carries
+# the cluster of one specific major, and PostgreSQL refuses to start on a
+# directory written by another one without a pg_upgrade. With `latest`, the day
+# the tag moves to the next major, an ordinary re-run of this playbook pulls it
+# and the stack stops, with nothing having changed on our side. Moving to a new
+# major is a deliberate operation with a dump and a restore, see the README.
+#
+# The others hold no state we own, so pinning them is about reproducibility: a
+# rebuild should not silently change the software being deployed. nginx is
+# pinned on its minor, since its major is always `1`.
+antarest_postgres_image: "{{ container_registry }}/postgres:18"
+antarest_redis_image: "{{ container_registry }}/redis:8"
+antarest_nginx_image: "{{ container_registry }}/nginx:1.31"
+antarest_adminer_image: "{{ container_registry }}/adminer:5"
 
 # The images that have to be present for the stack to start, beyond our own.
 # Shared with build.yml so the archives and the units cannot drift apart.

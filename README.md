@@ -384,6 +384,38 @@ en amont depuis.
   `webapp/src/routes/login/index.tsx` ligne 149. Le playbook le repère par son
   contenu et le remplace par la clé de traduction du projet (voir plus haut).
 
+## Versions majeures des bases de données
+
+Les images tierces sont épinglées sur une majeure (`postgres:18`, `mariadb:11`,
+`redis:8`, `nginx:1.31`, `adminer:5`) et non sur `latest`, pour une raison qui
+n'est pas cosmétique.
+
+Le répertoire `data/db` contient un cluster PostgreSQL d'une majeure donnée, et
+PostgreSQL **refuse de démarrer** sur un répertoire écrit par une autre majeure
+sans `pg_upgrade`. Avec `latest`, le jour où le tag passe à la majeure suivante,
+une simple relance du playbook tire la nouvelle image et le stack s'arrête, sans
+que rien n'ait changé de votre côté. Le mode `archive` ne protège pas, il
+déplace seulement la panne au prochain `build.yml`, à un moment sans rapport
+apparent avec la cause.
+
+Changer de majeure est donc une opération volontaire :
+
+```bash
+# sauvegarder avec l'ancienne image encore en place
+podman exec postgresql pg_dumpall -U postgres > antarest-db.sql
+systemctl stop antares-web.target
+
+# relever antarest_postgres_image, vider le repertoire de donnees, redeployer
+mv /var/antares-web/data/db/pgdata /var/antares-web/data/db/pgdata.old
+ansible-playbook site.yml --limit <hote> --tags antares_web
+
+# recharger
+podman exec -i postgresql psql -U postgres < antarest-db.sql
+```
+
+Même logique pour MariaDB sur le front-end Slurm, avec `mariadb-dump` et le
+volume `slurmdb-data`.
+
 ## Limites connues
 
 - Xpansion n'est pas couvert : le script de lancement dérive du modèle
