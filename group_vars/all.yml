@@ -386,17 +386,12 @@ manage_hostname: false
 #  refuses to run if it cannot work out which one that is.
 #
 #  On a RHEL rebuild there is already a firewall running: firewalld, enabled by
-#  the installer, dropping everything but SSH. Two packet filters that have to
-#  agree is exactly the situation the comment above warns about, so the role
-#  picks one rather than leaving both in place:
-#    - with hardening_firewall_enabled on, firewalld is stopped, disabled and
-#      masked, and the nftables table below is the whole filtering policy;
-#    - with it off, firewalld stays in charge and the role opens in it what the
-#      nftables table would have opened - the interface on an antares_web
-#      machine, and the other machines of the inventory as a trusted source -
-#      and enables masquerade on the zone of the public NIC, without which
-#      PublishPort (a DNAT, then a forward) is dropped even with the port open.
-#  Set hardening_manage_firewalld to false to be left alone with it.
+#  the installer, dropping everything but SSH. Debian and Ubuntu ship none.
+#  `hardening_firewall_enabled: false` means no host firewall, so firewalld is
+#  stopped, disabled and masked either way; the nftables table is what the
+#  knob actually turns on. Two filters that have to agree is exactly the
+#  situation the comment above warns about. Set hardening_manage_firewalld
+#  to false to be left alone with firewalld.
 # ---------------------------------------------------------------------------
 hardening_enabled: true
 
