@@ -41,6 +41,14 @@
   ansible.posix.synchronize:
     src: "{{ antares_artifacts_dir }}/"
     dest: "{{ antarest_base_dir }}/artifacts/"
+    # rsync runs as root here (become turns into --rsync-path="sudo rsync"),
+    # so --archive would stamp the *controller's* ownership on the destination:
+    # the directory ends up owned by whatever UID the operator happens to have
+    # locally, the task above puts it back to root on the next run, and the two
+    # take turns reporting a change forever. Nothing reads these archives but
+    # root anyway.
+    owner: false
+    group: false
     rsync_opts:
       - "--include=*.tar.gz"
       - "--include=manifest.yml"
