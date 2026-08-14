@@ -11,6 +11,11 @@ Description=Antares-Web backend
 Requires=postgresql.service redis.service
 After=postgresql.service redis.service
 PartOf={{ antarest_service_name }}.target
+# Start budget for the Restart= below: five attempts, then the unit gives up.
+# This is the one that needs them: After=postgresql.service only means the
+# postgres *container* started, not that it accepts connections yet.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 ContainerName=antarest
@@ -33,6 +38,10 @@ Volume={{ volume }}
 [Service]
 # The first start migrates the database schema, which is not instant.
 TimeoutStartSec=300
+# on-failure, not always: a container that keeps dying exhausts the budget in
+# [Unit] and stays `failed` instead of looping out of sight. See the README.
+Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy={{ antarest_service_name }}.target

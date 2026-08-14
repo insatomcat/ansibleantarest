@@ -12,6 +12,9 @@ Description=Antares-Web maintenance scheduler (celery beat)
 Requires=redis.service
 After=redis.service
 PartOf={{ antarest_service_name }}.target
+# Start budget for the Restart= below: five attempts, then the unit gives up.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 ContainerName=antarest-celery-beat
@@ -34,6 +37,12 @@ Volume={{ antarest_data_dir }}/celerybeat:{{ antarest_celerybeat_dir }}
 # quadlet keys, which only exist from podman 5.0: Ubuntu 24.04 ships 4.9.
 PodmanArgs=--workdir={{ antarest_celerybeat_dir }} --entrypoint=/scripts/start.sh
 Exec=celery-beat
+
+[Service]
+# on-failure, not always: a container that keeps dying exhausts the budget in
+# [Unit] and stays `failed` instead of looping out of sight. See the README.
+Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy={{ antarest_service_name }}.target
