@@ -1,0 +1,32 @@
+---
+# The nginx configuration and its unit, in a file of their own because they are
+# rendered twice on the run that obtains a certificate: once before the stack
+# starts (plain http, so that certbot has something to answer the challenge
+# with) and once after (TLS on, port 443 published).
+
+# With TLS off the project file is mounted straight from the checkout and there
+# is nothing to render, see antarest_nginx_conf_source.
+- name: Deploy the nginx configuration
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ antarest_deploy_dir }}/nginx.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  when: antarest_tls_enabled | bool
+  notify: Restart Antares-Web
+
+- name: Deploy the nginx quadlet unit
+  ansible.builtin.template:
+    src: quadlet/antares-nginx.container.j2
+    dest: /etc/containers/systemd/antares-nginx.container
+    owner: root
+    group: root
+    mode: "0644"
+  register: antarest_nginx_unit
+  notify: Restart Antares-Web
+
+- name: Reload systemd so the quadlet generator picks the unit up
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: antarest_nginx_unit.changed

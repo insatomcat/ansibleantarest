@@ -1,0 +1,83 @@
+---
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: "{{ hardening_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: "{{ apt_lock_timeout }}"
+  when: hardening_fail2ban_enabled | bool
+
+- name: Deploy the ban action
+  ansible.builtin.template:
+    src: action-antares-nft.conf.j2
+    dest: "/etc/fail2ban/action.d/{{ hardening_fail2ban_action }}.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  when: hardening_fail2ban_enabled | bool
+  notify: Restart fail2ban
+
+- name: Deploy the Antares-Web login filter
+  ansible.builtin.template:
+    src: filter-antares-web-login.conf.j2
+    dest: /etc/fail2ban/filter.d/antares-web-login.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: hardening_fail2ban_enabled | bool
+  notify: Restart fail2ban
+
+- name: Deploy the jails
+  ansible.builtin.template:
+    src: jail-antares.local.j2
+    dest: /etc/fail2ban/jail.d/antares.local
+    owner: root
+    group: root
+    mode: "0644"
+  when: hardening_fail2ban_enabled | bool
+  notify: Restart fail2ban
+
+# fail2ban starts with whatever it could parse and logs the rest, so a jail
+# with a typo in it is a jail that silently does nothing. This says so instead.
+- name: Check the fail2ban configuration parses
+  ansible.builtin.command: fail2ban-client --test
+  register: hardening_fail2ban_test
+  changed_when: false
+  when: hardening_fail2ban_enabled | bool
+
+- name: Enable fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban.service
+    enabled: true
+    state: started
+  when: hardening_fail2ban_enabled | bool
+
+- name: Apply the pending fail2ban restart now
+  ansible.builtin.meta: flush_handlers
+
+# Not just "is the service running": a jail that failed to start leaves the
+# service up and reports nothing, which is exactly the failure this checks for.
+- name: Check the jails are up
+  ansible.builtin.command: fail2ban-client status {{ item }}
+  register: hardening_fail2ban_status
+  changed_when: false
+  loop: "{{ ['sshd'] + (['antares-web-login']
+                        if hardening_fail2ban_web_jail | bool
+                           and inventory_hostname in (groups['antares_web'] | default([]))
+                        else []) }}"
+  when: hardening_fail2ban_enabled | bool
+
+- name: Stop fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban.service
+    enabled: false
+    state: stopped
+  failed_when: false
+  when: not hardening_fail2ban_enabled | bool
+
+- name: Remove the jails
+  ansible.builtin.file:
+    path: /etc/fail2ban/jail.d/antares.local
+    state: absent
+  when: not hardening_fail2ban_enabled | bool

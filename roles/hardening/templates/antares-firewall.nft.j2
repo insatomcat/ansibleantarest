@@ -1,0 +1,82 @@
+#!/usr/sbin/nft -f
+{{ ansible_managed | comment }}
+#
+# Loaded by {{ hardening_firewall_service }}.service, and by nothing else:
+# /etc/nftables.conf is left alone on purpose, since what Debian ships in it
+# starts with `flush ruleset`, which would also wipe the rules netavark writes
+# for the containers.
+#
+# The add/delete pair below is the idiom that makes the file reloadable: the
+# table is created if it is missing, then dropped, then rebuilt, all in one
+# transaction, so the rules are never live without the policy or the other way
+# round.
+
+add table inet {{ hardening_firewall_table }}
+delete table inet {{ hardening_firewall_table }}
+
+table inet {{ hardening_firewall_table }} {
+
+    # The other machines of the deployment. They talk NFS, Slurm and SSH to
+    # each other on ports that have no reason to be open to the world.
+    set trusted_v4 {
+        type ipv4_addr
+        flags interval
+{% if hardening_peers_v4 | length > 0 %}
+        elements = { {{ hardening_peers_v4 | join(', ') }} }
+{% endif %}
+    }
+
+    set trusted_v6 {
+        type ipv6_addr
+        flags interval
+{% if hardening_peers_v6 | length > 0 %}
+        elements = { {{ hardening_peers_v6 | join(', ') }} }
+{% endif %}
+    }
+
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        ct state established,related accept
+        ct state invalid drop
+
+{% for iface in hardening_firewall_trusted_interfaces %}
+        iifname "{{ iface }}" accept
+{% endfor %}
+
+        # ipv6-icmp carries neighbour discovery: dropping it does not harden
+        # anything, it just breaks IPv6. icmp is what makes path MTU discovery
+        # and a plain ping work.
+        meta l4proto ipv6-icmp accept
+{% if hardening_firewall_allow_icmp | bool %}
+        meta l4proto icmp accept
+{% endif %}
+
+        # A DHCP lease renewal on a cloud image comes back to these.
+        udp dport { 67, 68, 546 } accept
+
+        ip saddr @trusted_v4 accept
+        ip6 saddr @trusted_v6 accept
+
+        # SSH, read from `sshd -T` rather than assumed to be 22.
+        tcp dport { {{ hardening_ssh_ports | join(', ') }} } accept
+{% if hardening_web_ports | length > 0 %}
+
+        # The Antares-Web interface. Port 80 stays open even with TLS on: it
+        # answers the redirect to https, and it is where the ACME http-01
+        # challenge is validated at every certificate renewal.
+        tcp dport { {{ hardening_web_ports | join(', ') }} } accept
+{% endif %}
+{% if hardening_firewall_extra_tcp_ports | length > 0 %}
+
+        tcp dport { {{ hardening_firewall_extra_tcp_ports | join(', ') }} } accept
+{% endif %}
+{% if hardening_firewall_extra_udp_ports | length > 0 %}
+        udp dport { {{ hardening_firewall_extra_udp_ports | join(', ') }} } accept
+{% endif %}
+{% if hardening_firewall_log_drops | bool %}
+
+        limit rate 5/minute burst 10 packets log prefix "{{ hardening_firewall_table }} drop: " level info
+{% endif %}
+    }
+}

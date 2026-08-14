@@ -25,6 +25,18 @@
   roles:
     - common
 
+# Firewall, fail2ban, sshd and unattended upgrades. Early on purpose: a machine
+# that is going to be reachable on the internet should not spend the length of
+# a full deployment with everything open. Only the input hook is filtered, so
+# nothing here gets in the way of what follows.
+- name: Hardening
+  hosts: all
+  become: true
+  tags: hardening
+  roles:
+    - role: hardening
+      when: hardening_enabled | bool
+
 # ---------------------------------------------------------------------------
 #  Slurm cluster
 # ---------------------------------------------------------------------------

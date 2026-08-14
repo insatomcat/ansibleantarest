@@ -1,0 +1,89 @@
+---
+# A packet filter on the input hook and nothing else. Deliberately not on
+# forward: published container ports are DNATed and routed, they never traverse
+# input, and a forward chain with a drop policy would take down every container
+# on the machine, outgoing traffic included. What this protects is therefore
+# the host itself - sshd, rpcbind and nfsd, slurmctld, slurmd, slurmdbd - which
+# is exactly what has no business being reachable from the internet. What the
+# containers publish is governed by their PublishPort, and the two that are not
+# meant to be public (adminer here, MariaDB on the front-end) are bound to
+# 127.0.0.1 in their units.
+
+- name: Install nftables
+  ansible.builtin.apt:
+    name: nftables
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: "{{ apt_lock_timeout }}"
+  when: hardening_firewall_enabled | bool
+
+- name: Create the ruleset directory
+  ansible.builtin.file:
+    path: "{{ hardening_firewall_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: hardening_firewall_enabled | bool
+
+# The whole file is one nft transaction: the `add table` / `delete table` pair
+# at the top makes it reloadable, and the rules only ever exist together with
+# the drop policy, so there is no window where the port would be open with the
+# accept rules missing.
+- name: Deploy the ruleset
+  ansible.builtin.template:
+    src: antares-firewall.nft.j2
+    dest: "{{ hardening_firewall_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "nft --check --file %s"
+  when: hardening_firewall_enabled | bool
+  notify: Reload the antares firewall
+
+- name: Deploy the unit loading the ruleset
+  ansible.builtin.template:
+    src: antares-firewall.service.j2
+    dest: "/etc/systemd/system/{{ hardening_firewall_service }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  register: hardening_firewall_unit
+  when: hardening_firewall_enabled | bool
+  notify: Reload the antares firewall
+
+- name: Enable the firewall
+  ansible.builtin.systemd:
+    name: "{{ hardening_firewall_service }}.service"
+    enabled: true
+    state: started
+    daemon_reload: "{{ hardening_firewall_unit.changed | default(false) }}"
+  when: hardening_firewall_enabled | bool
+
+# Switching the firewall off has to take the rules down, not just stop writing
+# them: the table is loaded at boot by a unit that would otherwise stay enabled.
+- name: Stop the firewall
+  ansible.builtin.systemd:
+    name: "{{ hardening_firewall_service }}.service"
+    enabled: false
+    state: stopped
+  failed_when: false
+  when: not hardening_firewall_enabled | bool
+
+- name: Remove the firewall files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ hardening_firewall_file }}"
+    - "/etc/systemd/system/{{ hardening_firewall_service }}.service"
+  register: hardening_firewall_cleanup
+  when: not hardening_firewall_enabled | bool
+
+- name: Forget the removed unit
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when:
+    - not hardening_firewall_enabled | bool
+    - hardening_firewall_cleanup.changed

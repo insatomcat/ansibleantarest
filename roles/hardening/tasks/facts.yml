@@ -1,0 +1,108 @@
+---
+# ---------------------------------------------------------------------------
+#  The SSH ports
+#
+#  Hardcoding 22 is how a firewall locks an operator out: the inventory of this
+#  very repository has a machine answering on 2222. `sshd -T` prints the
+#  effective configuration, every Port line included, which is the only source
+#  that cannot disagree with the running daemon. ansible_port is added on top,
+#  because that one is known to work: it is how this task got here.
+# ---------------------------------------------------------------------------
+- name: Ask sshd which ports it listens on
+  ansible.builtin.command: sshd -T
+  register: hardening_sshd_config
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Resolve the SSH ports to keep open
+  ansible.builtin.set_fact:
+    hardening_ssh_ports: >-
+      {{ ((hardening_sshd_config.stdout_lines | default([])
+           | select('match', '^port ') | map('regex_replace', '^port ', '') | list)
+          + [ansible_port | default(22, true)]
+          + hardening_ssh_extra_ports)
+         | map('int') | unique | sort }}
+
+# The port Ansible came in on is always opened, but that is not enough: behind
+# a port forwarding it is the *external* port, and the packet reaching this
+# machine carries the internal one. Losing the answer of sshd therefore means
+# opening the wrong port and locking the next connection out.
+- name: Check the SSH ports were found
+  ansible.builtin.assert:
+    that:
+      - hardening_sshd_config.rc == 0 or hardening_ssh_extra_ports | length > 0
+      - hardening_ssh_ports | length > 0
+    fail_msg: >-
+      Could not work out which ports sshd listens on on {{ inventory_hostname }}
+      ("sshd -T" said: {{ hardening_sshd_config.stderr | default('') | trim }}).
+      Refusing to install a firewall that would probably lock you out: list the
+      ports in hardening_ssh_extra_ports, or set hardening_firewall_enabled to
+      false.
+    quiet: true
+  when: hardening_firewall_enabled | bool
+
+# ---------------------------------------------------------------------------
+#  The other machines of the deployment
+#
+#  NFS (2049 plus the RPC ports), slurmctld (6817), slurmd (6818), slurmdbd
+#  (6819) and the SSH submission path all talk between the machines of the
+#  inventory. Rather than opening those ports to the world, the machines
+#  themselves are trusted, which is also what a private cluster network would
+#  give.
+#
+#  The addresses come from the facts rather than from ansible_host, which may
+#  be a name, a public address in front of a NAT, or missing altogether.
+#  A machine whose facts are not in the play (a --limit run, an empty cache)
+#  contributes nothing, hence the caching in ansible.cfg and the fact-gathering
+#  play at the top of site.yml.
+# ---------------------------------------------------------------------------
+- name: Resolve the addresses of the other machines of the deployment
+  ansible.builtin.set_fact:
+    hardening_peers_v4: >-
+      {{ ((groups['all'] | default([]) | map('extract', hostvars)
+           | map(attribute='ansible_facts.all_ipv4_addresses', default=[]) | list | flatten
+           if hardening_firewall_trust_inventory | bool else [])
+          + (hardening_firewall_extra_sources | reject('search', ':') | list))
+         | reject('match', '^127\.') | unique | sort }}
+    hardening_peers_v6: >-
+      {{ ((groups['all'] | default([]) | map('extract', hostvars)
+           | map(attribute='ansible_facts.all_ipv6_addresses', default=[]) | list | flatten
+           if hardening_firewall_trust_inventory | bool else [])
+          + (hardening_firewall_extra_sources | select('search', ':') | list))
+         | reject('match', '^(::1$|fe80:)') | unique | sort }}
+
+# A machine of the inventory that contributed no address is a machine the
+# firewall will treat as a stranger, which is how a --limit run on a stale fact
+# cache silently cuts the NFS mount of a compute node.
+- name: Warn about the machines whose addresses are unknown
+  ansible.builtin.debug:
+    msg: >-
+      {{ hardening_faceless_hosts | trim }}: no gathered facts, so their
+      addresses are not in the trusted set of the firewall of
+      {{ inventory_hostname }}. Run the playbook without --limit so that the
+      first play gathers from every machine, or list the addresses in
+      hardening_firewall_extra_sources.
+  vars:
+    hardening_faceless_hosts: >-
+      {% for host in groups['all'] | default([])
+         if hostvars[host].ansible_facts.all_ipv4_addresses is not defined %}
+      {{- host }} {% endfor %}
+  when:
+    - hardening_firewall_enabled | bool
+    - hardening_firewall_trust_inventory | bool
+    - hardening_faceless_hosts | trim | length > 0
+
+# ---------------------------------------------------------------------------
+#  The ports the interface is published on
+#
+#  Only on the machines that run Antares-Web, and only those that are actually
+#  published: with TLS off, nothing listens on 443. The variables live in
+#  group_vars/all.yml so that they are in scope here too.
+# ---------------------------------------------------------------------------
+- name: Resolve the public ports of Antares-Web
+  ansible.builtin.set_fact:
+    hardening_web_ports: >-
+      {{ ([antarest_http_port | int]
+          + ([antarest_https_port | int] if antarest_tls_enabled | default(false) | bool else []))
+         if inventory_hostname in (groups['antares_web'] | default([])) else [] }}

@@ -1,0 +1,135 @@
+---
+# ===========================================================================
+#  What each block does is documented in group_vars/all.yml, next to the
+#  on/off switches. What follows is the tuning.
+# ===========================================================================
+
+hardening_packages:
+  - nftables
+  # fail2ban only *recommends* python3-systemd, and without it the systemd
+  # backend cannot read the journal at all: on a machine installed with
+  # --no-install-recommends every jail would come up dead.
+  - python3-systemd
+  - fail2ban
+
+# ---------------------------------------------------------------------------
+#  Firewall
+# ---------------------------------------------------------------------------
+
+# Our own nftables table, loaded by its own unit. Nothing here touches
+# /etc/nftables.conf, whose shipped content starts with `flush ruleset` and
+# would take podman's own rules down with it.
+hardening_firewall_table: antares_fw
+hardening_firewall_file: /etc/nftables.d/antares-firewall.nft
+hardening_firewall_service: antares-firewall
+
+# Interfaces whose input is accepted wholesale. `podman*` is not a courtesy:
+# aardvark-dns listens on the bridge address, which is the *host*, so container
+# name resolution is input traffic and a drop policy without this rule breaks
+# every container's DNS.
+hardening_firewall_trusted_interfaces:
+  - lo
+  - "podman*"
+
+# Ports open to the whole world, on top of SSH and, on an antares_web machine,
+# the interface. Written as numbers.
+hardening_firewall_extra_tcp_ports: []
+hardening_firewall_extra_udp_ports: []
+
+# Addresses allowed on every port, on top of the machines of the inventory.
+# CIDRs accepted, e.g. "10.1.0.0/24" for a whole cluster network.
+hardening_firewall_extra_sources: []
+
+# Include the other machines of the inventory in the trusted sources. This is
+# what keeps NFS, Slurm and the SSH submission path working without opening
+# 2049 or 6817 to the internet.
+hardening_firewall_trust_inventory: true
+
+# Answer pings, and let path MTU discovery work. Blocking icmp is folklore that
+# costs more than it buys; icmpv6 is accepted whatever this says, since
+# neighbour discovery is how IPv6 works at all.
+hardening_firewall_allow_icmp: true
+
+# Log what the policy drops, rate-limited. Off by default: an internet-facing
+# machine gets scanned continuously and this fills the journal.
+hardening_firewall_log_drops: false
+
+# ---------------------------------------------------------------------------
+#  fail2ban
+# ---------------------------------------------------------------------------
+hardening_fail2ban_bantime: 1h
+hardening_fail2ban_findtime: 10m
+hardening_fail2ban_maxretry: 5
+
+# Never banned. The machines of the inventory are added to it for the same
+# reason as in the firewall, plus one of them is the machine you are typing on.
+hardening_fail2ban_ignoreip:
+  - 127.0.0.1/8
+  - ::1
+
+# Ban action. Deliberately not the stock `nftables` one: it filters in the
+# input hook, which published container ports never reach. See the template.
+hardening_fail2ban_action: antares-nft
+hardening_fail2ban_nft_table: antares_f2b
+
+# Jail on the Antares-Web login form, on the antares_web machines. The API
+# answers 401 on a wrong password, nginx logs it, this counts them.
+hardening_fail2ban_web_jail: true
+# Container whose journal the jail reads. Same name as the one the antares_web
+# role gives nginx; that role's defaults are not in scope in this play, hence
+# the fallback rather than a direct reference.
+hardening_fail2ban_web_container: "{{ antarest_nginx_container | default('antares-nginx') }}"
+hardening_fail2ban_web_maxretry: 10
+hardening_fail2ban_web_findtime: 10m
+hardening_fail2ban_web_bantime: 1h
+# The nginx path of the login endpoint: /v1/login on the backend, behind the
+# /api/ prefix the front-end and nginx use.
+hardening_fail2ban_web_login_path: /api/v1/login
+
+# ---------------------------------------------------------------------------
+#  SSH
+# ---------------------------------------------------------------------------
+hardening_ssh_config_file: /etc/ssh/sshd_config.d/50-antares-hardening.conf
+
+# `prohibit-password` keeps root reachable with a key, which some automation
+# relies on, and closes the password. `no` refuses root outright.
+hardening_ssh_permit_root_login: prohibit-password
+
+# The one setting that can lock you out, so the role checks first that the
+# account Ansible connects with has an authorized_keys, and stops if it does
+# not rather than leaving the machine unreachable.
+hardening_ssh_disable_password_auth: true
+
+hardening_ssh_max_auth_tries: 4
+hardening_ssh_login_grace_time: 30
+hardening_ssh_x11_forwarding: false
+# Left on: the README documents reaching adminer through `ssh -L`, and closing
+# this buys nothing against someone who already has an account and a shell.
+hardening_ssh_allow_tcp_forwarding: true
+
+# Ports sshd listens on. Read from `sshd -T` at run time, which is the only
+# answer that cannot be wrong; this is the fallback, and anything listed here
+# is opened on top of what was found.
+hardening_ssh_extra_ports: []
+
+# ---------------------------------------------------------------------------
+#  Unattended upgrades
+# ---------------------------------------------------------------------------
+# The distribution ships an origins list restricted to the security pocket, and
+# it is left alone: this only turns the thing on.
+hardening_unattended_packages:
+  - unattended-upgrades
+# Rebooting a machine that may be running an eight-hour study is a decision for
+# an operator, not for a timer.
+hardening_unattended_reboot: false
+
+# ---------------------------------------------------------------------------
+#  Secrets
+# ---------------------------------------------------------------------------
+# The values shipped in group_vars/all.yml. A deployment still carrying them is
+# reported; set hardening_fail_on_default_secrets to make that a failure.
+hardening_default_secrets:
+  antarest_jwt_key: secretkeytochange
+  antarest_admin_password: admin
+  antarest_db_password: somepass
+  slurmdbd_db_password: changeme-slurm-acct

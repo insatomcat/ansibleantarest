@@ -1,0 +1,22 @@
+---
+# Reload rather than restart: `nft -f` on the file is one transaction, so the
+# rules are replaced without a moment where the machine has no filtering, and
+# the unit is Type=oneshot anyway.
+- name: Reload the antares firewall
+  ansible.builtin.systemd:
+    name: "{{ hardening_firewall_service }}.service"
+    state: reloaded
+    daemon_reload: true
+
+- name: Restart fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban.service
+    state: restarted
+
+# Nothing to do when sshd is started from its socket unit: there is no daemon
+# holding the configuration, each connection reads it again.
+- name: Reload sshd
+  ansible.builtin.systemd:
+    name: ssh.service
+    state: reloaded
+  when: hardening_ssh_socket.stdout | default('') | trim != 'active'

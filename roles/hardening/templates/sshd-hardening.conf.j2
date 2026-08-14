@@ -1,0 +1,28 @@
+{{ ansible_managed | comment }}
+#
+# Drop-in read from /etc/ssh/sshd_config, which includes this directory as its
+# first line. In sshd the *first* value of a keyword wins, which is why the
+# include comes first in the distribution file and why this overrides what the
+# rest of sshd_config says.
+#
+#   sshd -T | grep -E 'permitrootlogin|passwordauthentication|maxauthtries'
+
+PermitRootLogin {{ hardening_ssh_permit_root_login }}
+{% if hardening_ssh_disable_password_auth | bool %}
+
+# Both are needed: with PasswordAuthentication off alone, PAM still offers the
+# password through keyboard-interactive on a stock Debian sshd.
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+{% endif %}
+
+# An empty password would be an account anybody can walk into.
+PermitEmptyPasswords no
+
+MaxAuthTries {{ hardening_ssh_max_auth_tries }}
+LoginGraceTime {{ hardening_ssh_login_grace_time }}
+
+X11Forwarding {{ 'yes' if hardening_ssh_x11_forwarding | bool else 'no' }}
+# Left on by default: the README reaches adminer with `ssh -L`, and closing it
+# gains nothing against someone who already has a shell here.
+AllowTcpForwarding {{ 'yes' if hardening_ssh_allow_tcp_forwarding | bool else 'no' }}

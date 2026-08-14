@@ -1,0 +1,95 @@
+{{ ansible_managed | comment }}
+#
+# Mounted as /etc/nginx/conf.d/default.conf in the antares-nginx container,
+# in place of the resources/deploy/nginx.conf shipped by the project.
+#
+# It is that file plus TLS: same client_max_body_size, same /www root with the
+# SPA fallback, same /api/ proxy to http://antarest:5000/ with the websocket
+# upgrade and the long read timeout. The locations live in a macro so that the
+# port 80 and the port 443 servers cannot drift apart.
+#
+# The upstream file is only rendered here when antarest_tls_enabled is true;
+# with TLS off the project file is mounted directly, unchanged. The checksum of
+# the upstream file is compared to antarest_nginx_upstream_sha1 at deploy time,
+# so a change on their side is reported instead of being silently ignored here.
+
+{% macro antares_app() %}
+    client_max_body_size 1G;
+
+    # serve static webapp files
+    location / {
+      root    /www;
+      try_files $uri $uri/ /index.html = 404;
+    }
+
+    location /api/ {
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-Host $host:$server_port;
+      proxy_set_header X-Forwarded-Server $host;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      # Not in the upstream file: it is what tells the backend it is reached
+      # over https, so that anything it builds from the request scheme does not
+      # point back at http. Honoured only because the antarest container gets
+      # FORWARDED_ALLOW_IPS, gunicorn ignoring the header otherwise.
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_redirect          off;
+      proxy_pass      http://antarest:5000/;
+
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "upgrade";
+      proxy_read_timeout 1200;
+    }
+{% endmacro %}
+{% macro acme_challenge() %}
+{% if antarest_tls_provider == 'letsencrypt' %}
+    # Left served over plain http on purpose: this is the only path certbot
+    # needs, and the ACME server follows redirects but has nothing to validate
+    # a certificate against on a host that does not have one yet.
+    location ^~ /.well-known/acme-challenge/ {
+      root {{ antarest_tls_webroot_container }};
+      default_type "text/plain";
+    }
+{% endif %}
+{% endmacro %}
+server {
+    listen       80;
+    server_name  {{ antarest_tls_domain }};
+{{ acme_challenge() }}
+{% if antarest_tls_active | bool and antarest_tls_redirect_http | bool %}
+
+    location / {
+      return 301 https://$host$request_uri;
+    }
+{% else %}
+{{ antares_app() }}
+{% endif %}
+}
+{% if antarest_tls_active | bool %}
+
+server {
+    listen       443 ssl;
+    http2        on;
+    server_name  {{ antarest_tls_domain }};
+
+    ssl_certificate     {{ antarest_tls_cert }};
+    ssl_certificate_key {{ antarest_tls_key }};
+
+    # Mozilla "intermediate" without the TLS 1.2 ciphers that need an explicit
+    # list: everything below TLS 1.2 is off, and the 1.3 suites are picked by
+    # OpenSSL itself.
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+{% if antarest_tls_hsts_max_age | int > 0 %}
+
+    # Tells the browser never to come back over http. Deliberately without
+    # includeSubDomains and preload: this host is usually one name among others
+    # on the domain, and the header is hard to take back once it is cached.
+    add_header Strict-Transport-Security "max-age={{ antarest_tls_hsts_max_age }}" always;
+{% endif %}
+{{ antares_app() }}
+}
+{% endif %}
