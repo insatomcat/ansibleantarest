@@ -23,6 +23,11 @@
 # mode out is what makes the two composable: podman takes the options as one
 # comma-separated list after the second colon, so there has to be something for
 # the flag to be appended to.
+#
+# Two mounts are not listed here: the cluster directory of postgresql and the
+# schedule file of celery beat, which belong to one container each and are
+# written in their own unit. They follow the same spelling, and have to: a bind
+# mount that misses the flag is unreadable to the container on any EL 9 host.
 _antarest_volume_opts: "{{ container_volume_opts | trim }}"
 
 # Mounts every antarest process needs (backend, celery worker). The celery
