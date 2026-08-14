@@ -5,11 +5,11 @@
 - name: Check the distribution is supported
   ansible.builtin.assert:
     that:
-      - ansible_os_family in ['Debian', 'RedHat']
-      - (ansible_distribution ~ ' ' ~ ansible_distribution_major_version) in supported_distros
+      - ansible_facts['os_family'] in ['Debian', 'RedHat']
+      - (ansible_facts['distribution'] ~ ' ' ~ ansible_facts['distribution_major_version']) in supported_distros
     fail_msg: >-
-      {{ inventory_hostname }} runs {{ ansible_distribution }}
-      {{ ansible_distribution_version }} (family {{ ansible_os_family }}), which
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}
+      {{ ansible_facts['distribution_version'] }} (family {{ ansible_facts['os_family'] }}), which
       is not in supported_distros ({{ supported_distros | join(', ') }}).
       Packages are installed with apt on the Debian family and dnf on the
       RedHat one, so no other family can work at all. Add the release to

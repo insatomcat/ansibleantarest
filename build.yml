@@ -31,7 +31,7 @@
 
 - name: Build the Antares-Web artefacts
   hosts: builder
-  gather_facts: true
+  gather_facts: false
   become: true
   vars:
     # Suppresses the "restart the stack" notify of build_image.yml: there is no
@@ -59,6 +59,11 @@
   # Before the role below, because it runs `podman info` against the build
   # store, which has to exist by then.
   pre_tasks:
+
+    # Same reason as the first play of site.yml: gather_facts would reuse a
+    # stale cache after this builder is rebuilt as another distribution.
+    - name: Gather facts
+      ansible.builtin.setup:
 
     # This play does not run the common role, so nothing else would refresh the
     # apt lists or enable EPEL, and the podman install below would be the first

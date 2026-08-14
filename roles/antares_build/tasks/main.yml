@@ -72,7 +72,7 @@
       antares_uid: {{ antares_uid }}
       antares_gid: {{ antares_gid }}
       image: "{{ antarest_image }}"
-      built_at: "{{ ansible_date_time.iso8601 | default('unknown') }}"
+      built_at: "{{ ansible_facts['date_time']['iso8601'] | default('unknown') }}"
     dest: "{{ antares_build_artifacts }}/manifest.yml"
     mode: "0644"
 

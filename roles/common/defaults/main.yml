@@ -1,9 +1,9 @@
 ---
 # Package names differ between the two families, so every role that installs
-# anything resolves its list from ansible_os_family. The `_by_family` dict is
-# the data, the plain name is what the tasks use and what an inventory
+# anything resolves its list from ansible_facts['os_family']. The `_by_family`
+# dict is the data, the plain name is what the tasks use and what an inventory
 # overrides.
-common_packages: "{{ _common_packages_by_family[ansible_os_family] }}"
+common_packages: "{{ _common_packages_by_family[ansible_facts['os_family']] }}"
 _common_packages_by_family:
   Debian:
     - ca-certificates
@@ -35,16 +35,16 @@ _common_packages_by_family:
 # rebuilds with chronyd. A cluster whose nodes disagree on the time gets munge
 # authentication failures ("Rewound credential"), so this is not cosmetic.
 common_timesync_service: >-
-  {{ 'chronyd' if ansible_os_family == 'RedHat' else 'systemd-timesyncd' }}
+  {{ 'chronyd' if ansible_facts['os_family'] == 'RedHat' else 'systemd-timesyncd' }}
 common_manage_timesync: true
 
 # The CodeReady Builder repository, which EPEL builds against. Named
 # differently by each rebuild, and on plain RHEL it carries the architecture.
 # Set to an empty string to leave the repositories alone.
-common_crb_repo: "{{ _common_crb_repo_by_distro[ansible_distribution] | default('crb') }}"
+common_crb_repo: "{{ _common_crb_repo_by_distro[ansible_facts['distribution']] | default('crb') }}"
 _common_crb_repo_by_distro:
-  OracleLinux: "ol{{ ansible_distribution_major_version }}_codeready_builder"
-  RedHat: "codeready-builder-for-rhel-{{ ansible_distribution_major_version }}-{{ ansible_architecture }}-rpms"
+  OracleLinux: "ol{{ ansible_facts['distribution_major_version'] }}_codeready_builder"
+  RedHat: "codeready-builder-for-rhel-{{ ansible_facts['distribution_major_version'] }}-{{ ansible_facts['architecture'] }}-rpms"
   Rocky: crb
   AlmaLinux: crb
   CentOS: crb
@@ -52,7 +52,15 @@ _common_crb_repo_by_distro:
 # The package that declares EPEL. Oracle ships its own, the other rebuilds
 # carry Fedora's in their extras repository, and plain RHEL has neither, so
 # there it is fetched by URL. Set to an empty string to leave EPEL alone.
-common_epel_release: "{{ _common_epel_release_by_distro[ansible_distribution] | default('epel-release') }}"
+common_epel_release: "{{ _common_epel_release_by_distro[ansible_facts['distribution']] | default('epel-release') }}"
 _common_epel_release_by_distro:
-  OracleLinux: "oracle-epel-release-el{{ ansible_distribution_major_version }}"
-  RedHat: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm"
+  OracleLinux: "oracle-epel-release-el{{ ansible_facts['distribution_major_version'] }}"
+  RedHat: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_facts['distribution_major_version'] }}.noarch.rpm"
+
+# The repository that package declares. Oracle ships it disabled
+# (`ol9_developer_EPEL`); Fedora's epel-release enables `epel` on its own, and
+# the enable task is then a no-op. Set to an empty string to leave the
+# repositories alone.
+common_epel_repo: "{{ _common_epel_repo_by_distro[ansible_facts['distribution']] | default('epel') }}"
+_common_epel_repo_by_distro:
+  OracleLinux: "ol{{ ansible_facts['distribution_major_version'] }}_developer_EPEL"

@@ -1,7 +1,7 @@
 ---
 # Debian splits the server and the client tools in two packages; EL 9 ships
 # both in nfs-utils.
-nfs_server_packages: "{{ _nfs_server_packages_by_family[ansible_os_family] }}"
+nfs_server_packages: "{{ _nfs_server_packages_by_family[ansible_facts['os_family']] }}"
 _nfs_server_packages_by_family:
   Debian:
     - nfs-kernel-server

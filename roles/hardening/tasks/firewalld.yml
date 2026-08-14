@@ -45,11 +45,56 @@
       {{ not hardening_firewall_enabled | bool
          and (hardening_firewalld_active.stdout | default('') | trim) == 'active' }}
 
+- name: Read firewalld's default zone
+  ansible.builtin.command: firewall-cmd --get-default-zone
+  register: hardening_firewalld_default_zone
+  changed_when: false
+  check_mode: false
+  when: hardening_firewalld_in_charge | bool
+
+- name: Read the firewalld zone of the default interface
+  ansible.builtin.command: >-
+    firewall-cmd --get-zone-of-interface={{ ansible_facts['default_ipv4']['interface'] }}
+  register: hardening_firewalld_iface_zone
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - hardening_firewalld_in_charge | bool
+    - ansible_facts['default_ipv4']['interface'] is defined
+
+- name: Resolve the firewalld zone of the public interface
+  ansible.builtin.set_fact:
+    hardening_firewalld_active_zone: >-
+      {{ hardening_firewalld_zone
+         if hardening_firewalld_zone | length > 0 else
+         (hardening_firewalld_iface_zone.stdout | default('') | trim
+          if (hardening_firewalld_iface_zone.rc | default(1) == 0
+              and (hardening_firewalld_iface_zone.stdout | default('') | trim) | length > 0)
+          else (hardening_firewalld_default_zone.stdout | default('public') | trim)) }}
+  when: hardening_firewalld_in_charge | bool
+
+# PublishPort is a DNAT in PREROUTING, after which the packet is forwarded to
+# the container, not delivered locally. firewalld's default policy drops
+# forwarded traffic, so opening 80/tcp on the input chain (the task below)
+# is not enough: nginx is reachable on the host and nowhere else. Masquerade
+# on the zone of the public interface is what turns forwarding on for that
+# zone, which is also how a container reaches the internet to pull an image.
+- name: Allow forwarded container ports through firewalld
+  ansible.posix.firewalld:
+    masquerade: true
+    zone: "{{ hardening_firewalld_active_zone }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  when: hardening_firewalld_in_charge | bool
+
 # python3-firewall is what the ansible.posix.firewalld module drives; it comes
 # with the daemon, so it is there whenever the daemon is.
 - name: Open the Antares-Web ports in firewalld
   ansible.posix.firewalld:
     port: "{{ item }}/tcp"
+    zone: "{{ hardening_firewalld_active_zone }}"
     state: enabled
     permanent: true
     immediate: true
@@ -59,6 +104,7 @@
 - name: Open the extra UDP ports in firewalld
   ansible.posix.firewalld:
     port: "{{ item }}/udp"
+    zone: "{{ hardening_firewalld_active_zone }}"
     state: enabled
     permanent: true
     immediate: true
@@ -86,6 +132,7 @@
 - name: Keep the SSH ports open in firewalld
   ansible.posix.firewalld:
     port: "{{ item }}/tcp"
+    zone: "{{ hardening_firewalld_active_zone }}"
     state: enabled
     permanent: true
     immediate: true
