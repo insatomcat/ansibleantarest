@@ -1,9 +1,8 @@
 ---
 - name: Install slurmd
-  ansible.builtin.apt:
-    name: slurmd
+  ansible.builtin.package:
+    name: "{{ slurmd_packages }}"
     state: present
-    lock_timeout: "{{ apt_lock_timeout }}"
 
 - name: Create the slurmd spool directory
   ansible.builtin.file:

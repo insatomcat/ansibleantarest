@@ -47,14 +47,17 @@
       tar -czf {{ antares_build_artifacts }}/webapp-dist.tar.gz -C {{ antarest_dir }}/webapp dist
   changed_when: true
 
+# One tarball per solver *and* per build of it: a fleet whose web server runs
+# Debian and whose cluster runs Oracle Linux needs both, and the targets pick
+# theirs by name out of the same cache directory.
 - name: Download the solver tarballs
   ansible.builtin.get_url:
-    url: "{{ antares_solver_base_url }}/v{{ item.version }}/antares-{{ item.version }}-{{ antares_solver_os }}.tar.gz"
-    dest: "{{ antares_build_artifacts }}/antares-{{ item.version }}-{{ antares_solver_os }}.tar.gz"
+    url: "{{ antares_solver_base_url }}/v{{ item.0.version }}/antares-{{ item.0.version }}-{{ item.1 }}.tar.gz"
+    dest: "{{ antares_build_artifacts }}/antares-{{ item.0.version }}-{{ item.1 }}.tar.gz"
     mode: "0644"
-  loop: "{{ antares_solvers }}"
+  loop: "{{ antares_solvers | product(antares_build_solver_os) | list }}"
   loop_control:
-    label: "antares-{{ item.version }}"
+    label: "antares-{{ item.0.version }}-{{ item.1 }}"
   when: antares_build_fetch_solvers | bool
 
 # Recorded for whoever has to answer "what is actually in these archives", which

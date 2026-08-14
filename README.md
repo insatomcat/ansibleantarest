@@ -74,7 +74,7 @@ One thing to know when editing these files: settings written **under a host** ov
 
 ## Requirements
 
-- A Debian-family distribution on all target machines (see supported distros below), root access via `sudo`, and Python 3 installed.
+- A Debian-family or RHEL-compatible distribution on all target machines (see supported distros below), root access via `sudo`, and Python 3 installed.
 - The `antares_web` machine needs Internet access (container images, npm and Python packages, solver binaries).
 - The Slurm frontend also downloads solvers from GitHub.
 - A free UID/GID that is identical on all machines for the `antares` account: `9000` by default. The playbook will refuse to continue if the UID/GID are already taken.
@@ -82,7 +82,7 @@ One thing to know when editing these files: settings written **under a host** ov
 
 ### Supported distributions
 
-All installs use `apt`, so supported systems are Debian/Ubuntu family. Package names, systemd unit names and `/etc/slurm` layout are the same across the supported releases below; podman is provided by the distribution (Debian 13 ships podman 5.x, Ubuntu 24.04 ships 4.9, quadlet is present since 4.4), so no special adaptation is required:
+Two families are supported: Debian (Debian and Ubuntu, `apt`) and RedHat (Oracle Linux and the other RHEL rebuilds, `dnf`). Every install goes through `ansible.builtin.package`, and everything that actually differs between the two (package names, service names, repositories) is resolved from `ansible_os_family` in one place per role, so no task exists twice.
 
 ```yaml
 supported_distros:      # group_vars/all.yml
@@ -90,13 +90,33 @@ supported_distros:      # group_vars/all.yml
   - "Debian 13"
   - "Ubuntu 22"
   - "Ubuntu 24"
+  - "OracleLinux 9"
+  - "RedHat 9"
+  - "Rocky 9"
+  - "AlmaLinux 9"
+  - "CentOS 9"
 ```
 
-The playbook aborts on unsupported distros and prints the variable to extend. Set `distro_check_enabled: false` to disable the check entirely.
+The playbook aborts on unsupported distros and prints the variable to extend. A rebuild of a supported major that is not in the list is usually fine to add. Set `distro_check_enabled: false` to disable the check entirely.
 
-Important cluster note: use one distribution per cluster. Packaged Slurm versions differ (e.g., 23.11 on Ubuntu 24.04 vs 24.11 on Debian 13) and the daemons `slurmctld` / `slurmd` / `slurmdbd` interoperate only across certain major versions. The generated `slurm.conf` works for both, but do not mix a front-end on Debian 13 with compute nodes on Ubuntu 24.04 in the same cluster. The `antares_web` machine is unaffected: it talks to the Slurm frontend only via SSH.
+Podman comes from the distribution on both families and is recent enough everywhere: quadlet has been part of podman since 4.4, Debian 13 ships 5.x, Ubuntu 24.04 ships 4.9, and EL 9 has been on 4.4 or later since 9.2. The playbook checks the version and stops rather than writing units nothing would generate.
 
-The apt lock is tolerated up to `apt_lock_timeout` seconds (default 300) because Ubuntu images often run `apt-daily` and `unattended-upgrades` on boot.
+Important cluster note: use one distribution per cluster. Packaged Slurm versions differ (23.11 on Ubuntu 24.04, 24.11 on Debian 13, whatever OpenHPC currently ships on EL 9) and the daemons `slurmctld` / `slurmd` / `slurmdbd` interoperate only across certain major versions. The generated `slurm.conf` works for all of them, but do not mix a front-end on Debian 13 with compute nodes on Oracle Linux 9 in the same cluster. The `antares_web` machine is unaffected: it talks to the Slurm frontend only via SSH, so a Debian web server driving an Oracle Linux cluster is fine.
+
+On the Debian family the dpkg lock is tolerated up to `apt_lock_timeout` seconds (default 300), because Ubuntu images often run `apt-daily` and `unattended-upgrades` on boot. Rather than being passed to every install, this is written to `/etc/apt/apt.conf.d/80-antares-lock-timeout`, so it also covers the apt commands the playbook does not run itself.
+
+### What a RHEL-compatible target needs on top
+
+Everything below is done by the playbook. It is listed because it changes the machine in ways worth knowing about.
+
+| Topic | What happens |
+|---|---|
+| **Repositories** | The `common` role installs `dnf-plugins-core`, enables **CRB** (`ol9_codeready_builder` on Oracle Linux, `crb` on the other rebuilds) and installs **EPEL**. Both are needed: `htop`, `fail2ban` and `certbot` come from EPEL, which is built against CRB. |
+| **Slurm** | No EL 9 repository ships Slurm, neither the base repositories nor EPEL. It comes from **OpenHPC 3** instead (`slurm_repo: openhpc`, release rpm in `slurm_openhpc_release`). Package names carry an `-ohpc` suffix; `/etc/slurm`, the systemd units and the `slurm` account are where they are everywhere else. Set `slurm_repo: distro` if you install Slurm yourself. |
+| **Solver binaries** | The Ubuntu 22.04 build of Antares Simulator is linked against glibc 2.35 and does not start on EL 9, which has 2.34. `antares_solver_os` therefore follows the family and picks the project's **Oracle Linux 8** build there. |
+| **SELinux** | Left enforcing. Container bind mounts carry the `z` relabelling flag (`container_volume_opts`), the booleans `nfs_export_all_rw` and `use_nfs_home_dirs` are set on the NFS server and the clients, and the Let's Encrypt tree gets a `semanage fcontext` entry so that a renewal does not silently produce a certificate the nginx container cannot read. |
+| **firewalld** | Enabled out of the box, and it would drop the interface. See "Hardening" below: the role either takes it out of the way or hands it the ports. |
+| **Unattended updates** | `dnf-automatic` with `upgrade_type = security` instead of `unattended-upgrades`, with the same policy: security updates only, no automatic reboot. |
 
 ### The antares account: choosing UID/GID
 
@@ -141,7 +161,8 @@ The `hardening` role reports any of these still holding the shipped value, and r
 ### Solvers
 
 ```yaml
-antares_solver_os: "Ubuntu-22.04"
+# Ubuntu-22.04 on the Debian family, OracleServer-8.10 on the RedHat one
+antares_solver_os: "{{ 'OracleServer-8.10' if ansible_os_family == 'RedHat' else 'Ubuntu-22.04' }}"
 antares_solvers:
   - version: "8.8.17"      # Antares_Simulator release tag
     study_version: "8.8"   # major.minor string used by Antares-Web
@@ -152,6 +173,8 @@ antares_solvers:
 ```
 
 Executable names changed across generations: `antares-<X>.<Y>-solver` for the 8.x line and `antares-solver` from 9.x onward. Each entry in this list is installed on both the web machine (local launcher) and in the shared `/home` (Slurm launcher), and populates the binaries table in `config.prod.yaml` and the `case` in `launchAntares.sh`.
+
+`antares_solver_os` selects which build of each release is downloaded, and it is not cosmetic: the Ubuntu 22.04 build needs glibc 2.35 and does not start on EL 9, which has 2.34, while the project's Oracle Linux 8 build (glibc 2.28) runs on every rebuild. The default follows the family of each target, so a Debian web server driving an Oracle Linux cluster installs the right binary on both sides.
 
 ### Antares-Web
 
@@ -207,6 +230,15 @@ slurmdbd_innodb_buffer_pool_size: "1G"
 Compute node characteristics (`CPUs`, `SocketsPerBoard`, `CoresPerSocket`, `ThreadsPerCore`, `RealMemory`) are derived from Ansible facts and can be overridden per-host in the inventory using `slurm_node_cpus`, `slurm_node_sockets`, `slurm_node_cores_per_socket`, `slurm_node_threads_per_core` and `slurm_node_real_memory`.
 
 The maximum cores selectable in the job submission UI is capped to the smallest compute node, otherwise jobs requesting more cores than any node has will remain pending forever.
+
+On a RHEL-compatible cluster, Slurm comes from OpenHPC because no EL 9 repository ships it:
+
+```yaml
+slurm_repo: openhpc          # `distro` on the Debian family
+slurm_openhpc_release: "http://repos.openhpc.community/OpenHPC/3/EL_9/x86_64/ohpc-release-3-1.el9.x86_64.rpm"
+```
+
+The release rpm is installed with the GPG check disabled, since it is what brings in the key its own repositories are signed with; everything pulled from them afterwards is verified normally. Package names then carry an `-ohpc` suffix (`slurm-ohpc`, `slurm-slurmctld-ohpc`, `slurm-slurmd-ohpc`, `slurm-slurmdbd-ohpc`) and nothing else moves: the daemons, `/etc/slurm`, the `slurm` account and the generated `slurm.conf` are the same as on Debian. Set `slurm_repo: distro` to install Slurm yourself and only let the playbook configure it.
 
 ## Antares-Web server directory layout
 
@@ -317,7 +349,7 @@ hardening_unattended_upgrades: true
 
 Everything is on except the firewall, which duplicates what a cloud provider's security group already does, and two filters that have to agree is one more place for a rule to go missing. Turn it on for a machine with nothing in front of it, and in particular for a Slurm front-end on a network you do not control: its NFS export uses `no_root_squash`.
 
-**Firewall.** An nftables input chain with a drop policy, in a table of its own (`inet antares_fw`) loaded by `antares-firewall.service`. `/etc/nftables.conf` is left alone: what Debian ships in it starts with `flush ruleset`, which would take the rules netavark writes for the containers down with it.
+**Firewall.** An nftables input chain with a drop policy, in a table of its own (`inet antares_fw`) loaded by `antares-firewall.service`. `/etc/nftables.conf` is left alone: what both families ship in it starts with `flush ruleset`, which would take the rules netavark writes for the containers down with it. On a RHEL rebuild, turning this on also disables firewalld, see below.
 
 ```bash
 nft list table inet antares_fw
@@ -330,7 +362,7 @@ Two things this deliberately does not do. It does not filter the `forward` hook,
 
 The peer addresses come from the gathered facts, so a `--limit` run on an expired fact cache would leave them out; the role says which machines it could not resolve rather than silently isolating them.
 
-**fail2ban.** The `sshd` jail, plus a jail on the Antares-Web login form: the API answers 401 on a wrong password and nginx logs the request. Both read the journal (`backend = systemd`) because the Ubuntu images ship no rsyslog at all, so a jail pointed at `/var/log/auth.log` starts dead - which is, incidentally, the state a stock Debian fail2ban is in.
+**fail2ban.** The `sshd` jail, plus a jail on the Antares-Web login form: the API answers 401 on a wrong password and nginx logs the request. Both read the journal (`backend = systemd`) because the Ubuntu images ship no rsyslog at all, so a jail pointed at `/var/log/auth.log` starts dead, which is incidentally the state a stock Debian fail2ban is in. On the RedHat family the packages come from EPEL, which splits them: `fail2ban-server` and `fail2ban-systemd` are installed, deliberately not the `fail2ban` metapackage, which drags in `fail2ban-firewalld` and its `banaction = firewalld`.
 
 ```bash
 fail2ban-client status
@@ -342,7 +374,14 @@ Bans are dropped in the `prerouting` hook at priority `raw`, not in `input` like
 
 **SSH.** A drop-in in `/etc/ssh/sshd_config.d/`: no password authentication, no root password login, `MaxAuthTries 4`, a 30 second grace time, no X11 forwarding. TCP forwarding stays on, since the README reaches adminer through `ssh -L`. Before closing the password, the role checks that the account Ansible connects with has a non-empty `authorized_keys` and stops if it does not, rather than leaving an unreachable machine; set `hardening_ssh_disable_password_auth: false` if the machine authenticates through something else, an SSH certificate authority for instance. The resulting configuration is checked with `sshd -t`, and the drop-in is removed again if sshd refuses it.
 
-**Unattended upgrades.** `unattended-upgrades` enabled on the origins the distribution already restricts to the security pocket, without the automatic reboot: a study can run for hours and a machine that reboots on its own loses it. `/var/run/reboot-required` says when one is due.
+**Unattended upgrades.** On the Debian family, `unattended-upgrades` enabled on the origins the distribution already restricts to the security pocket. On the RedHat family, `dnf-automatic` with `upgrade_type = security` and its timer enabled, which is the same policy with different machinery. Neither reboots on its own: a study can run for hours and a machine that reboots in the middle of one loses it. `/var/run/reboot-required` and `dnf needs-restarting -r` say when one is due.
+
+**firewalld (RedHat family).** The RHEL rebuilds boot with firewalld enabled and a default zone that accepts SSH and nothing else, so a deployment that ignored it would come up with an Antares-Web nobody can reach and a cluster whose NFS mount times out. The role picks one filter rather than leaving two in place:
+
+- with `hardening_firewall_enabled: true`, firewalld is stopped, disabled and **masked**, and the nftables table above is the whole policy. `systemctl unmask firewalld` puts it back;
+- with it `false` (the default), firewalld stays in charge and the role opens in it what the nftables table would have opened: the interface ports on an `antares_web` machine, the SSH ports read from `sshd -T`, and the other machines of the inventory added to the `trusted` zone, which is the counterpart of the `trusted_v4`/`trusted_v6` sets of the ruleset.
+
+Set `hardening_manage_firewalld: false` to be left alone with it.
 
 **Secrets.** The role also reports the secrets below still holding the value this repository ships, admin/admin being a faster way in than any brute force. Set `hardening_fail_on_default_secrets: true` to make that a failure rather than a message.
 
@@ -375,6 +414,14 @@ ansible-playbook site.yml -e antarest_image_source=archive  # many times
 | `manifest.yml` | version, commit, UID, date |
 
 In `archive` mode the target loads images idempotently (no retransfer if present), unpacks the frontend in the checked-out tree where nginx bind-mounts it, and takes solvers from the local cache instead of GitHub. Archives are transported with `rsync`, not the `copy` module, which is unsuitable for hundreds of megabytes.
+
+The solver tarballs are cached for the builder's own family. A mixed fleet, or a Debian builder feeding Oracle Linux targets, wants both builds:
+
+```yaml
+antares_build_solver_os: ["Ubuntu-22.04", "OracleServer-8.10"]
+```
+
+A target that finds no tarball for its family in the cache falls back to downloading it from GitHub, so getting this wrong costs time, not a failure.
 
 Three constraints to know:
 - The builder must share the target architecture. Building amd64 on arm64 requires QEMU emulation which is slow and defeats the benefit.
@@ -455,3 +502,5 @@ Same idea for MariaDB on the Slurm frontend (use `mariadb-dump` and the `slurmdb
 - The Antares-Web login jail counts the 401s nginx logs. A brute force that spreads over many addresses, or one aimed at an endpoint other than the login, is not covered.
 - Migration from a Docker-based version of this playbook: the `slurm_frontend` role stops and removes the old `slurmdb.service` unit and its `docker-compose.yml` but does not touch the docker volume `slurmdb_data`: it contains accounting history. Reusing a live DB requires a `mariadb-dump` from the old volume and restoration into the podman volume `slurmdb-data`. On the web server, data under `/var/antares-web/data` are bind mounts and are reused as-is.
 - The NNI label patch modifies source before the build. The checkout is reset each run (`git force`), so the patch is reapplied every time; a build stamp (`deploy/.frontend-build-stamp`) prevents rebuilding the frontend if nothing changed. Changing `antarest_login_username_label` triggers a rebuild.
+- RHEL-compatible support targets the 9 series. Nothing here is specific to Oracle Linux beyond the names of the CRB and EPEL packages, so Rocky, Alma, CentOS Stream and RHEL itself follow the same path, but Oracle Linux 9 is the one the defaults are written for. EL 8 is not covered: its podman is too old for quadlet.
+- Slurm on EL 9 comes from OpenHPC, a third-party repository. It is the maintained answer there and what the HPC world runs, but it is one more upstream to follow: a major OpenHPC bump can move Slurm by several versions at once, which the "one distribution per cluster" rule above then applies to.

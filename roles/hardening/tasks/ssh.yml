@@ -64,11 +64,12 @@
     quiet: true
   when: hardening_ssh_disable_password_auth | bool
 
-# Ubuntu 24.04 starts sshd from a socket unit: sshd.service is not running, a
+# Ubuntu 24.04 starts sshd from a socket unit: ssh.service is not running, a
 # reload would fail, and there is nothing to reload anyway since every incoming
-# connection spawns a process that reads the configuration afresh.
+# connection spawns a process that reads the configuration afresh. EL 9 ships
+# the same socket unit, disabled, under the other name - hence the variable.
 - name: Check whether sshd is socket activated
-  ansible.builtin.command: systemctl is-active ssh.socket
+  ansible.builtin.command: "systemctl is-active {{ hardening_ssh_service }}.socket"
   register: hardening_ssh_socket
   changed_when: false
   failed_when: false

@@ -12,6 +12,16 @@
 - name: Configure the firewall
   ansible.builtin.include_tasks: firewall.yml
 
+# After our own ruleset rather than before, on purpose: when this is the task
+# that takes firewalld down, the nftables table is already loaded, so the
+# machine goes from one filtering policy to the other instead of spending the
+# length of the previous task with none.
+- name: Settle what to do with firewalld
+  ansible.builtin.include_tasks: firewalld.yml
+  when:
+    - ansible_os_family == 'RedHat'
+    - hardening_manage_firewalld | bool
+
 - name: Configure fail2ban
   ansible.builtin.include_tasks: fail2ban.yml
 

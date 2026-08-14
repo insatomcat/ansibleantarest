@@ -1,0 +1,9 @@
+---
+# nfs-common on the Debian family, nfs-utils on the RedHat one, which ships the
+# server and the client tools together.
+nfs_client_packages: "{{ _nfs_client_packages_by_family[ansible_os_family] }}"
+_nfs_client_packages_by_family:
+  Debian:
+    - nfs-common
+  RedHat:
+    - nfs-utils

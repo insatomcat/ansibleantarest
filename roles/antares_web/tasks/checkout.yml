@@ -1,9 +1,8 @@
 ---
 - name: Install the packages needed to build Antares-Web
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name: "{{ antares_web_packages }}"
     state: present
-    lock_timeout: "{{ apt_lock_timeout }}"
 
 - name: Create the Antares-Web base directory
   ansible.builtin.file:

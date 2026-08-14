@@ -1,0 +1,40 @@
+---
+# Where the Slurm packages come from, on a family whose distribution ships
+# none. Included from main.yml on every Slurm node, before the first install,
+# so that slurm_frontend and slurm_compute find their own packages later.
+#
+# No EL 9 repository packages Slurm: not the base repositories, not EPEL, which
+# dropped it years ago. OpenHPC is the maintained answer, it is what the HPC
+# world runs on EL, and its packages keep /etc/slurm, the systemd unit names
+# and the slurm account exactly where every other distribution puts them. Only
+# the package names change, and those live in defaults/main.yml.
+
+- name: Install the OpenHPC release package
+  ansible.builtin.dnf:
+    name: "{{ slurm_openhpc_release }}"
+    state: present
+    # Same reason as EPEL in the common role: the release package is what
+    # brings in the key its own repositories are signed with, so on the run
+    # that installs it there is nothing to verify against yet. Everything
+    # pulled from those repositories afterwards is checked normally.
+    disable_gpg_check: true
+
+# OpenHPC's own recipe creates this account before installing anything, and so
+# does the slurm-ohpc package. Doing it here as well pins what the daemons run
+# as to slurm_user, which slurm.conf, the log directory and the spool directory
+# all already assume.
+- name: Create the slurm system group
+  ansible.builtin.group:
+    name: "{{ slurm_user }}"
+    system: true
+    state: present
+
+- name: Create the slurm system account
+  ansible.builtin.user:
+    name: "{{ slurm_user }}"
+    group: "{{ slurm_user }}"
+    system: true
+    shell: /sbin/nologin
+    home: "{{ slurm_spool_dir }}"
+    create_home: false
+    state: present

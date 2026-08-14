@@ -1,0 +1,93 @@
+---
+# RedHat family only. See hardening_manage_firewalld in defaults/main.yml for
+# why this exists at all: the rebuilds boot with firewalld enabled and a
+# default zone that accepts SSH and nothing else, so a deployment that left it
+# alone would produce an Antares-Web nobody can reach.
+
+- name: Look for firewalld
+  ansible.builtin.stat:
+    path: /usr/sbin/firewalld
+  register: hardening_firewalld_binary
+
+# ---------------------------------------------------------------------------
+#  Our own nftables ruleset is in charge: firewalld goes away
+# ---------------------------------------------------------------------------
+#
+# Masked, not merely disabled: firewalld is a dependency of a handful of
+# packages that would happily start it again, and a machine whose filtering
+# policy silently gains a second author is a machine nobody can reason about.
+# `systemctl unmask firewalld` puts it back.
+- name: Take firewalld out of the way of the nftables ruleset
+  ansible.builtin.systemd:
+    name: firewalld.service
+    state: stopped
+    enabled: false
+    masked: true
+  when:
+    - hardening_firewall_enabled | bool
+    - hardening_firewalld_binary.stat.exists
+
+# ---------------------------------------------------------------------------
+#  firewalld is in charge: it gets told what to open
+# ---------------------------------------------------------------------------
+
+- name: Check whether firewalld is running
+  ansible.builtin.command: systemctl is-active firewalld.service
+  register: hardening_firewalld_active
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: not hardening_firewall_enabled | bool
+
+- name: Note that firewalld is the one filtering
+  ansible.builtin.set_fact:
+    hardening_firewalld_in_charge: >-
+      {{ not hardening_firewall_enabled | bool
+         and (hardening_firewalld_active.stdout | default('') | trim) == 'active' }}
+
+# python3-firewall is what the ansible.posix.firewalld module drives; it comes
+# with the daemon, so it is there whenever the daemon is.
+- name: Open the Antares-Web ports in firewalld
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ hardening_web_ports + hardening_firewall_extra_tcp_ports }}"
+  when: hardening_firewalld_in_charge | bool
+
+- name: Open the extra UDP ports in firewalld
+  ansible.posix.firewalld:
+    port: "{{ item }}/udp"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ hardening_firewall_extra_udp_ports }}"
+  when: hardening_firewalld_in_charge | bool
+
+# The counterpart of the trusted_v4/trusted_v6 sets of the nftables ruleset:
+# NFS, slurmctld, slurmd, slurmdbd and the SSH submission path all talk between
+# the machines of the inventory, on ports that have no business being open to
+# the world. Trusting the machines rather than the ports is the same trade the
+# nftables table makes.
+- name: Trust the other machines of the deployment in firewalld
+  ansible.posix.firewalld:
+    source: "{{ item }}"
+    zone: "{{ hardening_firewalld_peer_zone }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ hardening_peers_v4 + hardening_peers_v6 }}"
+  when: hardening_firewalld_in_charge | bool
+
+# The SSH ports are read from `sshd -T`, so a daemon moved off 22 is covered
+# here as well; firewalld's default zone only knows about the `ssh` service,
+# which is 22 and nothing else.
+- name: Keep the SSH ports open in firewalld
+  ansible.posix.firewalld:
+    port: "{{ item }}/tcp"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ hardening_ssh_ports | default([]) }}"
+  when: hardening_firewalld_in_charge | bool

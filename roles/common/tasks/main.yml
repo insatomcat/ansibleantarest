@@ -1,25 +1,19 @@
 ---
+# Both of these are tagged `always`: they are what makes any other install of
+# the run work at all, and a run limited to --tags antares_web skips this play
+# otherwise.
 - name: Check the distribution is supported
-  ansible.builtin.assert:
-    that:
-      - ansible_os_family == "Debian"
-      - (ansible_distribution ~ ' ' ~ ansible_distribution_major_version) in supported_distros
-    fail_msg: >-
-      {{ inventory_hostname }} runs {{ ansible_distribution }}
-      {{ ansible_distribution_version }}, which is not in supported_distros
-      ({{ supported_distros | join(', ') }}). Every task installs packages with
-      apt, so only the Debian family can work at all. Add the release to
-      supported_distros to try it anyway, or set distro_check_enabled: false.
-    quiet: true
-  when: distro_check_enabled | bool
+  ansible.builtin.include_tasks: preflight.yml
+  tags: always
+
+- name: Prepare the package manager
+  ansible.builtin.include_tasks: packages.yml
+  tags: always
 
 - name: Install the base packages
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name: "{{ common_packages }}"
     state: present
-    update_cache: true
-    cache_valid_time: 3600
-    lock_timeout: "{{ apt_lock_timeout }}"
 
 # The group and the user task would both fail on a host where the pair is
 # taken, with a message that says nothing about which account is in the way, so
@@ -117,7 +111,7 @@
 
 - name: Enable time synchronisation
   ansible.builtin.systemd:
-    name: systemd-timesyncd
+    name: "{{ common_timesync_service | trim }}"
     enabled: true
     state: started
   when: common_manage_timesync | bool

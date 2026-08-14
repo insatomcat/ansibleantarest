@@ -1,15 +1,11 @@
 ---
 - name: Install munge
-  ansible.builtin.apt:
-    name:
-      - munge
-      - libmunge2
-      - libmunge-dev
+  ansible.builtin.package:
+    name: "{{ munge_packages }}"
     state: present
-    lock_timeout: "{{ apt_lock_timeout }}"
 
-# The distribution package already generates a key at install time; this only
-# kicks in on a host where the key is missing.
+# The Debian package generates a key at install time, the EL one does not, so
+# on the RedHat family this is where the cluster key actually comes from.
 - name: Generate the munge key on the front-end
   ansible.builtin.command:
     cmd: dd if=/dev/urandom bs=1 count=1024 of=/etc/munge/munge.key

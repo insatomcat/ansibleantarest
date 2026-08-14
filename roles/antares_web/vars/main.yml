@@ -16,15 +16,27 @@
 #  Renaming any of the three breaks the stack silently.
 # ===========================================================================
 
+# Every bind mount below is written with its access mode spelled out, `:rw` or
+# `:ro`, and gets container_volume_opts appended to it. That variable is the
+# SELinux relabelling flag (`,z`) on a machine where SELinux is enforcing and
+# an empty string everywhere else, see group_vars/all.yml. Spelling the access
+# mode out is what makes the two composable: podman takes the options as one
+# comma-separated list after the second colon, so there has to be something for
+# the flag to be appended to.
+_antarest_volume_opts: "{{ container_volume_opts | trim }}"
+
 # Mounts every antarest process needs (backend, celery worker). The celery
 # beat is the exception: it only reads the configuration, see its unit.
-antarest_shared_volumes:
-  - "{{ antarest_data_dir }}/workspaces:/workspaces"
-  - "{{ antarest_data_dir }}/tmp:/antarest_tmp_dir"
-  - "{{ antarest_data_dir }}/matrices:/matrixstore"
-  - "{{ antarest_data_dir }}/archives:/studies/archives"
-  - "{{ antarest_data_dir }}/logs:/logs"
-  - "{{ antarest_data_dir }}/blobstore:/blobstore"
+antarest_shared_volumes: >-
+  {{ _antarest_shared_volumes | map('regex_replace', '$', _antarest_volume_opts) | list }}
+
+_antarest_shared_volumes:
+  - "{{ antarest_data_dir }}/workspaces:/workspaces:rw"
+  - "{{ antarest_data_dir }}/tmp:/antarest_tmp_dir:rw"
+  - "{{ antarest_data_dir }}/matrices:/matrixstore:rw"
+  - "{{ antarest_data_dir }}/archives:/studies/archives:rw"
+  - "{{ antarest_data_dir }}/logs:/logs:rw"
+  - "{{ antarest_data_dir }}/blobstore:/blobstore:rw"
   - "{{ antarest_deploy_dir }}/config.prod.yaml:/resources/application.yaml:ro"
 
 # Mounts only the API backend needs: the local launcher workspace, the gunicorn
@@ -32,10 +44,11 @@ antarest_shared_volumes:
 # front-end.
 antarest_backend_volumes: >-
   {{ antarest_shared_volumes
-     + [antarest_data_dir ~ '/local_workspace:/local_workspace',
-        antarest_dir ~ '/resources/deploy/gunicorn.py:/conf/gunicorn.py:ro',
-        antarest_solvers_dir ~ ':/antares_simulator:ro']
-     + ([antarest_ssh_key ~ ':/id_rsa:ro'] if slurm_enabled | bool else []) }}
+     + ([antarest_data_dir ~ '/local_workspace:/local_workspace:rw',
+         antarest_dir ~ '/resources/deploy/gunicorn.py:/conf/gunicorn.py:ro',
+         antarest_solvers_dir ~ ':/antares_simulator:ro']
+        + ([antarest_ssh_key ~ ':/id_rsa:ro'] if slurm_enabled | bool else []))
+       | map('regex_replace', '$', _antarest_volume_opts) | list }}
 
 # Certificate actually served, resolved from the provider. `manual` is the only
 # one where the operator chooses the paths; the other two are managed here.
@@ -52,11 +65,12 @@ antarest_tls_key: >-
 # certbot drops the challenge files, so it is only useful to that provider.
 # Mounted read-only: nothing in the container writes there.
 antarest_tls_volumes: >-
-  {{ (['/etc/letsencrypt:/etc/letsencrypt:ro',
-       antarest_tls_webroot ~ ':' ~ antarest_tls_webroot_container ~ ':ro']
-      if antarest_tls_provider == 'letsencrypt'
-      else ([antarest_tls_cert | dirname, antarest_tls_key | dirname]
-            | unique | map('regex_replace', '^(.*)$', '\1:\1:ro') | list))
+  {{ ((['/etc/letsencrypt:/etc/letsencrypt:ro',
+        antarest_tls_webroot ~ ':' ~ antarest_tls_webroot_container ~ ':ro']
+       if antarest_tls_provider == 'letsencrypt'
+       else ([antarest_tls_cert | dirname, antarest_tls_key | dirname]
+             | unique | map('regex_replace', '^(.*)$', '\1:\1:ro') | list))
+      | map('regex_replace', '$', _antarest_volume_opts) | list)
      if antarest_tls_enabled | bool else [] }}
 
 # With TLS off the project file is mounted unchanged, exactly as before; with
@@ -66,9 +80,10 @@ antarest_nginx_conf_source: >-
      else (antarest_dir ~ '/resources/deploy/nginx.conf') }}
 
 antarest_nginx_volumes: >-
-  {{ [antarest_nginx_conf_source ~ ':/etc/nginx/conf.d/default.conf:ro',
-      antarest_dir ~ '/webapp/dist:/www',
-      antarest_dir ~ '/resources/deploy/web.config.json:/www/config.json:ro']
+  {{ ([antarest_nginx_conf_source ~ ':/etc/nginx/conf.d/default.conf:ro',
+       antarest_dir ~ '/webapp/dist:/www:ro',
+       antarest_dir ~ '/resources/deploy/web.config.json:/www/config.json:ro']
+      | map('regex_replace', '$', _antarest_volume_opts) | list)
      + antarest_tls_volumes }}
 
 # The quadlet units, rendered into /etc/containers/systemd. Order is irrelevant,

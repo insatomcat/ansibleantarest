@@ -11,7 +11,8 @@ PermitRootLogin {{ hardening_ssh_permit_root_login }}
 {% if hardening_ssh_disable_password_auth | bool %}
 
 # Both are needed: with PasswordAuthentication off alone, PAM still offers the
-# password through keyboard-interactive on a stock Debian sshd.
+# password through keyboard-interactive on any sshd built with UsePAM on, which
+# is what both families ship.
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 {% endif %}

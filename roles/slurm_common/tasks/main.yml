@@ -1,9 +1,23 @@
 ---
+- name: Configure the OpenHPC repositories
+  ansible.builtin.include_tasks: repo.yml
+  when: slurm_repo == 'openhpc'
+
 - name: Install the Slurm packages common to every node
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name: "{{ slurm_common_packages }}"
     state: present
-    lock_timeout: "{{ apt_lock_timeout }}"
+
+# Owned by the Slurm packages of both families, so normally a no-op. Named here
+# anyway because the alternative is the slurm.conf template failing at the end
+# of this file with a path error that says nothing about a missing package.
+- name: Create the Slurm configuration directory
+  ansible.builtin.file:
+    path: "{{ slurm_conf_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
 
 - name: Create the Slurm log directory
   ansible.builtin.file:

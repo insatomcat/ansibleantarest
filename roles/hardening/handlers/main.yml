@@ -17,6 +17,6 @@
 # holding the configuration, each connection reads it again.
 - name: Reload sshd
   ansible.builtin.systemd:
-    name: ssh.service
+    name: "{{ hardening_ssh_service }}.service"
     state: reloaded
   when: hardening_ssh_socket.stdout | default('') | trim != 'active'

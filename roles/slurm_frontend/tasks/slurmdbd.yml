@@ -1,9 +1,8 @@
 ---
 - name: Install slurmdbd
-  ansible.builtin.apt:
-    name: slurmdbd
+  ansible.builtin.package:
+    name: "{{ slurmdbd_packages }}"
     state: present
-    lock_timeout: "{{ apt_lock_timeout }}"
 
 - name: Create the accounting database directory
   ansible.builtin.file:

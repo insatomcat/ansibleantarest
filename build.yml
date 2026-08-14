@@ -60,6 +60,19 @@
   # store, which has to exist by then.
   pre_tasks:
 
+    # This play does not run the common role, so nothing else would refresh the
+    # apt lists or enable EPEL, and the podman install below would be the first
+    # thing to notice.
+    - name: Check the builder runs a supported distribution
+      ansible.builtin.include_role:
+        name: common
+        tasks_from: preflight
+
+    - name: Prepare the package manager of the builder
+      ansible.builtin.include_role:
+        name: common
+        tasks_from: packages
+
     - name: Create the build directories
       ansible.builtin.file:
         path: "{{ item }}"

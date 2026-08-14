@@ -1,0 +1,34 @@
+---
+# dnf-automatic is the RedHat equivalent of unattended-upgrades: a timer, a
+# configuration file, and by default a machine that only downloads and reports.
+# The whole configuration is rendered here rather than patched key by key -
+# the file is short, and the shipped one only differs from ours in the three
+# settings that matter (what to install, whether to install it, whether to
+# reboot).
+
+- name: Configure dnf-automatic
+  ansible.builtin.template:
+    src: dnf-automatic.conf.j2
+    dest: /etc/dnf/automatic.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: hardening_dnf_automatic_conf
+
+# The whole point of the file above, and the one thing a stock install does not
+# do: the timer is shipped disabled.
+- name: Enable the periodic security upgrades
+  ansible.builtin.systemd:
+    name: dnf-automatic.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ hardening_dnf_automatic_conf.changed }}"
+
+# dnf-automatic reads this file with configparser, and a malformed one is only
+# reported when the timer fires - hours later, in a journal nobody is reading.
+# Parsing it here with the same library says so now instead.
+- name: Check dnf-automatic can parse its configuration
+  ansible.builtin.command: >-
+    python3 -c "import configparser;
+    configparser.ConfigParser().read('/etc/dnf/automatic.conf')"
+  changed_when: false

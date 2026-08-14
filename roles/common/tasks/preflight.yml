@@ -1,0 +1,19 @@
+---
+# Tagged `always` by its include, so an unsupported machine is named before
+# anything is installed on it, whatever --tags the run was given.
+
+- name: Check the distribution is supported
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family in ['Debian', 'RedHat']
+      - (ansible_distribution ~ ' ' ~ ansible_distribution_major_version) in supported_distros
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_distribution }}
+      {{ ansible_distribution_version }} (family {{ ansible_os_family }}), which
+      is not in supported_distros ({{ supported_distros | join(', ') }}).
+      Packages are installed with apt on the Debian family and dnf on the
+      RedHat one, so no other family can work at all. Add the release to
+      supported_distros to try it anyway - a rebuild of a supported major is
+      usually fine - or set distro_check_enabled: false.
+    quiet: true
+  when: distro_check_enabled | bool
