@@ -8,7 +8,7 @@ Three types of machines are used:
 
 | Inventory group     | Role |
 |---|---|
-| `antares_web`       | Builds and runs Antares-Web (podman + quadlet) |
+| `antares_web`       | Builds and runs Antares-Web (podman + quadlet, TLS optional) |
 | `slurm_frontend`    | Slurm controller, accounting database, NFS server for `/home` |
 | `slurm_compute`     | Compute nodes, mounting the shared `/home` via NFS |
 
@@ -26,7 +26,7 @@ $EDITOR group_vars/all.yml      # at least set the secrets (see below)
 ansible-playbook site.yml
 ```
 
-The interface will then be available at `http://<antares_web>/` (default credentials: `admin` / `admin`).
+The interface will then be available at `http://<antares_web>/` (default credentials: `admin` / `admin`), or `https://` once TLS is on (see below). The machines are firewalled, fail2banned and their sshd hardened along the way, see "Hardening".
 
 Without a cluster:
 
@@ -98,6 +98,8 @@ Set secrets in `group_vars/all.yml` (or an ansible-vault encrypted file):
 
 The PostgreSQL password is read only at the first initialization of the data volume; changing it later requires clearing `/var/antares-web/data/db`.
 
+The `hardening` role reports any of these still holding the shipped value, and refuses to deploy if `hardening_fail_on_default_secrets` is on. On anything reachable from the internet, also turn TLS on and read "Hardening" below.
+
 ## Main variables
 
 ### Solvers
@@ -122,6 +124,27 @@ antarest_version: "v2.33.0"   # tag, branch or commit of the AntaREST repo
 antarest_http_port: 80
 antarest_force_rebuild: false # force rebuild of frontend + image
 ```
+
+### TLS
+
+There is already an nginx in the stack, so that is the one that terminates TLS: no second reverse proxy to install and no port to move. Switching it on makes the `antares-nginx` container listen on 443 as well and, by default, redirect http to it.
+
+```yaml
+antarest_tls_enabled: true
+antarest_tls_domain: "antares.example.org"
+antarest_tls_provider: letsencrypt   # letsencrypt | selfsigned | manual
+antarest_tls_email: "ops@example.org"
+```
+
+| Provider | What happens |
+|---|---|
+| `letsencrypt` | certbot obtains the certificate over http-01, answered by the stack's own nginx (webroot method). Renewal needs no downtime and the `certbot.timer` shipped with the package handles it. |
+| `selfsigned`  | A certificate generated on the machine, valid ten years. Encrypts the traffic and makes every browser complain. For an internal network, or to test the plumbing without burning ACME rate limits. |
+| `manual`      | A certificate you put on the machine yourself, for instance one issued by a company CA. Point `antarest_tls_certificate` and `antarest_tls_certificate_key` at the full chain and the private key. |
+
+Let's Encrypt needs `antarest_tls_domain` to resolve to this machine and port 80 to be reachable from the internet, since that is where the challenge is fetched (the http-01 challenge has no port to negotiate, hence the playbook refusing to try if `antarest_http_port` is not 80). The first run brings the stack up on plain http, obtains the certificate through it and reloads nginx with TLS on; nothing has to be run twice. Use `antarest_tls_staging: true` while debugging, then remove the certificate (or `certbot renew --force-renewal`) to get a real one, because the playbook only asks for a certificate when there is none.
+
+With TLS off, the `resources/deploy/nginx.conf` of the project is mounted unchanged, exactly as before. With TLS on, a rendered configuration is mounted instead: the same file plus the port 443 server, the redirect and an HSTS header (`antarest_tls_hsts_max_age`, 0 to remove it). The deployment compares the project file to the checksum ours was derived from and says so if upstream changed it.
 
 ### Login label for the username field
 
@@ -160,6 +183,10 @@ The maximum cores selectable in the job submission UI is capped to the smallest 
 
 /etc/containers/systemd/     quadlet container units
 /etc/systemd/system/antares-web.target
+
+/etc/antares-web/tls/        self-signed or hand-copied certificate
+/etc/letsencrypt/            certbot state, when that provider is used
+/var/www/certbot/            ACME challenge webroot, served by nginx
 ```
 
 Configuration and data live outside the git checkout: changing `antarest_version` and re-running the playbook updates the application without touching the data.
@@ -195,6 +222,58 @@ Three container names are significant (they become DNS names on the podman netwo
 
 All images are fully qualified (`docker.io/library/postgres:latest`, `localhost/antarest:latest`): Debian/Ubuntu don't set `unqualified-search-registries`, so short names are not resolved by podman and will be rejected.
 
+## Hardening
+
+A blank VM, a few minutes, and an Antares-Web reachable on the internet with 22 and 80 open is exactly what this playbook makes easy, so the `hardening` role runs right after the base configuration and before anything is deployed. Four independent blocks, each switched on its own:
+
+```yaml
+hardening_enabled: true               # group_vars/all.yml
+hardening_firewall_enabled: false     # off: a cloud VM already has a security group
+hardening_fail2ban_enabled: true
+hardening_ssh_enabled: true
+hardening_unattended_upgrades: true
+```
+
+Everything is on except the firewall, which duplicates what a cloud provider's security group already does, and two filters that have to agree is one more place for a rule to go missing. Turn it on for a machine with nothing in front of it, and in particular for a Slurm front-end on a network you do not control: its NFS export uses `no_root_squash`.
+
+**Firewall.** An nftables input chain with a drop policy, in a table of its own (`inet antares_fw`) loaded by `antares-firewall.service`. `/etc/nftables.conf` is left alone: what Debian ships in it starts with `flush ruleset`, which would take the rules netavark writes for the containers down with it.
+
+```bash
+nft list table inet antares_fw
+systemctl reload antares-firewall     # re-apply after an edit
+```
+
+Open to the world: the ports sshd actually listens on, read from `sshd -T` rather than assumed to be 22 (the inventory of this repository has a machine answering on 2222), and the interface ports on an `antares_web` machine. Open to the other machines of the inventory, on every port: that is what keeps NFS, Slurm and the job submission path working without exposing 2049 or 6817 to the internet, and it is the reason the NFS export with `no_root_squash` on the front-end stops being a hole. Add anything else with `hardening_firewall_extra_tcp_ports` or `hardening_firewall_extra_sources`.
+
+Two things this deliberately does not do. It does not filter the `forward` hook, because a packet aimed at a published container port is DNATed and routed, never traverses `input`, and a forward chain with a drop policy would take every container down, outgoing traffic included: what the containers expose is decided by their `PublishPort`, and the two that are not meant to be public (adminer, the accounting MariaDB) are bound to `127.0.0.1` in their units. And it accepts everything arriving on `podman*` interfaces, because aardvark-dns listens on the bridge address, which belongs to the host: without that rule, container name resolution dies and the backend never finds `postgresql`.
+
+The peer addresses come from the gathered facts, so a `--limit` run on an expired fact cache would leave them out; the role says which machines it could not resolve rather than silently isolating them.
+
+**fail2ban.** The `sshd` jail, plus a jail on the Antares-Web login form: the API answers 401 on a wrong password and nginx logs the request. Both read the journal (`backend = systemd`) because the Ubuntu images ship no rsyslog at all, so a jail pointed at `/var/log/auth.log` starts dead - which is, incidentally, the state a stock Debian fail2ban is in.
+
+```bash
+fail2ban-client status
+fail2ban-client status antares-web-login
+fail2ban-client set antares-web-login unbanip 203.0.113.7
+```
+
+Bans are dropped in the `prerouting` hook at priority `raw`, not in `input` like the stock actions. This is the difference everybody meets with docker and ufw: an input-hook ban is reported by the jail and does nothing at all, since the traffic to a container is DNATed at `nat prerouting` and routed onward. Dropping earlier catches the containers and the host alike. The machines of the inventory are never banned.
+
+**SSH.** A drop-in in `/etc/ssh/sshd_config.d/`: no password authentication, no root password login, `MaxAuthTries 4`, a 30 second grace time, no X11 forwarding. TCP forwarding stays on, since the README reaches adminer through `ssh -L`. Before closing the password, the role checks that the account Ansible connects with has a non-empty `authorized_keys` and stops if it does not, rather than leaving an unreachable machine; set `hardening_ssh_disable_password_auth: false` if the machine authenticates through something else, an SSH certificate authority for instance. The resulting configuration is checked with `sshd -t`, and the drop-in is removed again if sshd refuses it.
+
+**Unattended upgrades.** `unattended-upgrades` enabled on the origins the distribution already restricts to the security pocket, without the automatic reboot: a study can run for hours and a machine that reboots on its own loses it. `/var/run/reboot-required` says when one is due.
+
+**Secrets.** The role also reports the secrets below still holding the value this repository ships, admin/admin being a faster way in than any brute force. Set `hardening_fail_on_default_secrets: true` to make that a failure rather than a message.
+
+The bans do not depend on the firewall: fail2ban writes its own table, so it keeps working with `hardening_firewall_enabled: false`.
+
+Each block can also be flipped for a run, or per host in the inventory:
+
+```bash
+ansible-playbook site.yml -e hardening_firewall_enabled=true     # this run only
+ansible-playbook site.yml -e hardening_enabled=false             # none of it
+```
+
 ## Build once, deploy everywhere
 
 By default (`antarest_image_source: build`) the target clones, builds the frontend with node and produces the image. This is standalone but requires Internet and about 4 GB of heap on the build machine. For repeated destroy/recreate cycles or multiple servers this is wasteful because the build uses `npm install` (not `npm ci`) so builds at different times may produce different artifacts.
@@ -229,6 +308,7 @@ Without a registry, each new version means `N × size` copies with no layer dedu
 ansible-playbook site.yml --tags antares_web     # redeploy application
 ansible-playbook site.yml --tags slurm           # cluster only
 ansible-playbook site.yml --tags solver          # (re)install solvers
+ansible-playbook site.yml --tags hardening       # firewall, fail2ban, sshd, updates
 ansible-playbook site.yml -e antarest_force_rebuild=true   # full rebuild
 ```
 
@@ -289,7 +369,7 @@ Same idea for MariaDB on the Slurm frontend (use `mariadb-dump` and the `slurmdb
 ## Known limitations
 
 - Xpansion is not covered: the launcher script derives from `launchAntares_v1.1.2.sh`, which expects an R environment and environment modules that are not provided here.
-- No firewall is configured. Machines are assumed to be on a trusted network, as in the reference procedure.
-- No TLS in front of the web UI. Put a reverse proxy with TLS if you expose the interface beyond your internal network.
+- The firewall filters the host only, not the `forward` hook the container traffic goes through: a port published by a unit is reachable, whatever the firewall says. See "Hardening" for why, and check the `PublishPort` lines before publishing something new.
+- The Antares-Web login jail counts the 401s nginx logs. A brute force that spreads over many addresses, or one aimed at an endpoint other than the login, is not covered.
 - Migration from a Docker-based version of this playbook: the `slurm_frontend` role stops and removes the old `slurmdb.service` unit and its `docker-compose.yml` but does not touch the docker volume `slurmdb_data`: it contains accounting history. Reusing a live DB requires a `mariadb-dump` from the old volume and restoration into the podman volume `slurmdb-data`. On the web server, data under `/var/antares-web/data` are bind mounts and are reused as-is.
 - The NNI label patch modifies source before the build. The checkout is reset each run (`git force`), so the patch is reapplied every time; a build stamp (`deploy/.frontend-build-stamp`) prevents rebuilding the frontend if nothing changed. Changing `antarest_login_username_label` triggers a rebuild.

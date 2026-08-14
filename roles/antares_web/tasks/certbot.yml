@@ -1,0 +1,88 @@
+---
+# Runs after the stack is up, because the http-01 challenge is answered by the
+# very nginx the stack runs: certbot drops a file under the webroot, the ACME
+# server fetches http://{{ antarest_tls_domain }}/.well-known/acme-challenge/...
+# and only then is there a certificate for nginx to serve.
+#
+# This is also why the webroot method is used rather than --standalone: renewal
+# needs no free port 80 and therefore no downtime, and the timer shipped by the
+# certbot package can do it unattended.
+
+- name: Install certbot
+  ansible.builtin.apt:
+    name: "{{ antarest_certbot_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: "{{ apt_lock_timeout }}"
+
+# The package ships certbot.timer, which runs `certbot -q renew` twice a day
+# and does nothing until a certificate is within 30 days of expiry.
+- name: Enable the renewal timer
+  ansible.builtin.systemd:
+    name: certbot.timer
+    enabled: true
+    state: started
+
+- name: Create the renewal hook directory
+  ansible.builtin.file:
+    path: /etc/letsencrypt/renewal-hooks/deploy
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# A renewed certificate is a new file on disk and nothing more: nginx keeps
+# serving the one it read at startup until it is told otherwise.
+- name: Deploy the hook reloading nginx after a renewal
+  ansible.builtin.template:
+    src: certbot-reload-nginx.sh.j2
+    dest: /etc/letsencrypt/renewal-hooks/deploy/10-reload-antares-nginx.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Check the ACME challenge is served
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ antarest_http_port }}/.well-known/acme-challenge/ping"
+    status_code: [404]
+  changed_when: false
+  when: not antarest_tls_active | bool
+
+# `creates` is what keeps this idempotent, and it also keeps a re-run of the
+# playbook from counting against the Let's Encrypt rate limits (50 certificates
+# per domain and week, 5 duplicates): once the certificate is on disk, renewing
+# it is the timer's job.
+- name: Obtain the certificate
+  ansible.builtin.command:
+    cmd: >-
+      certbot certonly --webroot
+      --webroot-path {{ antarest_tls_webroot }}
+      --domain {{ antarest_tls_domain }}
+      --cert-name {{ antarest_tls_domain }}
+      --email {{ antarest_tls_email }}
+      --agree-tos --non-interactive --keep-until-expiring
+      {{ '--staging' if antarest_tls_staging | bool else '' }}
+    creates: "{{ antarest_tls_cert }}"
+  register: antarest_certbot
+
+- name: Turn TLS on now that the certificate exists
+  ansible.builtin.set_fact:
+    antarest_tls_active: true
+  when: antarest_certbot is changed
+
+# Re-renders the configuration (the port 443 server block appears) and the
+# quadlet unit (port 443 gets published), then the handler restarts the stack.
+- name: Enable TLS in nginx
+  ansible.builtin.include_tasks: nginx.yml
+  when: antarest_certbot is changed
+
+- name: Apply the pending restarts now
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the https port to answer
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ antarest_https_port }}"
+    timeout: 120
+  when: antarest_certbot is changed

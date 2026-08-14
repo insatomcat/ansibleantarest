@@ -1,0 +1,109 @@
+---
+# Port 22 open on the internet means a continuous stream of password attempts.
+# fail2ban slows them down; sshd not taking passwords at all is what makes them
+# pointless.
+
+- name: Read the main sshd configuration
+  ansible.builtin.slurp:
+    src: /etc/ssh/sshd_config
+  register: hardening_sshd_main
+
+# Everything here is written as a drop-in rather than into sshd_config, so that
+# a distribution upgrade can keep its own file. That only works if sshd_config
+# includes the directory, which every release in supported_distros does, but a
+# machine carrying a config file from an older one may not.
+- name: Check sshd reads its drop-in directory
+  ansible.builtin.assert:
+    that:
+      - hardening_sshd_main.content | b64decode
+        is search('(?m)^\s*Include\s+/etc/ssh/sshd_config\.d/')
+    fail_msg: >-
+      /etc/ssh/sshd_config on {{ inventory_hostname }} does not include
+      /etc/ssh/sshd_config.d/*.conf, so {{ hardening_ssh_config_file }} would be
+      written and never read. Add "Include /etc/ssh/sshd_config.d/*.conf" as the
+      first line of sshd_config (that is where the distribution puts it, and the
+      first setting seen wins in sshd), or set hardening_ssh_enabled to false.
+    quiet: true
+
+# ---------------------------------------------------------------------------
+#  Before closing the password door, check there is a key in the lock
+# ---------------------------------------------------------------------------
+- name: Identify the account Ansible connects with
+  ansible.builtin.command: id -un
+  become: false
+  changed_when: false
+  check_mode: false
+  register: hardening_login_user
+  when: hardening_ssh_disable_password_auth | bool
+
+- name: Locate the home directory of that account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ hardening_login_user.stdout | trim }}"
+  when: hardening_ssh_disable_password_auth | bool
+
+- name: Look for its authorized_keys
+  ansible.builtin.stat:
+    path: >-
+      {{ ansible_facts.getent_passwd[hardening_login_user.stdout | trim][4] }}/.ssh/authorized_keys
+  register: hardening_authorized_keys
+  when: hardening_ssh_disable_password_auth | bool
+
+- name: Check a key is in place before refusing passwords
+  ansible.builtin.assert:
+    that:
+      - hardening_authorized_keys.stat.exists
+      - hardening_authorized_keys.stat.size > 0
+    fail_msg: >-
+      {{ hardening_login_user.stdout | trim }} has no authorized_keys on
+      {{ inventory_hostname }}, so turning PasswordAuthentication off would
+      leave nobody able to log in. Install your public key first
+      (ssh-copy-id), or set hardening_ssh_disable_password_auth to false.
+      Set it to false as well if this machine authenticates through something
+      else, an SSH certificate authority for instance.
+    quiet: true
+  when: hardening_ssh_disable_password_auth | bool
+
+# Ubuntu 24.04 starts sshd from a socket unit: sshd.service is not running, a
+# reload would fail, and there is nothing to reload anyway since every incoming
+# connection spawns a process that reads the configuration afresh.
+- name: Check whether sshd is socket activated
+  ansible.builtin.command: systemctl is-active ssh.socket
+  register: hardening_ssh_socket
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Deploy the sshd hardening
+  ansible.builtin.template:
+    src: sshd-hardening.conf.j2
+    dest: "{{ hardening_ssh_config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: hardening_sshd_dropin
+  notify: Reload sshd
+
+# `sshd -t` parses the whole configuration, drop-in included. Checking it here
+# rather than letting the reload fail matters: the drop-in is removed again on
+# a bad configuration, so the machine is left exactly as it was found instead of
+# with a file that would break the next restart, days later, for someone else.
+- name: Check the resulting sshd configuration is valid
+  ansible.builtin.command: sshd -t
+  register: hardening_sshd_check
+  changed_when: false
+  failed_when: false
+
+- name: Remove the drop-in that sshd refused
+  ansible.builtin.file:
+    path: "{{ hardening_ssh_config_file }}"
+    state: absent
+  when: hardening_sshd_check.rc != 0
+
+- name: Report the sshd configuration error
+  ansible.builtin.fail:
+    msg: >-
+      sshd refused the configuration on {{ inventory_hostname }}, so
+      {{ hardening_ssh_config_file }} was removed and nothing changed:
+      {{ hardening_sshd_check.stderr | default('') | trim }}
+  when: hardening_sshd_check.rc != 0

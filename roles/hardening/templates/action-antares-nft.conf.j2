@@ -1,0 +1,59 @@
+{{ ansible_managed | comment }}
+#
+# Why not the stock `nftables` or `iptables-multiport` action:
+#
+# both filter in the input hook, and a packet aimed at a published container
+# port never gets there. podman DNATs it in the nat prerouting hook and the
+# kernel then routes it to the container, so it traverses forward, not input.
+# The consequence is the one everybody meets with docker and ufw: the jail
+# reports a ban, the banned address keeps reaching the application.
+#
+# So this action filters in the prerouting hook at priority -300 (raw), which
+# comes before the DNAT at -100 and before conntrack at -200. A banned address
+# is dropped for the containers and for the host alike, and its established
+# connections go with it.
+#
+# The table is shared by every jail using this action. Sets are created with
+# `add`, which is a no-op when they already exist, so a second jail starting
+# does not flush the bans of the first one. Stopping fail2ban deletes the
+# table, which lifts every ban - the intuitive behaviour, and fail2ban restores
+# what is still current from its own database on the next start.
+
+[Definition]
+
+actionstart = nft add table inet <nft_table>
+              nft add set inet <nft_table> <nft_set_v4> '{ type ipv4_addr; flags interval; }'
+              nft add set inet <nft_table> <nft_set_v6> '{ type ipv6_addr; flags interval; }'
+              nft add chain inet <nft_table> <nft_chain> '{ type filter hook prerouting priority -300; policy accept; }'
+              nft flush chain inet <nft_table> <nft_chain>
+              nft add rule inet <nft_table> <nft_chain> ip saddr @<nft_set_v4> drop
+              nft add rule inet <nft_table> <nft_chain> ip6 saddr @<nft_set_v6> drop
+
+actionstop = nft delete table inet <nft_table> 2>/dev/null || true
+
+actioncheck = nft list chain inet <nft_table> <nft_chain> > /dev/null
+
+# The family is worked out from the address rather than from fail2ban's own
+# <family> tag, so that the action does not depend on which of the two spellings
+# the installed version uses.
+actionban = if echo '<ip>' | grep -q ':'; then
+                nft add element inet <nft_table> <nft_set_v6> '{ <ip> }';
+            else
+                nft add element inet <nft_table> <nft_set_v4> '{ <ip> }';
+            fi
+
+actionunban = if echo '<ip>' | grep -q ':'; then
+                  nft delete element inet <nft_table> <nft_set_v6> '{ <ip> }';
+              else
+                  nft delete element inet <nft_table> <nft_set_v4> '{ <ip> }';
+              fi
+
+actionflush = nft flush set inet <nft_table> <nft_set_v4>
+              nft flush set inet <nft_table> <nft_set_v6>
+
+[Init]
+
+nft_table = {{ hardening_fail2ban_nft_table }}
+nft_chain = prerouting
+nft_set_v4 = banned-v4
+nft_set_v6 = banned-v6

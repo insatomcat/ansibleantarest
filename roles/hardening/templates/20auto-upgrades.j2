@@ -1,0 +1,8 @@
+{{ ansible_managed | comment('c') }}
+//
+// Read by the apt-daily and apt-daily-upgrade timers: the first refreshes the
+// package lists, the second runs unattended-upgrade against them. Both are
+// zero here on a stock Debian, which is to say switched off.
+
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";

@@ -1,0 +1,28 @@
+{{ ansible_managed | comment }}
+#
+# Modelled on the nftables.service the distribution ships, but loading our own
+# file and deleting only our own table, so that the two can coexist and so that
+# nothing here ever touches what netavark writes for the containers.
+#
+#   systemctl reload {{ hardening_firewall_service }}    # re-apply the file
+#   systemctl stop {{ hardening_firewall_service }}      # drop the table, no filtering
+#   nft list table inet {{ hardening_firewall_table }}   # what is actually loaded
+
+[Unit]
+Description=Antares host firewall (nftables)
+Documentation=man:nft(8)
+Wants=network-pre.target
+Before=network-pre.target
+DefaultDependencies=no
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f {{ hardening_firewall_file }}
+ExecReload=/usr/sbin/nft -f {{ hardening_firewall_file }}
+ExecStop=/usr/sbin/nft delete table inet {{ hardening_firewall_table }}
+
+[Install]
+WantedBy=multi-user.target
