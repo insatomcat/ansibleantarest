@@ -221,8 +221,11 @@ slurm_launch_script: "{{ antares_home }}/launchAntares.sh"
 slurmdbd_enabled: true
 slurmdbd_db_password: "changeme-slurm-acct"
 slurmdbd_dir: /var/slurmdb
+# Pinned to a major, like the Antares-Web images: the slurmdb-data volume holds
+# a MariaDB cluster of one specific major, and moving to the next one is a
+# deliberate dump and restore, not something a re-run should trigger.
 slurmdbd_mariadb_image: "{{ container_registry }}/mariadb:11"
-slurmdbd_adminer_image: "{{ container_registry }}/adminer:latest"
+slurmdbd_adminer_image: "{{ container_registry }}/adminer:5"
 # The reference procedure uses 12G, which does not fit a small front-end VM.
 slurmdbd_innodb_buffer_pool_size: "1G"
 slurmdbd_enable_adminer: false
