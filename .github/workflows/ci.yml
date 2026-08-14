@@ -56,15 +56,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Ansible
         run: |
+          set -euxo pipefail
+          # The runner images already carry ansible-core in a pipx venv under
+          # /opt/pipx, which belongs to root: pipx cannot rebuild it as the
+          # runner user and fails outright. Ours goes in the home directory
+          # instead, which also pins the version to a current ansible-core
+          # rather than to whatever the image happens to ship.
+          export PIPX_HOME="$HOME/.local/pipx"
+          export PIPX_BIN_DIR="$HOME/.local/bin"
           pipx install --force ansible-core
+          # GITHUB_PATH only takes effect in the *next* step, hence both lines.
+          echo "$PIPX_BIN_DIR" >> "$GITHUB_PATH"
+          export PATH="$PIPX_BIN_DIR:$PATH"
           ansible --version
-
-      - name: Install the collections
-        run: ansible-galaxy collection install -r requirements.yml
+          ansible-galaxy collection install -r requirements.yml
 
       - name: Check the playbooks parse
         run: ansible-playbook --syntax-check -i inventory/ci.yml site.yml build.yml
@@ -78,7 +87,7 @@ jobs:
     timeout-minutes: 120
     steps:
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The image build, the podman store and the artefacts together need more
       # than / has free. /mnt is the runner's temp disk, which is where
@@ -95,7 +104,13 @@ jobs:
       - name: Install Ansible
         run: |
           set -euxo pipefail
+          # See the syntax job: /opt/pipx belongs to root and pipx cannot
+          # rebuild the venv the image ships there.
+          export PIPX_HOME="$HOME/.local/pipx"
+          export PIPX_BIN_DIR="$HOME/.local/bin"
           pipx install --force ansible-core
+          echo "$PIPX_BIN_DIR" >> "$GITHUB_PATH"
+          export PATH="$PIPX_BIN_DIR:$PATH"
           ansible --version
           ansible-galaxy collection install -r requirements.yml
 
