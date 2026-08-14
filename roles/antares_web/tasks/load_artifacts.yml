@@ -73,19 +73,29 @@
   changed_when: true
   notify: Restart Antares-Web
 
-- name: Check the Antares-Web image is now present
-  ansible.builtin.command: "{{ container_cmd }} image inspect {{ antarest_image }}"
-  register: antarest_image_after_load
+# Every image the stack needs, not just ours: an archive set produced before a
+# third-party tag was repinned still loads without error, and postgres would
+# then simply be absent. Podman's default pull policy for quadlet units is
+# `missing`, so the unit tries to reach the registry, and on the offline target
+# this mode exists for, the run dies much later in the pg_isready retry loop
+# with an error that never mentions an image.
+- name: Check the images are now present
+  ansible.builtin.command: "{{ container_cmd }} image inspect {{ item }}"
+  loop: "{{ [antarest_image] + antarest_thirdparty_images }}"
+  register: antarest_images_after_load
   changed_when: false
   failed_when: false
 
-- name: Fail when the image did not load
+- name: Fail when an image did not load
   ansible.builtin.assert:
-    that: antarest_image_after_load.rc == 0
+    that: antarest_images_after_load.results | selectattr('rc', 'ne', 0) | list | length == 0
     fail_msg: >-
-      {{ antarest_image }} is still not present after loading
-      antarest-image.tar.gz. The archive was probably built with a different
-      antarest_image name; check manifest.yml in {{ antares_artifacts_dir }}.
+      {{ antarest_images_after_load.results | selectattr('rc', 'ne', 0)
+         | map(attribute='item') | join(', ') }}
+      still absent after loading the archives from {{ antares_artifacts_dir }}.
+      They were built under other names, most likely by a build.yml older than
+      the current image pins; check manifest.yml and re-run
+      `ansible-playbook build.yml`.
     quiet: true
 
 # The web application is a plain directory served by nginx through a bind mount,

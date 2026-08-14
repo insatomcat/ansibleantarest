@@ -90,6 +90,35 @@
   become: false
   run_once: true
 
+# The fetch below overwrites file by file, by name, so an archive whose name
+# changed since the last build survives next to its replacement: repinning
+# postgres from `latest` to a major renames its archive, it does not replace it.
+# load_artifacts.yml ships and loads every *.tar.gz it finds, so a leftover
+# means hundreds of megabytes on the wire and unwanted images on every target.
+# The solver tarballs are spared: they are a version-keyed cache that
+# antares_solver_cache_dir also reads, and antares_build_fetch_solvers may well
+# have been off for this run.
+- name: List what the controller already holds
+  ansible.builtin.find:
+    paths: "{{ antares_artifacts_dir }}"
+    patterns: ["*.tar.gz", "manifest.yml"]
+  register: antares_artifacts_existing
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Drop the artefacts this build did not produce
+  ansible.builtin.file:
+    path: "{{ antares_artifacts_dir }}/{{ item }}"
+    state: absent
+  loop: >-
+    {{ antares_artifacts_existing.files | map(attribute='path') | map('basename') | list
+       | difference(antares_build_produced.files | map(attribute='path') | map('basename') | list)
+       | reject('match', 'antares-[0-9]') | list }}
+  delegate_to: localhost
+  become: false
+  run_once: true
+
 - name: Fetch the artefacts back to the controller
   ansible.builtin.fetch:
     src: "{{ item.path }}"

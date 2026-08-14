@@ -4,12 +4,12 @@
 # reused build tasks run, and role defaults are not visible there.
 
 # Third-party images shipped alongside our own, so that a target with no
-# Internet access can still start the stack. Their names come from the same
-# variables the quadlet units use, so the two can never drift.
-antares_build_thirdparty_images:
-  - "{{ antarest_postgres_image }}"
-  - "{{ antarest_redis_image }}"
-  - "{{ antarest_nginx_image }}"
+# Internet access can still start the stack. This is literally the list the
+# target checks before starting, rather than a copy of it: a copy drifts, and
+# the drift only shows up as a container that cannot pull on an offline machine.
+# It follows that antarest_enable_adminer has to be set where the builder sees
+# it too (group_vars/all.yml), not only on the web host.
+antares_build_thirdparty_images: "{{ antarest_thirdparty_images }}"
 
 # Whether to also save the solver tarballs into the artefact directory.
 antares_build_fetch_solvers: true
