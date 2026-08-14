@@ -20,9 +20,10 @@
 #  on downloading the solvers. Doing that once instead of once per machine is
 #  the difference between a usable destroy-and-replay loop and a coffee break.
 #
-#  The builder must share the architecture of the targets. Building for amd64
-#  from an arm64 machine means QEMU emulation, which is slow enough to defeat
-#  the purpose.
+#  The builder needs nothing installed beforehand: this play installs podman on
+#  it through the same role the deployment uses. It must however share the
+#  architecture of the targets. Building for amd64 from an arm64 machine means
+#  QEMU emulation, which is slow enough to defeat the purpose.
 #
 #  This reuses the very task files the normal deployment uses, so the artefacts
 #  cannot be built by a different recipe than the one they replace.
@@ -55,11 +56,9 @@
     # left alone, so the image still carries the fleet's UID.
     antarest_frontend_build_uid: 0
     antarest_frontend_build_gid: 0
-  tasks:
-
-    - name: Check podman is available on the builder
-      ansible.builtin.command: "{{ container_cmd }} --version"
-      changed_when: false
+  # Before the role below, because it runs `podman info` against the build
+  # store, which has to exist by then.
+  pre_tasks:
 
     - name: Create the build directories
       ansible.builtin.file:
@@ -71,6 +70,14 @@
         - "{{ antares_build_artifacts }}"
         - "{{ antarest_base_dir }}"
       when: item | length > 0
+
+  # The same role the deployment uses, so a blank VM can be a builder without
+  # any manual preparation. It installs podman and checks it is recent enough,
+  # which is all a builder needs: nothing here starts a container from a unit.
+  roles:
+    - podman
+
+  tasks:
 
     - name: Fetch the AntaREST sources
       ansible.builtin.include_role:

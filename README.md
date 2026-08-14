@@ -36,6 +36,42 @@ ansible-playbook site.yml -e slurm_enabled=false
 
 The inventory should then contain only the `antares_web` group.
 
+## Example inventories
+
+`inventory/hosts.yml` is the default (set in `ansible.cfg`) and shows the full three-group layout. Two ready-to-copy inventories cover the simple cases, each carrying the options that are worth setting per machine, commented:
+
+| File | For |
+|---|---|
+| `inventory/antares-web.example.yml` | one VM running Antares-Web, no cluster |
+| `inventory/build.example.yml` | one VM that only builds the artefacts |
+
+Both assume what a fresh Debian/Ubuntu cloud VM gives you: SSH open, an `ubuntu`, `admin` or `debian` account, `sudo` to root. Nothing else has to be installed, podman included.
+
+**Deploy a working Antares-Web.** Edit `ansible_host`, `ansible_user` and the three secrets, then:
+
+```bash
+ansible-playbook -i inventory/antares-web.example.yml site.yml -K
+```
+
+The interface answers on `http://<the machine>/` with `admin` / `admin`. `-K` asks for the sudo password; drop it if the account has `NOPASSWD`.
+
+**Build the artefacts once, on a builder.** Edit `ansible_host`, `ansible_user`, and `antares_build_root` if `/data` is not where the disk space is:
+
+```bash
+ansible-playbook -i inventory/build.example.yml build.yml -K
+```
+
+This produces `./artifacts` on the controller. Deploy it on as many machines as you like without ever building again:
+
+```bash
+ansible-playbook -i inventory/antares-web.example.yml site.yml \
+    -e antarest_image_source=archive -K
+```
+
+The builder and the targets must agree on `antares_uid`/`antares_gid` (baked into the image) and share the same CPU architecture. See "Build once, deploy everywhere" below.
+
+One thing to know when editing these files: settings written **under a host** override `group_vars/all.yml`, while a `vars:` block on a group does *not*, since playbook `group_vars` outrank inventory group vars. That is why everything per-deployment sits on the host in the examples. Anything shared by several machines belongs in `group_vars/all.yml`.
+
 ## Requirements
 
 - A Debian-family distribution on all target machines (see supported distros below), root access via `sudo`, and Python 3 installed.
@@ -328,7 +364,7 @@ ansible-playbook build.yml                                  # once
 ansible-playbook site.yml -e antarest_image_source=archive  # many times
 ```
 
-`build.yml` runs on the `builder` inventory group and reuses the deployment build tasks, so artifacts are produced exactly by the same recipe that the deployment uses. It drops artifacts into `./artifacts` (gitignored):
+`build.yml` runs on the `builder` inventory group (see `inventory/build.example.yml`) and reuses the deployment build tasks, so artifacts are produced exactly by the same recipe that the deployment uses. A builder needs nothing installed beforehand: the play pulls in the same `podman` role the deployment uses. It never starts the stack, so a builder is not an Antares-Web server. It drops artifacts into `./artifacts` (gitignored):
 
 | File | Content |
 |---|---|
