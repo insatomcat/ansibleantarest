@@ -55,8 +55,14 @@ antares_home: "/home/{{ antares_user }}"
 #      containers are labelled and the NFS booleans are set,
 #    - firewalld, which is enabled out of the box and would drop the traffic
 #      this deployment expects: see the hardening section at the bottom,
-#    - Slurm, which no EL 9 repository ships: it comes from OpenHPC, see
+#    - Slurm, which no EL repository ships: it comes from OpenHPC, see
 #      slurm_repo below.
+#
+#  EL 9 and EL 10 are both listed below, and they are not equivalent. The
+#  antares_web machine runs on either. The Slurm roles are EL 9 only: OpenHPC 3
+#  publishes an EL_9 tree and nothing for 10, so a Slurm node on EL 10 is
+#  stopped by the check in roles/slurm_common/tasks/repo.yml rather than left
+#  to fail on a missing slurm-ohpc package.
 #
 #  One caveat, on both families: the Slurm version differs between releases
 #  (23.11 on Ubuntu 24.04, 24.11 on Debian 13, whatever OpenHPC currently
@@ -69,10 +75,15 @@ supported_distros:
   - "Ubuntu 22"
   - "Ubuntu 24"
   - "OracleLinux 9"
+  - "OracleLinux 10"
   - "RedHat 9"
+  - "RedHat 10"
   - "Rocky 9"
+  - "Rocky 10"
   - "AlmaLinux 9"
+  - "AlmaLinux 10"
   - "CentOS 9"
+  - "CentOS 10"
 distro_check_enabled: true
 
 # The Ubuntu images run apt-daily and unattended-upgrades on boot, which holds

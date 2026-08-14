@@ -60,6 +60,11 @@
 # `dnf config-manager` rather than a repo file of our own: the repository is
 # already defined by the distribution, merely disabled, and rewriting its
 # definition would fork it from whatever the next distribution update ships.
+#
+# EL 10 is still dnf 4 (4.20 on Oracle Linux 10.1), so this spelling covers it
+# too. dnf 5, which no supported release ships yet, turned the option into a
+# subcommand: `config-manager setopt <id>.enabled=1`, from the dnf5-plugins
+# package rather than dnf-plugins-core.
 - name: Enable the CodeReady Builder repository
   ansible.builtin.command: "dnf config-manager --set-enabled {{ common_crb_repo }}"
   when:
@@ -81,8 +86,55 @@
     - ansible_facts['os_family'] == 'RedHat'
     - common_epel_release | length > 0
 
-# The list above was taken before that package existed, so it cannot tell
-# whether Oracle left the new repository disabled or Fedora already enabled it.
+# common_epel_repo is a pattern, and this is the machine's own list of ids to
+# match it against: `ol9_developer_EPEL` on EL 9, `ol10_u1_developer_EPEL` on
+# Oracle Linux 10.1, `epel` on the other rebuilds. --all rather than --enabled
+# because the whole point is that Oracle ships it disabled.
+- name: List every repository the machine defines
+  ansible.builtin.command: dnf repolist --all
+  register: common_dnf_repolist_all
+  changed_when: false
+  check_mode: false
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - common_epel_repo | length > 0
+    - common_epel_release | length > 0
+
+- name: Read the id of the EPEL repository from that list
+  ansible.builtin.set_fact:
+    common_epel_repo_ids: >-
+      {{ common_dnf_repolist_all.stdout
+         | regex_findall('(?m)^(' ~ common_epel_repo ~ ')\s') }}
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - common_epel_repo | length > 0
+    - common_epel_release | length > 0
+
+# Enabling a repository that does not exist is not an error for dnf, so without
+# this the run would carry on and fail much later, on packages that EPEL was
+# supposed to provide. Skipped under --check, where the release package that
+# defines the repository was not really installed a few tasks ago.
+- name: Check that EPEL was found, and only once
+  ansible.builtin.assert:
+    that: common_epel_repo_ids | default([]) | length == 1
+    fail_msg: >-
+      `dnf repolist --all` on {{ inventory_hostname }} lists
+      {{ common_epel_repo_ids | default([]) | length }} repositories matching
+      common_epel_repo ({{ common_epel_repo }}):
+      {{ common_epel_repo_ids | default([]) | join(', ') | default('none', true) }}.
+      EPEL is where htop, fail2ban and certbot come from. Run `dnf repolist
+      --all` there and set common_epel_repo to the exact id, or to an empty
+      string to leave the repositories alone and provide those packages
+      yourself.
+    quiet: true
+  when:
+    - ansible_facts['os_family'] == 'RedHat'
+    - common_epel_repo | length > 0
+    - common_epel_release | length > 0
+    - not ansible_check_mode
+
+# The list taken before the release package was installed cannot tell whether
+# Oracle left the new repository disabled or Fedora already enabled it.
 - name: List the repositories currently enabled
   ansible.builtin.command: dnf repolist --enabled
   register: common_dnf_repolist
@@ -97,10 +149,11 @@
 # name is already in the enabled list. Same config-manager as CRB: the
 # definition is the distribution's, we only flip the flag.
 - name: Enable the EPEL repository
-  ansible.builtin.command: "dnf config-manager --set-enabled {{ common_epel_repo }}"
+  ansible.builtin.command: "dnf config-manager --set-enabled {{ common_epel_repo_ids | first }}"
   when:
     - ansible_facts['os_family'] == 'RedHat'
     - common_epel_repo | length > 0
     - common_epel_release | length > 0
-    - common_epel_repo not in common_dnf_repolist.stdout
+    - common_epel_repo_ids | default([]) | length == 1
+    - common_epel_repo_ids | first not in common_dnf_repolist.stdout
   changed_when: true
