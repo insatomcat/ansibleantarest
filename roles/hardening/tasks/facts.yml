@@ -64,13 +64,15 @@
            | map(attribute='ansible_facts.all_ipv4_addresses', default=[]) | list | flatten
            if hardening_firewall_trust_inventory | bool else [])
           + (hardening_firewall_extra_sources | reject('search', ':') | list))
-         | reject('match', '^127\.') | unique | sort }}
+         | reject('match', '^127\.')
+         | reject('match', hardening_peer_exclude_pattern) | unique | sort }}
     hardening_peers_v6: >-
       {{ ((groups['all'] | default([]) | map('extract', hostvars)
            | map(attribute='ansible_facts.all_ipv6_addresses', default=[]) | list | flatten
            if hardening_firewall_trust_inventory | bool else [])
           + (hardening_firewall_extra_sources | select('search', ':') | list))
-         | reject('match', '^(::1$|fe80:)') | unique | sort }}
+         | reject('match', '^(::1$|fe80:)')
+         | reject('match', hardening_peer_exclude_pattern) | unique | sort }}
 
 # A machine of the inventory that contributed no address is a machine the
 # firewall will treat as a stranger, which is how a --limit run on a stale fact
