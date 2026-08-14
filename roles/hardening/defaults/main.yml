@@ -67,6 +67,31 @@ hardening_firewall_extra_sources: []
 # 2049 or 6817 to the internet.
 hardening_firewall_trust_inventory: true
 
+# An address matching this belongs to a container bridge on one of the
+# machines rather than to a machine, and is left out of both the trusted set
+# and the fail2ban ignore list. 10.88 is podman's default network, 10.89 is
+# what netavark hands to named networks (the pair podman_firewalld_trusted_
+# sources already names), 172.17 is docker0.
+#
+# Not cosmetic. all_ipv4_addresses only reports a bridge once it exists, which
+# is from the second deployment on, so leaving those addresses in makes the
+# jails and the nftables ruleset change on a run that changed nothing, and
+# reloads fail2ban and the firewall with them. The trusted set does not need
+# them either: the ruleset accepts iifname "podman*" wholesale, and traffic
+# from a container reaches the host across that bridge, not from another
+# machine.
+#
+# Filtered by address rather than by interface name, which would be the exact
+# statement of the intent, because the addresses are read from
+# all_ipv4_addresses of every host in the inventory: naming interfaces would
+# mean walking each host's per-interface facts, and a host outside a --limit
+# run has none, which is how a compute node silently drops out of the trusted
+# set and loses its NFS mount.
+#
+# Set to '^$' to keep every address: no address is the empty string, so
+# nothing is rejected.
+hardening_peer_exclude_pattern: '^(10\.88\.|10\.89\.|172\.17\.)'
+
 # Answer pings, and let path MTU discovery work. Blocking icmp is folklore that
 # costs more than it buys; icmpv6 is accepted whatever this says, since
 # neighbour discovery is how IPv6 works at all.
