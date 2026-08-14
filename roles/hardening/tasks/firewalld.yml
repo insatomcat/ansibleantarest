@@ -1,140 +1,27 @@
 ---
-# RedHat family only. See hardening_manage_firewalld in defaults/main.yml for
-# why this exists at all: the rebuilds boot with firewalld enabled and a
-# default zone that accepts SSH and nothing else, so a deployment that left it
-# alone would produce an Antares-Web nobody can reach.
+# RedHat family only. See hardening_manage_firewalld in defaults/main.yml.
+#
+# Debian and Ubuntu ship no host filter. Oracle Linux and the other rebuilds
+# boot with firewalld enabled, SSH only. `hardening_firewall_enabled: false`
+# therefore cannot mean "leave the machine as it is": on a rebuild that is
+# already a filter, the one the cloud security group was supposed to be
+# enough without. Masking firewalld makes the default mean the same thing
+# on both families: no host firewall, the security group (or the nftables
+# table, when the knob is on) is the whole policy.
+#
+# Masked, not merely disabled: firewalld is a dependency of a handful of
+# packages that would happily start it again. `systemctl unmask firewalld`
+# puts it back. Set hardening_manage_firewalld: false to not touch it at all.
 
 - name: Look for firewalld
   ansible.builtin.stat:
     path: /usr/sbin/firewalld
   register: hardening_firewalld_binary
 
-# ---------------------------------------------------------------------------
-#  Our own nftables ruleset is in charge: firewalld goes away
-# ---------------------------------------------------------------------------
-#
-# Masked, not merely disabled: firewalld is a dependency of a handful of
-# packages that would happily start it again, and a machine whose filtering
-# policy silently gains a second author is a machine nobody can reason about.
-# `systemctl unmask firewalld` puts it back.
-- name: Take firewalld out of the way of the nftables ruleset
+- name: Take firewalld out of the way
   ansible.builtin.systemd:
     name: firewalld.service
     state: stopped
     enabled: false
     masked: true
-  when:
-    - hardening_firewall_enabled | bool
-    - hardening_firewalld_binary.stat.exists
-
-# ---------------------------------------------------------------------------
-#  firewalld is in charge: it gets told what to open
-# ---------------------------------------------------------------------------
-
-- name: Check whether firewalld is running
-  ansible.builtin.command: systemctl is-active firewalld.service
-  register: hardening_firewalld_active
-  changed_when: false
-  failed_when: false
-  check_mode: false
-  when: not hardening_firewall_enabled | bool
-
-- name: Note that firewalld is the one filtering
-  ansible.builtin.set_fact:
-    hardening_firewalld_in_charge: >-
-      {{ not hardening_firewall_enabled | bool
-         and (hardening_firewalld_active.stdout | default('') | trim) == 'active' }}
-
-- name: Read firewalld's default zone
-  ansible.builtin.command: firewall-cmd --get-default-zone
-  register: hardening_firewalld_default_zone
-  changed_when: false
-  check_mode: false
-  when: hardening_firewalld_in_charge | bool
-
-- name: Read the firewalld zone of the default interface
-  ansible.builtin.command: >-
-    firewall-cmd --get-zone-of-interface={{ ansible_facts['default_ipv4']['interface'] }}
-  register: hardening_firewalld_iface_zone
-  changed_when: false
-  failed_when: false
-  check_mode: false
-  when:
-    - hardening_firewalld_in_charge | bool
-    - ansible_facts['default_ipv4']['interface'] is defined
-
-- name: Resolve the firewalld zone of the public interface
-  ansible.builtin.set_fact:
-    hardening_firewalld_active_zone: >-
-      {{ hardening_firewalld_zone
-         if hardening_firewalld_zone | length > 0 else
-         (hardening_firewalld_iface_zone.stdout | default('') | trim
-          if (hardening_firewalld_iface_zone.rc | default(1) == 0
-              and (hardening_firewalld_iface_zone.stdout | default('') | trim) | length > 0)
-          else (hardening_firewalld_default_zone.stdout | default('public') | trim)) }}
-  when: hardening_firewalld_in_charge | bool
-
-# PublishPort is a DNAT in PREROUTING, after which the packet is forwarded to
-# the container, not delivered locally. firewalld's default policy drops
-# forwarded traffic, so opening 80/tcp on the input chain (the task below)
-# is not enough: nginx is reachable on the host and nowhere else. Masquerade
-# on the zone of the public interface is what turns forwarding on for that
-# zone, which is also how a container reaches the internet to pull an image.
-- name: Allow forwarded container ports through firewalld
-  ansible.posix.firewalld:
-    masquerade: true
-    zone: "{{ hardening_firewalld_active_zone }}"
-    state: enabled
-    permanent: true
-    immediate: true
-  when: hardening_firewalld_in_charge | bool
-
-# python3-firewall is what the ansible.posix.firewalld module drives; it comes
-# with the daemon, so it is there whenever the daemon is.
-- name: Open the Antares-Web ports in firewalld
-  ansible.posix.firewalld:
-    port: "{{ item }}/tcp"
-    zone: "{{ hardening_firewalld_active_zone }}"
-    state: enabled
-    permanent: true
-    immediate: true
-  loop: "{{ hardening_web_ports + hardening_firewall_extra_tcp_ports }}"
-  when: hardening_firewalld_in_charge | bool
-
-- name: Open the extra UDP ports in firewalld
-  ansible.posix.firewalld:
-    port: "{{ item }}/udp"
-    zone: "{{ hardening_firewalld_active_zone }}"
-    state: enabled
-    permanent: true
-    immediate: true
-  loop: "{{ hardening_firewall_extra_udp_ports }}"
-  when: hardening_firewalld_in_charge | bool
-
-# The counterpart of the trusted_v4/trusted_v6 sets of the nftables ruleset:
-# NFS, slurmctld, slurmd, slurmdbd and the SSH submission path all talk between
-# the machines of the inventory, on ports that have no business being open to
-# the world. Trusting the machines rather than the ports is the same trade the
-# nftables table makes.
-- name: Trust the other machines of the deployment in firewalld
-  ansible.posix.firewalld:
-    source: "{{ item }}"
-    zone: "{{ hardening_firewalld_peer_zone }}"
-    state: enabled
-    permanent: true
-    immediate: true
-  loop: "{{ hardening_peers_v4 + hardening_peers_v6 }}"
-  when: hardening_firewalld_in_charge | bool
-
-# The SSH ports are read from `sshd -T`, so a daemon moved off 22 is covered
-# here as well; firewalld's default zone only knows about the `ssh` service,
-# which is 22 and nothing else.
-- name: Keep the SSH ports open in firewalld
-  ansible.posix.firewalld:
-    port: "{{ item }}/tcp"
-    zone: "{{ hardening_firewalld_active_zone }}"
-    state: enabled
-    permanent: true
-    immediate: true
-  loop: "{{ hardening_ssh_ports | default([]) }}"
-  when: hardening_firewalld_in_charge | bool
+  when: hardening_firewalld_binary.stat.exists
