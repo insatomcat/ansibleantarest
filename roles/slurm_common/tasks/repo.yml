@@ -31,6 +31,29 @@
       cluster over SSH and runs on either major.
     quiet: true
 
+# CentOS Stream is not a rebuild of a RHEL minor, it is what the next one is
+# built from, and its release package says so: it provides `redhat-release
+# 9.0` and stays there for the life of the stream. The OpenHPC release rpm
+# requires `redhat-release >= 9.1`, so dnf answers with forty lines about
+# centos-release-automotive conflicting with centos-stream-release rather than
+# with the one fact that matters. Same reasoning as the check above, and the
+# same escape hatch: only the shipped repository is tested.
+- name: Check the distribution can satisfy the OpenHPC release package
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] != 'CentOS'
+        or slurm_openhpc_release is not search('repos.openhpc.community')
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}
+      {{ ansible_facts['distribution_version'] }}, which provides
+      redhat-release 9.0 and always will, while the OpenHPC release package
+      requires redhat-release >= 9.1. There is nothing to install Slurm from
+      on this machine. Put the Slurm nodes on a RHEL rebuild - Oracle Linux,
+      Rocky, AlmaLinux - or set slurm_repo to `distro` and install Slurm
+      yourself. The antares_web machine is not concerned: it reaches the
+      cluster over SSH and runs on CentOS Stream perfectly well.
+    quiet: true
+
 - name: Install the OpenHPC release package
   ansible.builtin.dnf:
     name: "{{ slurm_openhpc_release }}"
