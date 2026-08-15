@@ -24,6 +24,22 @@
     - "{{ antarest_data_dir }}/local_workspace/local"
     - "{{ antarest_data_dir }}/local_workspace/slurm"
 
+# Since 2.34 the configuration is loaded through pydantic, and a `hostname:`
+# left empty in the slurm launcher is a validation error rather than something
+# the application shrugs off: the backend then refuses to start and the unit
+# crash-loops. slurm_frontend_ip is empty when the front-end has no cached
+# facts, which is what a `--limit antares_web` run on a cold controller gives.
+# Better caught here, with the reason, than in a container journal.
+- name: Check the Slurm front-end address is known
+  ansible.builtin.assert:
+    that: slurm_frontend_ip | trim | length > 0
+    fail_msg: >-
+      The Slurm launcher is enabled but the front-end address is unknown.
+      Run the play against the whole inventory, or set slurm_node_ip (or
+      ansible_host) on the host of the slurm_frontend group.
+    quiet: true
+  when: slurm_enabled | bool
+
 - name: Deploy the Antares-Web configuration
   ansible.builtin.template:
     src: config.prod.yaml.j2

@@ -184,7 +184,7 @@ Executable names changed across generations: `antares-<X>.<Y>-solver` for the 8.
 ### Antares-Web
 
 ```yaml
-antarest_version: "v2.33.0"   # tag, branch or commit of the AntaREST repo
+antarest_version: "v2.34.0"   # tag, branch or commit of the AntaREST repo
 antarest_http_port: 80
 antarest_force_rebuild: false # force rebuild of frontend + image
 ```
@@ -221,7 +221,7 @@ antarest_login_username_label: '{t("global.username")}'
 
 The default reuses the project's translation key so the field displays "Username" or the localized equivalent according to the browser language, instead of a fixed string. For a fixed literal label put a quoted string: `"'Login ID'"`.
 
-The target file changed location between releases (`webapp/src/components/wrappers/LoginWrapper.tsx` up to 2.19, `webapp/src/routes/login/index.tsx` in 2.33), so the task locates it by content rather than a fixed path. If a future version removes the label the task reports it and does nothing.
+The target file changed location between releases (`webapp/src/components/wrappers/LoginWrapper.tsx` up to 2.19, `webapp/src/routes/login/index.tsx` from 2.33 on), so the task locates it by content rather than a fixed path. If a future version removes the label the task reports it and does nothing.
 
 ### Slurm
 
@@ -303,7 +303,7 @@ All images are fully qualified (`docker.io/library/postgres:latest`, `localhost/
 
 Everything periodic runs in two containers, `antarest-celery-beat` (the scheduler) and `antarest-celery-worker` (which executes). The API process starts no background service: `server.services` is left unset in `config.prod.yaml`, which is what the application defaults to anyway.
 
-This is not what the upstream `docker-compose.yml` does. That file still declares a `watcher` and a `matrix_gc` container, which are `IService` singletons, the mechanism the project documents as the fallback for non-Celery environments (the desktop build). Celery is the deployment schema the project favours, [stated on PR #3360](https://github.com/AntaresSimulatorTeam/AntaREST/pull/3360), and the compose file is explicitly not a production reference any more. It also covers two of the eight periodic tasks, where the celery pair covers all eight:
+This is not what the upstream `docker-compose.yml` does. That file still declares a `watcher` and a `matrix_gc` container, which are `IService` singletons, the mechanism the project documents as the fallback for non-Celery environments (the desktop build). Celery is the deployment schema the project favours, [stated on PR #3360](https://github.com/AntaresSimulatorTeam/AntaREST/pull/3360), and the compose file is explicitly not a production reference any more. It also covers two of the nine periodic tasks, where the celery pair covers all nine:
 
 | Task | Default interval | Reclaims |
 |---|---|---|
@@ -315,8 +315,11 @@ This is not what the upstream `docker-compose.yml` does. That file still declare
 | `auto_archiver` | cron, nightly | archives studies untouched for 60 days |
 | `disk_usage` | cron, hourly | nothing (reporting) |
 | `disk_space_analyzer` | cron, nightly | nothing (reporting) |
+| `cache_launcher_load` | 30 s | nothing (stores the load of each launcher in the database) |
 
 The broker is Redis, on database 1 (the event bus uses 0). The application derives the broker and result-backend URLs from the `redis` section of `config.prod.yaml`, so there is no separate broker to configure.
+
+`cache_launcher_load` arrived with 2.34 and is the one task that talks to something outside the machine: it reads the load of every launcher that supports caching, which today means the Slurm one, and reading it is an ssh connection to the front-end. The worker therefore gets the same `/id_rsa` the backend has, mounted only when `slurm_enabled`. The local launcher reports its load live and is never cached. Should the connection fail, the API still answers `/v1/launcher/load` by querying the cluster itself, so the visible symptom is an error in the worker journal every 30 seconds rather than a broken page.
 
 Upgrading a deployment made before this change takes the `antarest-watcher` and `antarest-matrix-gc` containers down: they stay listed in `antarest_quadlet_all_units`, which is the list of units the role stops and removes once it no longer writes them. Never run both mechanisms at once, two watchers scan the workspaces twice.
 
@@ -452,7 +455,7 @@ The reference procedure dates from September 2025; several upstream changes have
 
 - Launcher format. The old `launcher.local` / `launcher.slurm` format was replaced by `launcher.launchers`: a list of entries each with `id`, `name` and `type`, and `launcher.default` points to an `id`. The old format is no longer read.
 - Version passed to the launcher script. antares-launcher now receives a `major.minor` (`8.8`) version string, not the compact integer (`910`). The generated `case` accepts both forms, so tests like `if [ "$ANTARES_VERSION" = "910" ]` from the PDF no longer match.
-- Frontend build image. The PDF's `Dockerfile_build_frontend` installed `requirements.txt` with Python 3.9 and nvm; the project moved to `uv` and `pyproject.toml` (no `requirements.txt`). The playbook builds the frontend in an official Node image pinned to the Node version in `webapp/.nvmrc` (22.13.0 for 2.33.0).
+- Frontend build image. The PDF's `Dockerfile_build_frontend` installed `requirements.txt` with Python 3.9 and nvm; the project moved to `uv` and `pyproject.toml` (no `requirements.txt`). The playbook builds the frontend in an official Node image pinned to the Node version in `webapp/.nvmrc` (22.13.0 for 2.34.0).
 - Account in the image. The PDF edits the project's `Dockerfile` to add `useradd`. The playbook leaves upstream checkout intact and stacks a derived image on top, surviving upstream Dockerfile changes (the env var `ANTARES_CONF` was previously `ANTARES` vs `ANTAREST_CONF` now).
 - No compose at all. The PDF relied on `docker-compose` v1 (end of life). The playbook replaces compose with podman + quadlet: each container is a systemd unit, the upstream `docker-compose.yml` is not used anymore. This removes the dependency on compose ≥ 2.24 and its `!override` tags.
 - Background tasks. The PDF, like the upstream compose file, runs a `watcher` and a `matrix_gc` container. The playbook runs `celery-beat` and `celery-worker` instead: that is the schema the project now favours, and the only one that also runs the blob, variable-view and task collectors. See "Background maintenance tasks".
@@ -461,7 +464,7 @@ The reference procedure dates from September 2025; several upstream changes have
 - Network exposure. The PDF published MariaDB on `0.0.0.0:3306` with root account; the playbook binds it only to `127.0.0.1` because `slurmdbd` runs on the same host. Adminer is disabled by default.
 - `archive_dir`. The PDF used `/studies/archives`, a path not provided by the upstream compose, so the playbook adds the corresponding mount in the backend unit.
 - Scratch directory. As in the PDF it is placed in the shared `/home`, but the playbook creates `~/scratch/`.
-- The "NNI" field. Still present in 2.33.0 but moved from `webapp/src/components/wrappers/LoginWrapper.tsx` line 170 to `webapp/src/routes/login/index.tsx` line 149. The playbook finds it by content and replaces it with the translation key (see above).
+- The "NNI" field. Still present in 2.34.0 but moved from `webapp/src/components/wrappers/LoginWrapper.tsx` line 170 to `webapp/src/routes/login/index.tsx` line 149. The playbook finds it by content and replaces it with the translation key (see above).
 
 ## Major database versions
 

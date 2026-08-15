@@ -140,7 +140,7 @@ antares_solvers:
 #  Antares-Web (AntaREST)
 # ---------------------------------------------------------------------------
 antarest_repo: "https://github.com/AntaresSimulatorTeam/AntaREST.git"
-antarest_version: "v2.33.0"            # git tag, branch or commit
+antarest_version: "v2.34.0"            # git tag, branch or commit
 antarest_base_dir: /var/antares-web
 antarest_dir: "{{ antarest_base_dir }}/AntaREST"
 antarest_update: true                  # let the play move the checkout to antarest_version
