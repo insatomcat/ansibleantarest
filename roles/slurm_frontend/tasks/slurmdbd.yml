@@ -110,22 +110,34 @@
     timeout: 180
 
 # MariaDB accepts TCP connections a few seconds before it is done initialising
-# the data directory on a first start.
-# `mariadb-admin` only exists from MariaDB 10.5 on, hence the fallback.
+# the data directory on a first start. Worse, the port answers even when it is
+# not listening at all: podman publishes it through conmon, which holds the
+# socket for as long as the unit is up, so the wait above returns while the
+# server behind it is still starting - or has just been killed.
+#
+# Everything after `sh -c` is one line on purpose. A folded scalar only folds
+# lines indented like its first one: a continuation indented further keeps its
+# newline, and inside these quotes that newline ended the command and left the
+# `||` starting a line of its own. `sh` then answered "Syntax error: || unexpected"
+# on every single try, thirty times, five seconds apart, while MariaDB was up
+# and answering - which is how this task managed to be broken from the day it
+# was written without anyone seeing it.
+#
+# The password is read from the container's own environment rather than passed
+# on the command line, which is what let this task drop the `no_log` that hid
+# the error. `mariadb-admin` only exists from MariaDB 10.5 on, hence the
+# fallback.
 - name: Wait for MariaDB to finish its initialisation
   ansible.builtin.shell:
     cmd: >-
-      {{ container_cmd }} exec
-      -e MYSQL_PWD={{ slurmdbd_db_password | quote }} slurmdb-mariadb
-      sh -c 'mariadb-admin ping --silent -uroot 2>/dev/null
-             || mysqladmin ping --silent -uroot'
+      {{ container_cmd }} exec slurmdb-mariadb
+      sh -c 'export MYSQL_PWD="$MARIADB_ROOT_PASSWORD"; mariadb-admin ping --silent -uroot 2>/dev/null || mysqladmin ping --silent -uroot'
     executable: /bin/bash
   register: slurmdb_ping
   until: slurmdb_ping.rc == 0
   retries: 30
   delay: 5
   changed_when: false
-  no_log: true
 
 - name: Deploy slurmdbd.conf
   ansible.builtin.template:
