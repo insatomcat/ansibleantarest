@@ -1,0 +1,553 @@
+---
+# ===========================================================================
+#  Check a deployment from the outside in
+#
+#      ansible-playbook verify.yml
+#      ansible-playbook -i inventory/ci-cluster.yml verify.yml
+#
+#  site.yml already asserts a great deal while it runs: the NFS export is
+#  visible, the mount is really NFS, the images loaded, /api/health answered.
+#  What it cannot check is what only exists once every machine is done, and
+#  what a machine looks like from somewhere that is not the machine itself:
+#
+#    - the cluster: slurmctld sees every node, the accounting database knows
+#      the cluster, a job submitted the way Antares-Web submits it runs on a
+#      compute node, and the shared /home really is shared,
+#    - the firewall: three different rulesets on three kinds of machine, each
+#      of which has to let the peers through and keep everyone else out.
+#
+#  The controller is the outside world here, and that is the point of the
+#  second half: it is not in the inventory, so it is in no ruleset's trusted
+#  set, and a probe from it crosses the input chain exactly like a packet
+#  from the internet. Run this from a machine that *is* in the inventory and
+#  every "the world cannot reach this" check becomes a tautology.
+#
+#  Nothing here changes anything, beyond one marker file in the shared /home
+#  that the last play removes. It is safe on a production deployment, and it
+#  is what the `cluster` job of .github/workflows/ci.yml runs after site.yml.
+#
+#  Both halves switch themselves off where they do not apply: the cluster
+#  plays when slurm_enabled is false, the firewall plays when
+#  hardening_firewall_enabled is false - a deployment filtered by a cloud
+#  security group instead has nothing on the machine to check.
+#
+#  Note on `hostvars[inventory_hostname]` below, where `ansible_host` would
+#  read more naturally: a task with delegate_to takes its connection
+#  variables from the machine it is delegated to, so inside a probe running
+#  on the controller `ansible_host` is the controller's own. The explicit
+#  lookup is the address of the machine being checked, delegated or not.
+# ===========================================================================
+
+# Same reason as the first play of site.yml: the cached facts may predate a
+# rebuild of the machine behind this name, and the addresses below are read
+# from them.
+- name: Gather facts from every machine
+  hosts: all
+  gather_facts: false
+  tags: always
+  tasks:
+    - name: Gather facts
+      ansible.builtin.setup:
+
+# ---------------------------------------------------------------------------
+#  Antares-Web
+# ---------------------------------------------------------------------------
+
+- name: The Antares-Web stack is up and answers
+  hosts: antares_web
+  gather_facts: false
+  tags: [verify, web]
+  vars:
+    # With TLS on, port 80 answers a redirect and nothing else, so the checks
+    # follow the interface to where it actually is. The certificate is not
+    # validated: selfsigned and the Let's Encrypt staging CA are both
+    # supported configurations, and what is under test here is the stack.
+    verify_web_url: >-
+      {{ 'https' if antarest_tls_enabled | default(false) | bool else 'http' }}://{{
+         hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}:{{
+         antarest_https_port if antarest_tls_enabled | default(false) | bool else antarest_http_port }}
+  tasks:
+
+    - name: Ask systemd about the units of the stack
+      ansible.builtin.command: "systemctl is-active {{ item }}"
+      register: verify_units
+      changed_when: false
+      failed_when: false
+      become: true
+      loop: "{{ verify_web_units }}"
+      vars:
+        verify_web_units: >-
+          {{ ['antares-web.target', 'postgresql.service', 'redis.service',
+              'antarest.service', 'antarest-celery-beat.service',
+              'antarest-celery-worker.service', 'antares-nginx.service']
+             + (['antarest-adminer.service'] if antarest_enable_adminer | default(false) | bool else []) }}
+
+    - name: Fail when a unit of the stack is not running
+      ansible.builtin.assert:
+        that: verify_units.results | rejectattr('stdout', 'equalto', 'active') | list | length == 0
+        fail_msg: >-
+          Not running on {{ inventory_hostname }}:
+          {{ verify_units.results | rejectattr('stdout', 'equalto', 'active')
+             | map(attribute='item') | join(', ') }}.
+          `systemctl status` and `journalctl -u <unit>` there say why.
+        quiet: true
+
+    # From the controller rather than from the machine, on purpose: what a
+    # deployment is for is answering someone else. A published container port
+    # is a netfilter rule rather than a listening socket on the host, so this
+    # is also the only side from which nginx can be asked anything at all.
+    - name: Ask the backend for its health
+      ansible.builtin.uri:
+        url: "{{ verify_web_url }}/api/health"
+        return_content: true
+        validate_certs: false
+      register: verify_health
+      retries: 12
+      delay: 5
+      until: verify_health.status | default(0) == 200
+      delegate_to: localhost
+      become: false
+
+    - name: Ask nginx for the web application
+      ansible.builtin.uri:
+        url: "{{ verify_web_url }}/"
+        return_content: true
+        validate_certs: false
+      register: verify_index
+      delegate_to: localhost
+      become: false
+
+    - name: Check nginx really serves the built front-end
+      ansible.builtin.assert:
+        that: verify_index.content is search('(?i)<title')
+        fail_msg: >-
+          {{ verify_web_url }}/ answered {{ verify_index.status }} but the body
+          is not an HTML document, so webapp/dist is not what nginx serves.
+        quiet: true
+
+    # Deliberately a wrong password: what is under test is that the /api/
+    # location reaches the backend and that the backend routes the request.
+    # A 502 or a 404 is the failure that matters, and 404 is what a wrong
+    # container name in the nginx upstream produces.
+    - name: Post a login the backend must reject
+      ansible.builtin.uri:
+        url: "{{ verify_web_url }}/api/v1/login"
+        method: POST
+        body_format: json
+        body:
+          username: verify.yml
+          password: wrong-on-purpose
+        status_code: [200, 401, 422]
+        validate_certs: false
+      delegate_to: localhost
+      become: false
+
+# ---------------------------------------------------------------------------
+#  The Slurm cluster
+# ---------------------------------------------------------------------------
+
+- name: The controller sees every compute node
+  hosts: slurm_frontend
+  become: true
+  gather_facts: false
+  tags: [verify, slurm]
+  tasks:
+
+    - name: Ask slurmctld whether it is alive
+      ansible.builtin.command: scontrol ping
+      register: verify_ping
+      changed_when: false
+      when: slurm_enabled | bool
+
+    - name: Check slurmctld answers as UP
+      ansible.builtin.assert:
+        that: verify_ping.stdout is search('is UP')
+        fail_msg: "scontrol ping on {{ inventory_hostname }}: {{ verify_ping.stdout | default('') }}"
+        quiet: true
+      when: slurm_enabled | bool
+
+    # --Node so that the answer is one line per node rather than sinfo's
+    # usual ranges, and a retry rather than a single shot: a node whose
+    # slurmd has just been restarted takes a few seconds to register. A node
+    # left in `down`, `drain` or `idle*` - the star meaning slurmctld cannot
+    # reach it - exhausts the retries and fails with the table in the message.
+    - name: Ask sinfo about the nodes
+      ansible.builtin.command: sinfo --Node --noheader --format '%N %T'
+      register: verify_sinfo
+      changed_when: false
+      retries: 12
+      delay: 5
+      until: >-
+        verify_sinfo.stdout_lines | length == (groups['slurm_compute'] | default([])) | length
+        and verify_sinfo.stdout_lines | map('regex_replace', '^\S+\s+', '')
+            | reject('in', ['idle', 'mixed', 'allocated', 'completing']) | list | length == 0
+      when: slurm_enabled | bool
+
+    - name: Check every compute node of the inventory is in the partition
+      ansible.builtin.assert:
+        that:
+          - (groups['slurm_compute'] | default([]) | map('extract', hostvars, 'slurm_node_name') | list)
+            | difference(verify_sinfo.stdout_lines | map('regex_replace', '\s.*$', '') | list)
+            | length == 0
+        fail_msg: >-
+          sinfo on {{ inventory_hostname }} does not list every compute node of
+          the inventory: {{ verify_sinfo.stdout_lines | join(' / ') }}.
+          A node missing here is usually a NodeName that does not match the
+          machine's own `hostname -s`, which is what slurmd matches itself
+          against in slurm.conf.
+        quiet: true
+      when: slurm_enabled | bool
+
+    - name: Ask the accounting database about the cluster
+      ansible.builtin.command: "sacctmgr --noheader --parsable2 show cluster {{ slurm_cluster_name }}"
+      register: verify_sacctmgr
+      changed_when: false
+      when:
+        - slurm_enabled | bool
+        - slurmdbd_enabled | bool
+
+    - name: Check the cluster is registered in the accounting database
+      ansible.builtin.assert:
+        that: verify_sacctmgr.stdout is search('^' ~ slurm_cluster_name ~ '\|')
+        fail_msg: >-
+          sacctmgr does not know about the cluster {{ slurm_cluster_name }}:
+          "{{ verify_sacctmgr.stdout }}". The command reached slurmdbd, so this
+          is the registration itself, see
+          roles/slurm_frontend/tasks/sacctmgr.yml.
+        quiet: true
+      when:
+        - slurm_enabled | bool
+        - slurmdbd_enabled | bool
+
+    # Written here, read from every compute node in the next play. The value
+    # is unique to the run so that a marker left behind by an earlier one
+    # cannot make a node with a local /home look like a node that mounts the
+    # share.
+    - name: Draw a marker for the shared home
+      ansible.builtin.set_fact:
+        verify_marker: "verify.yml {{ 999999999 | random }}"
+      when: slurm_enabled | bool
+
+    - name: Write the marker in the shared home
+      ansible.builtin.copy:
+        content: "{{ verify_marker }}\n"
+        dest: "{{ antares_home }}/.verify-nfs"
+        owner: "{{ antares_user }}"
+        group: "{{ antares_group }}"
+        mode: "0644"
+      when: slurm_enabled | bool
+
+- name: The compute nodes share the front-end's /home
+  hosts: slurm_compute
+  become: true
+  gather_facts: false
+  tags: [verify, slurm]
+  vars:
+    verify_frontend: "{{ (groups['slurm_frontend'] | default([])) | first | default('') }}"
+  tasks:
+
+    - name: Read the marker from the shared home
+      ansible.builtin.slurp:
+        src: "{{ antares_home }}/.verify-nfs"
+      register: verify_marker_read
+      when: slurm_enabled | bool
+
+    - name: Check the shared home is the front-end's
+      ansible.builtin.assert:
+        that: verify_marker_read.content | b64decode | trim == hostvars[verify_frontend].verify_marker
+        fail_msg: >-
+          {{ antares_home }}/.verify-nfs on {{ inventory_hostname }} does not
+          hold what the front-end just wrote there: the mount is not the
+          export, or it is a stale mount of an earlier one.
+        quiet: true
+      when: slurm_enabled | bool
+
+    # The solvers are installed once, on the front-end, into the shared /home.
+    # A compute node that cannot execute them runs no study, and the failure
+    # would only surface hours later in a job's stderr.
+    - name: Look for the solvers in the shared home
+      ansible.builtin.stat:
+        path: "{{ slurm_solvers_dir }}/antares-{{ item.version }}-{{ antares_solver_os | trim }}/bin/{{ item.bin }}"
+      register: verify_solvers
+      loop: "{{ antares_solvers }}"
+      loop_control:
+        label: "{{ item.version }}"
+      when: slurm_enabled | bool
+
+    - name: Check every solver is there and executable
+      ansible.builtin.assert:
+        that: verify_solvers.results | rejectattr('stat.xusr', 'defined') | list | length == 0
+        fail_msg: >-
+          Not executable from {{ inventory_hostname }}:
+          {{ verify_solvers.results | rejectattr('stat.xusr', 'defined')
+             | map(attribute='item.version') | join(', ') }}.
+        quiet: true
+      when: slurm_enabled | bool
+
+# ---------------------------------------------------------------------------
+#  The submission path, end to end
+#
+#  The one check that exercises what a study actually goes through: the key
+#  generated on the web machine, the account it reaches on the front-end, the
+#  munge authentication between the daemons, and a compute node running the
+#  step. Everything above tests one link of that chain at a time.
+# ---------------------------------------------------------------------------
+
+- name: Antares-Web can run a job on the cluster
+  hosts: antares_web
+  become: true
+  gather_facts: false
+  tags: [verify, slurm]
+  vars:
+    # The role default, which is not in scope in a play that does not run the
+    # role. An inventory that overrides it wins, as it should.
+    verify_ssh_key: "{{ antarest_ssh_key | default(antarest_base_dir ~ '/deploy/id_rsa') }}"
+  tasks:
+
+    # As root rather than as the antares user, deliberately: the backend reads
+    # this key inside a container, where it is bind-mounted as /id_rsa, so the
+    # host-side traversal to the deploy directory is not part of the path
+    # under test. The key, the authorized_keys entry the antares_ssh_access
+    # role wrote and the cluster behind them are.
+    - name: Submit a job the way the backend does, over SSH
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -i
+          - "{{ verify_ssh_key }}"
+          - -o
+          - BatchMode=yes
+          - -o
+          - StrictHostKeyChecking=no
+          - -o
+          - UserKnownHostsFile=/dev/null
+          - -o
+          - LogLevel=ERROR
+          - -o
+          - ConnectTimeout=10
+          - "{{ antares_user }}@{{ slurm_frontend_ip | trim }}"
+          - "srun --ntasks=1 --time=2 hostname && test -x {{ slurm_launch_script }} && echo launch-script-ok"
+      register: verify_srun
+      changed_when: false
+      when: slurm_enabled | bool
+
+    - name: Check the job ran on a compute node
+      ansible.builtin.assert:
+        that:
+          - (verify_srun.stdout_lines | first)
+            in (groups['slurm_compute'] | default([]) | map('extract', hostvars, 'slurm_node_name') | list)
+          - "'launch-script-ok' in verify_srun.stdout"
+        fail_msg: >-
+          The job submitted from {{ inventory_hostname }} through the front-end
+          answered "{{ verify_srun.stdout | default('') }}", which is not the
+          name of a compute node followed by the launch script check.
+        quiet: true
+      when: slurm_enabled | bool
+
+# ---------------------------------------------------------------------------
+#  The firewall
+#
+#  Three rulesets, one per kind of machine, checked from both sides. The
+#  ports that matter are looked at twice, which is what makes the answer mean
+#  something: a daemon is really listening on them, and the controller - not
+#  in the inventory, therefore not trusted by any of the rulesets - still
+#  cannot reach them, while the machines that need them can.
+#
+#  wait_for is the probe: state=started fails when nothing answers within the
+#  timeout, state=stopped fails when something does. Against a drop policy a
+#  connection hangs rather than being refused; both are "not reachable" here
+#  and the difference does not change the verdict, hence the short
+#  connect_timeout.
+# ---------------------------------------------------------------------------
+
+- name: The daemons the firewall has to cover are really listening
+  hosts: all
+  become: true
+  gather_facts: false
+  tags: [verify, firewall]
+  vars:
+    # Only the host daemons, and only the ones whose absence would make the
+    # probes below meaningless. Antares-Web is not in the list: its ports are
+    # published by containers, which on rootful podman is a netfilter rule
+    # rather than a socket on the host, so `ss` never sees them.
+    verify_expected_listeners: >-
+      {{ ([2049, 6817] + ([6819] if slurmdbd_enabled | bool else [])
+          if inventory_hostname in (groups['slurm_frontend'] | default([])) else [])
+         + ([6818] if inventory_hostname in (groups['slurm_compute'] | default([])) else []) }}
+  tasks:
+
+    - name: Read the listening sockets
+      ansible.builtin.command: ss --listening --tcp --numeric
+      register: verify_listening
+      changed_when: false
+      when:
+        - slurm_enabled | bool
+        - verify_expected_listeners | length > 0
+
+    - name: Check every service this machine is supposed to offer is listening
+      ansible.builtin.assert:
+        that: verify_missing_listeners | length == 0
+        fail_msg: >-
+          Nothing listens on {{ verify_missing_listeners | join(', ') }} on
+          {{ inventory_hostname }}, so the probes below would pass on a
+          machine that offers nothing at all. Listening sockets:
+          {{ verify_listening.stdout_lines[1:] | join(' / ') }}
+        quiet: true
+      vars:
+        # Column 4 of `ss` is the local address, port included. Loopback-only
+        # sockets are dropped: they are unreachable by construction and would
+        # answer the question the probes are asking.
+        verify_listening_ports: >-
+          {{ verify_listening.stdout_lines[1:]
+             | map('regex_replace', '^\S+\s+\S+\s+\S+\s+(\S+)\s+.*$', '\1')
+             | reject('match', '^(127\.|\[::1\])')
+             | map('regex_replace', '^.*:', '') | map('int') | unique | list }}
+        verify_missing_listeners: "{{ verify_expected_listeners | reject('in', verify_listening_ports) | list }}"
+      when:
+        - slurm_enabled | bool
+        - verify_expected_listeners | length > 0
+
+- name: The world reaches nothing but SSH, and the interface on the web machine
+  hosts: all
+  gather_facts: false
+  become: false
+  tags: [verify, firewall]
+  vars:
+    verify_address: "{{ hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}"
+    verify_public_ports: >-
+      {{ [hostvars[inventory_hostname].ansible_port | default(22, true) | int]
+         + ([antarest_http_port | int]
+            + ([antarest_https_port | int] if antarest_tls_enabled | default(false) | bool else [])
+            if inventory_hostname in (groups['antares_web'] | default([])) else []) }}
+    # Everything a machine of this kind offers, or could be made to offer by
+    # accident, that the world has no business reaching. The interface ports
+    # are in the list of every machine that is not the web server: nothing
+    # serves them there, and a ruleset that opened them anyway is a bug worth
+    # catching. So is a database published on 0.0.0.0 - the firewall does not
+    # cover that, since a published container port is DNATed and never
+    # traverses the input hook, so the PublishPort of the unit is the only
+    # thing standing between MariaDB and the network.
+    verify_private_ports: >-
+      {{ ([antarest_http_port | int, antarest_https_port | int]
+          if inventory_hostname not in (groups['antares_web'] | default([])) else [5432, 6379])
+         + ([111, 2049, 6817, 3306] + ([6819] if slurmdbd_enabled | bool else [])
+            if slurm_enabled | bool and inventory_hostname in (groups['slurm_frontend'] | default([])) else [])
+         + ([111, 2049, 6818]
+            if slurm_enabled | bool and inventory_hostname in (groups['slurm_compute'] | default([])) else []) }}
+  tasks:
+
+    - name: Probe from the controller the ports the world must reach
+      ansible.builtin.wait_for:
+        host: "{{ verify_address }}"
+        port: "{{ item }}"
+        state: started
+        connect_timeout: 5
+        timeout: 15
+      loop: "{{ verify_public_ports }}"
+      delegate_to: localhost
+      when: hardening_firewall_enabled | bool
+
+    - name: Probe from the controller the ports the world must not reach
+      ansible.builtin.wait_for:
+        host: "{{ verify_address }}"
+        port: "{{ item }}"
+        state: stopped
+        connect_timeout: 5
+        timeout: 15
+      loop: "{{ verify_private_ports }}"
+      delegate_to: localhost
+      when: hardening_firewall_enabled | bool
+
+- name: The compute nodes reach the front-end and each other
+  hosts: slurm_compute
+  gather_facts: false
+  become: false
+  tags: [verify, firewall]
+  vars:
+    verify_frontend: "{{ (groups['slurm_frontend'] | default([])) | first | default('') }}"
+  tasks:
+
+    # From the compute node itself, over the cluster network: these are the
+    # flows the peer trust of the ruleset exists for, and the ones the play
+    # above has just checked the world cannot use.
+    - name: Reach the NFS and controller ports of the front-end
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[verify_frontend].slurm_node_ip | trim }}"
+        port: "{{ item }}"
+        state: started
+        connect_timeout: 5
+        timeout: 15
+      loop: [111, 2049, 6817]
+      when:
+        - slurm_enabled | bool
+        - hardening_firewall_enabled | bool
+
+    # A job step spanning several nodes has the nodes talk to each other, not
+    # only to the controller.
+    - name: Reach slurmd on the other compute nodes
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item].slurm_node_ip | trim }}"
+        port: 6818
+        state: started
+        connect_timeout: 5
+        timeout: 15
+      loop: "{{ (groups['slurm_compute'] | default([])) | difference([inventory_hostname]) }}"
+      when:
+        - slurm_enabled | bool
+        - hardening_firewall_enabled | bool
+
+- name: The front-end reaches its compute nodes
+  hosts: slurm_frontend
+  gather_facts: false
+  become: false
+  tags: [verify, firewall]
+  tasks:
+
+    - name: Reach slurmd on every compute node
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item].slurm_node_ip | trim }}"
+        port: 6818
+        state: started
+        connect_timeout: 5
+        timeout: 15
+      loop: "{{ groups['slurm_compute'] | default([]) }}"
+      when:
+        - slurm_enabled | bool
+        - hardening_firewall_enabled | bool
+
+- name: The web machine reaches the front-end it submits to
+  hosts: antares_web
+  gather_facts: false
+  become: false
+  tags: [verify, firewall]
+  vars:
+    verify_frontend: "{{ (groups['slurm_frontend'] | default([])) | first | default('') }}"
+  tasks:
+
+    - name: Reach the SSH port of the front-end
+      ansible.builtin.wait_for:
+        host: "{{ slurm_frontend_ip | trim }}"
+        port: "{{ hostvars[verify_frontend].ansible_port | default(22, true) }}"
+        state: started
+        connect_timeout: 5
+        timeout: 15
+      when:
+        - slurm_enabled | bool
+        - hardening_firewall_enabled | bool
+
+# ---------------------------------------------------------------------------
+#  Tidy up
+# ---------------------------------------------------------------------------
+
+- name: Remove the marker from the shared home
+  hosts: slurm_frontend
+  become: true
+  gather_facts: false
+  tags: [verify, slurm]
+  tasks:
+
+    - name: Delete the marker
+      ansible.builtin.file:
+        path: "{{ antares_home }}/.verify-nfs"
+        state: absent
+      when: slurm_enabled | bool
