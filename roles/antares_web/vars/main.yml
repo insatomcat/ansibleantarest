@@ -55,6 +55,17 @@ antarest_backend_volumes: >-
         + ([antarest_ssh_key ~ ':/id_rsa:ro'] if slurm_enabled | bool else []))
        | map('regex_replace', '$', _antarest_volume_opts) | list }}
 
+# Mounts only the maintenance worker needs on top of the shared ones: the key
+# to the Slurm front-end. Since AntaREST 2.34 the worker runs one more periodic
+# task, cache_launcher_load, which stores the load of every launcher in the
+# database; reading the Slurm one means an ssh connection to the front-end,
+# exactly the one the backend makes, so the worker needs the same key. Without
+# it the task fails every 30 seconds and only the API keeps answering, live.
+antarest_worker_volumes: >-
+  {{ antarest_shared_volumes
+     + ([antarest_ssh_key ~ ':/id_rsa:ro'] if slurm_enabled | bool else [])
+       | map('regex_replace', '$', _antarest_volume_opts) | list }}
+
 # Certificate actually served, resolved from the provider. `manual` is the only
 # one where the operator chooses the paths; the other two are managed here.
 antarest_tls_cert: >-

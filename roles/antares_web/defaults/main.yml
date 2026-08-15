@@ -63,10 +63,11 @@ antarest_gunicorn_workers: 4
 #  Background maintenance tasks
 #
 #  Scheduled by the antarest-celery-beat container and executed by
-#  antarest-celery-worker. Eight periodic jobs: the watcher scan, the matrix,
-#  blob, variable-view and task collectors, the auto archiver and the two disk
-#  usage reports. This replaces the `watcher` and `matrix_gc` singleton
-#  containers of the upstream compose file, which covered two of the eight.
+#  antarest-celery-worker. Nine periodic jobs: the watcher scan, the matrix,
+#  blob, variable-view and task collectors, the auto archiver, the two disk
+#  usage reports and, since AntaREST 2.34, the launcher load cache. This
+#  replaces the `watcher` and `matrix_gc` singleton containers of the upstream
+#  compose file, which covered two of the nine.
 #
 #  Intervals are not exposed here: the upstream defaults (a scan every 15
 #  minutes, the matrix GC hourly, the blob GC daily) are sensible, and every
@@ -154,8 +155,9 @@ antarest_certbot_timer: >-
   {{ 'certbot-renew.timer' if ansible_facts['os_family'] == 'RedHat' else 'certbot.timer' }}
 
 # Checksum of the resources/deploy/nginx.conf the TLS template was derived
-# from (AntaREST v2.33.0). With TLS on, that file is no longer mounted, so a
-# change upstream would go unnoticed: the deployment compares and warns.
+# from (unchanged from AntaREST v2.33.0 to v2.34.0). With TLS on, that file is
+# no longer mounted, so a change upstream would go unnoticed: the deployment
+# compares and warns.
 antarest_nginx_upstream_sha1: 48204a956d1dc69ef5c5b8b4585a0cb517e8f9d8
 
 # Set to true once the certificate is on disk, see tasks/tls.yml. Never set by

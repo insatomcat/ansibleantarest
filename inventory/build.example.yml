@@ -74,7 +74,7 @@ all:
           #      cannot start it offline,
           #    - antarest_version is simply what you get.
           # ---------------------------------------------------------------
-          antarest_version: "v2.33.0"
+          antarest_version: "v2.34.0"
           antares_uid: 9000
           antares_gid: 9000
           antarest_enable_adminer: false
