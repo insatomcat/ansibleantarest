@@ -274,14 +274,20 @@
         label: "{{ item.version }}"
       when: slurm_enabled | bool
 
+    # `stat` reports no xusr at all for a path that does not exist, hence the
+    # default rather than a plain attribute test: absent and present but not
+    # executable are the same verdict here.
     - name: Check every solver is there and executable
       ansible.builtin.assert:
-        that: verify_solvers.results | rejectattr('stat.xusr', 'defined') | list | length == 0
+        that: item.stat.xusr | default(false)
         fail_msg: >-
-          Not executable from {{ inventory_hostname }}:
-          {{ verify_solvers.results | rejectattr('stat.xusr', 'defined')
-             | map(attribute='item.version') | join(', ') }}.
+          {{ slurm_solvers_dir }}/antares-{{ item.item.version }}-{{ antares_solver_os | trim }}/bin/{{ item.item.bin }}
+          is missing from the shared home of {{ inventory_hostname }}, or is
+          not executable there.
         quiet: true
+      loop: "{{ verify_solvers.results }}"
+      loop_control:
+        label: "{{ item.item.version }}"
       when: slurm_enabled | bool
 
 # ---------------------------------------------------------------------------
