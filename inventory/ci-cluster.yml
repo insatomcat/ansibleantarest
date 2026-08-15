@@ -83,9 +83,9 @@ all:
       <<: *ci_cluster_common
       ansible_host: 192.168.77.12
 
-      # The shipped 1G is sized for a real front-end; MariaDB would refuse
-      # to start with it inside a 2.5 GB machine sharing its memory with
-      # slurmctld, slurmdbd and nfsd.
+      # The shipped 1G is sized for a real front-end. This machine has
+      # 1.25 GB in total and shares them with slurmctld, slurmdbd and nfsd,
+      # on a runner where all five machines together have 6 GB.
       slurmdbd_innodb_buffer_pool_size: "128M"
 
     slurm-node-1:
