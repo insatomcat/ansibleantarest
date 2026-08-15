@@ -42,6 +42,7 @@ _antarest_shared_volumes:
   - "{{ antarest_data_dir }}/archives:/studies/archives:rw"
   - "{{ antarest_data_dir }}/logs:/logs:rw"
   - "{{ antarest_data_dir }}/blobstore:/blobstore:rw"
+  - "{{ antarest_data_dir }}/outputs:/outputs:rw"
   - "{{ antarest_deploy_dir }}/config.prod.yaml:/resources/application.yaml:ro"
 
 # Mounts only the API backend needs: the local launcher workspace, the gunicorn

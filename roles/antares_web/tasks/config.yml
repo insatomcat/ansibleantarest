@@ -15,6 +15,10 @@
     - "{{ antarest_data_dir }}/archives"
     - "{{ antarest_data_dir }}/logs"
     - "{{ antarest_data_dir }}/blobstore"
+    # Empty unless the out-of-study output storage is turned on, and mounted
+    # everywhere all the same: reading the configuration creates it, see
+    # config.prod.yaml.j2.
+    - "{{ antarest_data_dir }}/outputs"
     # Working directory of the celery beat container, which writes its
     # `celerybeat-schedule` state file there. See the unit for why it cannot
     # simply stay in the container.
