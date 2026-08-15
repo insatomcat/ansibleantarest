@@ -25,6 +25,17 @@ _slurm_build_packages_by_family:
     - gcc-c++
     - make
 
+# Mode of slurm_log_dir. The directory belongs to a package on both families,
+# and rpm reapplies the mode the package declares on every install that follows
+# - slurm-slurmdbd-ohpc ships it as 0700, and the front-end installs slurmdbd
+# after this role has created the directory. Asking for 0755 there meant the
+# second run of site.yml always had one change to report, and the third none:
+# a one-shot fight with the packaging, landing exactly on the run an
+# idempotence check looks at. The daemons write there as SlurmUser, or as root
+# on a compute node, so either mode works; matching the packaging is what
+# keeps the run quiet.
+slurm_log_dir_mode: "{{ '0700' if ansible_facts['os_family'] == 'RedHat' else '0755' }}"
+
 # Extra raw lines appended to slurm.conf just before the node definitions.
 # Handy for GresTypes, MpiDefault, QOS settings...
 slurm_extra_config: []
