@@ -1,6 +1,6 @@
 ---
 # ===========================================================================
-#  Cluster half of the CI, used by the `cluster` job of
+#  Cluster half of the CI, used by the `slurm` job of
 #  .github/workflows/ci.yml.
 #
 #  Five throwaway machines on one GitHub runner, which is the shape the
@@ -66,11 +66,29 @@ all:
         antarest_db_password: "ci-db-not-a-secret"
         slurmdbd_db_password: "ci-slurmdb-not-a-secret"
 
+        # Ubuntu 26.04 is not in the shipped list: it is claimed for CI
+        # only, which is what the preflight failure message tells you to
+        # do, and it keeps the claim scoped here. The rest is the shipped
+        # list, repeated because a host variable replaces it wholesale.
+        supported_distros:
+          - "Debian 12"
+          - "Debian 13"
+          - "Ubuntu 22"
+          - "Ubuntu 24"
+          - "OracleLinux 9"
+          - "OracleLinux 10"
+          - "RedHat 9"
+          - "RedHat 10"
+          - "Rocky 9"
+          - "Rocky 10"
+          - "AlmaLinux 9"
+          - "AlmaLinux 10"
+          - "CentOS 9"
+          - "CentOS 10"
+          - "Ubuntu 26"
+
       # slurm_enabled is left alone: group_vars/all.yml already defaults it
-      # to true, which is what this inventory is for. supported_distros is
-      # left alone too, for as long as the cluster targets of the workflow
-      # are distributions the repository already claims - unlike the
-      # runner itself, see inventory/ci-build.yml.
+      # to true, which is what this inventory is for.
 
       ansible_host: 192.168.77.11
 

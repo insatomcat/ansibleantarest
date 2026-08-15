@@ -24,7 +24,7 @@
 #
 #  Nothing here changes anything, beyond one marker file in the shared /home
 #  that the last play removes. It is safe on a production deployment, and it
-#  is what the `cluster` job of .github/workflows/ci.yml runs after site.yml.
+#  is what the `slurm` job of .github/workflows/ci.yml runs after site.yml.
 #
 #  Both halves switch themselves off where they do not apply: the cluster
 #  plays when slurm_enabled is false, the firewall plays when

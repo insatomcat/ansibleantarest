@@ -3,11 +3,11 @@
 #  Build the artefacts once, then deploy them on one virtual machine per
 #  distribution, in parallel.
 #
-#      syntax   -> the playbooks parse
-#      build    -> build.yml on the runner itself, artefacts uploaded
-#      deploy   -> one job per target: boot a VM, site.yml, curl, idempotence
-#      cluster  -> one job per target: boot five VMs on a bridge, site.yml,
-#                  verify.yml, idempotence
+#      syntax     -> the playbooks parse
+#      build      -> build.yml on the runner itself, artefacts uploaded
+#      standalone -> one job per target: boot a VM, site.yml, curl, idempotence
+#      slurm      -> one job per target: boot five VMs on a bridge, site.yml,
+#                    verify.yml, idempotence
 #
 #  The runner stays Ubuntu 26.04 and is only the controller and the builder.
 #  Every deployment happens inside a QEMU/KVM machine booted from the cloud
@@ -21,8 +21,8 @@
 #  the target, and the artefacts actually travelling over the network to a
 #  machine that is not the controller.
 #
-#  The `deploy` job is Antares-Web on its own, with the studies running on
-#  the machine itself. The `cluster` job is the other shape the playbook
+#  The `standalone` job is Antares-Web on its own, with the studies running
+#  on the machine itself. The `slurm` job is the other shape the playbook
 #  supports and the one the reference procedure describes: five machines on
 #  a network of their own, the web server, the Slurm front-end and three
 #  compute nodes. That is what makes NFS, munge, the job submission over SSH
@@ -33,7 +33,9 @@
 #  Adding a distribution is one entry in the `targets` job below plus one
 #  option in the `only` input, provided its cloud image reads a NoCloud seed
 #  and boots on legacy BIOS - every image listed there does. Adding it to the
-#  cluster suite as well is the `cluster: true` flag on the same entry.
+#  Slurm suite as well is the `slurm` flag on the same entry: `always` for a
+#  target every pull request pays for, `dispatch` for one a manual run picks
+#  up. See the note above that table for what the memory columns are for.
 #
 #  The images are downloaded on every run and not cached. Measured on the
 #  first green run: between 5 and 8 seconds each, 110 to 165 MB/s from all
@@ -79,8 +81,8 @@ on:
         default: all
         options:
           - all
-          - single
-          - cluster
+          - standalone
+          - slurm
 
 # A full run takes tens of minutes; a new push makes the one in flight
 # pointless.
@@ -141,22 +143,36 @@ jobs:
   #  Both are deliberate: the EL side is where this playbook does the most
   #  distribution-specific work and a moving target there would be noise.
   #
-  #  `cluster` picks the targets the five-machine job runs on, which is a
-  #  subset: a cluster job is five virtual machines instead of one, and the
-  #  cluster roles are also where the distributions differ most (no EL 10 at
-  #  all, since OpenHPC 3 publishes no EL 10 tree). Debian 13 first because
-  #  it is the closest thing to the reference procedure.
+  #  `slurm` picks the targets the five-machine job runs on, and how often:
+  #  `always` on every pull request, `dispatch` only when a run asks for it.
+  #  One per family is what a pull request pays for, because that is where
+  #  the differences are - apt against dnf, the distribution's own Slurm
+  #  against OpenHPC, SELinux enforcing, firewalld. Moving a target from
+  #  `dispatch` to `always` is one word here.
+  #
+  #  EL 10 is absent from that column on purpose and not by oversight:
+  #  OpenHPC 3 publishes an EL_9 tree and nothing above it, so a Slurm node
+  #  on EL 10 is stopped by the check in roles/slurm_common/tasks/repo.yml.
+  #  The 10 series is covered by the standalone job, which is the only shape
+  #  the playbook supports there.
+  #
+  #  `web_mb`, `front_mb` and `node_mb` size the machines when the defaults
+  #  in the boot step do not fit. The EL images need more per machine and
+  #  give the web server less: measured on a five-machine cluster, an EL 9
+  #  compute node settles at 271 MB of its own and a Debian one at less,
+  #  while the EL web server never went past 1.4 GB.
   # ---------------------------------------------------------------------
   targets:
     name: targets
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
-      cluster_matrix: ${{ steps.pick.outputs.cluster_matrix }}
+      slurm_matrix: ${{ steps.pick.outputs.slurm_matrix }}
       suite: ${{ steps.pick.outputs.suite }}
     env:
       ONLY: ${{ inputs.only }}
       SUITE: ${{ inputs.suite }}
+      EVENT: ${{ github.event_name }}
     steps:
       - id: pick
         run: |
@@ -167,17 +183,21 @@ jobs:
               "name":  "debian13",
               "label": "Debian 13",
               "image": "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2",
-              "cluster": true
+              "slurm": "always"
             },
             {
               "name":  "ubuntu26",
               "label": "Ubuntu 26.04",
-              "image": "https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img"
+              "image": "https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img",
+              "slurm": "dispatch"
             },
             {
               "name":  "ol9",
               "label": "Oracle Linux 9",
-              "image": "https://yum.oracle.com/templates/OracleLinux/OL9/u8/x86_64/OL9U8_x86_64-kvm-b293.qcow2"
+              "image": "https://yum.oracle.com/templates/OracleLinux/OL9/u8/x86_64/OL9U8_x86_64-kvm-b293.qcow2",
+              "slurm": "always",
+              "web_mb": 2560,
+              "node_mb": 768
             },
             {
               "name":  "ol10",
@@ -187,7 +207,10 @@ jobs:
             {
               "name":  "centos9",
               "label": "CentOS Stream 9",
-              "image": "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+              "image": "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2",
+              "slurm": "dispatch",
+              "web_mb": 2560,
+              "node_mb": 768
             },
             {
               "name":  "centos10",
@@ -203,7 +226,11 @@ jobs:
             matrix=$(jq -c --arg n "$only" '[.[] | select(.name == $n)]' /tmp/targets.json)
             [ "$matrix" != '[]' ] || { echo "::error::no target named $only"; exit 1; }
           fi
-          cluster_matrix=$(jq -c '[.[] | select(.cluster)]' <<<"$matrix")
+          # On a pull request only the `always` targets; a manual run takes
+          # every target of the suite, narrowed by `only` like the other one.
+          slurm_matrix=$(jq -c --arg ev "$EVENT" \
+            '[.[] | select(.slurm) | select($ev != "pull_request" or .slurm == "always")]' \
+            <<<"$matrix")
 
           # A pull request runs both shapes. A manual run can narrow it down
           # to one through the `suite` input, which is worth doing while
@@ -213,12 +240,12 @@ jobs:
 
           {
             echo "matrix=$matrix"
-            echo "cluster_matrix=$cluster_matrix"
+            echo "slurm_matrix=$slurm_matrix"
             echo "suite=$suite"
           } >> "$GITHUB_OUTPUT"
           echo "suite: $suite"
-          echo "single-machine targets:"; jq -r '.[].label' <<<"$matrix"
-          echo "cluster targets:";        jq -r '.[].label' <<<"$cluster_matrix"
+          echo "standalone targets:"; jq -r '.[].label' <<<"$matrix"
+          echo "slurm targets:";      jq -r '.[].label' <<<"$slurm_matrix"
 
   # ---------------------------------------------------------------------
   #  One build for every target. The image and the web application are
@@ -305,14 +332,14 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------------
-  #  One deployment per distribution, each in its own virtual machine on
-  #  its own runner. fail-fast is off: a distribution breaking is a result,
+  #  One standalone deployment per distribution, each in its own virtual
+  #  machine on its own runner. fail-fast is off: a distribution breaking is a result,
   #  not a reason to lose the others.
   # ---------------------------------------------------------------------
-  deploy:
-    name: ${{ matrix.target.label }}
+  standalone:
+    name: standalone on ${{ matrix.target.label }}
     needs: [targets, build]
-    if: ${{ needs.targets.outputs.suite != 'cluster' }}
+    if: ${{ needs.targets.outputs.suite != 'slurm' }}
     runs-on: ${{ inputs.runner || 'ubuntu-26.04' }}
     timeout-minutes: 90
     strategy:
@@ -585,24 +612,31 @@ jobs:
   #  for 11.5 GB of guests, left the runner with 333 MB available and 600 MB
   #  swapped out, and starved MariaDB out of finishing its initialisation.
   #
-  #  So: 3 GB for the web machine, which runs the whole podman stack, 1.25 GB
-  #  for the front-end, which runs MariaDB next to the daemons, and 576 MB per
-  #  compute node, which runs slurmd and nothing else. 6 GB of guests, plus
-  #  half a gigabyte of swap inside each machine and a swap file out here for
-  #  the spikes. Drop a compute node from the table if this ever stops
-  #  fitting: three is what makes a multi-node step meaningful, not a number
-  #  the playbook depends on.
+  #  So, on the Debian family: 3 GB for the web machine, which runs the whole
+  #  podman stack, 1.25 GB for the front-end, which runs MariaDB next to the
+  #  daemons, and 576 MB per compute node, which runs slurmd and nothing else.
+  #  6 GB of guests, plus half a gigabyte of swap inside each machine and a
+  #  swap file out here for the spikes. The EL images ask for more per machine
+  #  and are given less on the web server, see the target table. Drop a
+  #  compute node from that table if this ever stops fitting: three is what
+  #  makes a multi-node step meaningful, not a number the playbook depends on.
+  #
+  #  Every guest ends up resident for its whole allocation, because a guest
+  #  fills what it is given with page cache, so the sum of the column is what
+  #  the runner pays. Measured inside the machines of an EL 9 cluster: 1.4 GB
+  #  really used on the web server, 499 MB on the front-end, 271 MB on a
+  #  compute node.
   # ---------------------------------------------------------------------
-  cluster:
-    name: cluster on ${{ matrix.target.label }}
+  slurm:
+    name: slurm on ${{ matrix.target.label }}
     needs: [targets, build]
-    if: ${{ needs.targets.outputs.suite != 'single' && needs.targets.outputs.cluster_matrix != '[]' }}
+    if: ${{ needs.targets.outputs.suite != 'standalone' && needs.targets.outputs.slurm_matrix != '[]' }}
     runs-on: ${{ inputs.runner || 'ubuntu-26.04' }}
     timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJSON(needs.targets.outputs.cluster_matrix) }}
+        target: ${{ fromJSON(needs.targets.outputs.slurm_matrix) }}
     env:
       # The cluster network. /24 on a bridge that exists only inside the
       # runner, with the runner itself on .1 as the gateway.
@@ -679,20 +713,27 @@ jobs:
       #  whichever renderer that particular distribution ships.
       # -------------------------------------------------------------
       - name: Build the cluster network
+        env:
+          # The defaults are the Debian family's, measured; a target that
+          # needs other numbers carries them in the table of the targets job.
+          WEB_MB: ${{ matrix.target.web_mb || 3072 }}
+          FRONT_MB: ${{ matrix.target.front_mb || 1280 }}
+          NODE_MB: ${{ matrix.target.node_mb || 576 }}
         run: |
           set -euxo pipefail
 
           sudo mkdir -p /mnt/vm
           sudo chown "$(id -u):$(id -g)" /mnt/vm
 
-          # name          last octet  MB     vcpus  disk
-          cat > /mnt/vm/machines <<'EOF'
-          antares-web   11          3072   2      40G
-          slurm-front   12          1280   2      20G
-          slurm-node-1  13          576    1      10G
-          slurm-node-2  14          576    1      10G
-          slurm-node-3  15          576    1      10G
+          # name          last octet  MB           vcpus  disk (a minimum)
+          cat > /mnt/vm/machines <<EOF
+          antares-web   11          $WEB_MB      2      40G
+          slurm-front   12          $FRONT_MB    2      20G
+          slurm-node-1  13          $NODE_MB     1      10G
+          slurm-node-2  14          $NODE_MB     1      10G
+          slurm-node-3  15          $NODE_MB     1      10G
           EOF
+          cat /mnt/vm/machines
 
           # The last resort under a spike, on the host side. What actually
           # keeps a machine this small out of trouble is the half gigabyte
@@ -759,6 +800,16 @@ jobs:
           # Ubuntu ships qcow2 under a .img name, so ask rather than assume.
           fmt=$(qemu-img info --output=json /mnt/vm/base.img | jq -r .format)
 
+          # An overlay smaller than the image under it silently truncates that
+          # image, and the guest then hangs in dracut waiting for a root LV
+          # that lies past the end of its own disk. An Oracle Linux template
+          # is 37 GiB of virtual size where a Debian genericcloud is 3 GiB, so
+          # the size in the table is a minimum and this is the floor. Nothing
+          # is paid for the difference: an overlay only holds what is written
+          # to it.
+          base_gib=$(( ( $(qemu-img info --output=json /mnt/vm/base.img \
+                           | jq -r '."virtual-size"') + 1073741823 ) / 1073741824 ))
+
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519_ci
@@ -781,8 +832,10 @@ jobs:
           while read -r name octet mem cpus disk; do
             [ -n "$name" ] || continue
 
+            want=${disk%G}
+            [ "$want" -ge "$base_gib" ] || want=$base_gib
             qemu-img create -f qcow2 -F "$fmt" -b /mnt/vm/base.img \
-                            "/mnt/vm/$name.qcow2" "$disk"
+                            "/mnt/vm/$name.qcow2" "${want}G"
 
             # The tap is created here rather than by QEMU so that QEMU does
             # not have to run as root to open /dev/net/tun. Names are tapN:
