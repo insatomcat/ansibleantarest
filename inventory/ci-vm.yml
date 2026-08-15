@@ -6,9 +6,10 @@
 #  The GitHub runner is the controller only. The `antares_web` machine is a
 #  throwaway virtual machine booted on the runner with QEMU/KVM from the
 #  cloud image of the distribution under test - Debian 13, Ubuntu 26.04,
-#  Oracle Linux 9 or 10, one job each. The artefacts built by the `build`
-#  job land in ./artifacts on the controller and site.yml ships them to the
-#  machine with `-e antarest_image_source=archive`.
+#  Oracle Linux 9 and 10, CentOS Stream 9 and 10, one job each. The
+#  artefacts built by the `build` job land in ./artifacts on the controller
+#  and site.yml ships them to the machine with
+#  `-e antarest_image_source=archive`.
 #
 #  What this buys over deploying on the runner itself, which is what CI did
 #  before: SELinux is enforcing, firewalld is installed and running, the
@@ -92,19 +93,25 @@ all:
       antarest_db_password: "ci-db-not-a-secret"
 
       # ---------------------------------------------------------------
-      #  Left at the shipped default, which is what most deployments run,
-      #  so CI tests the configuration people actually get.
+      #  On, which the shipped default is not: the nftables table and,
+      #  on the RedHat family, the masking of firewalld that comes with
+      #  it are half of what a deployment does to a machine, and CI
+      #  could not test either while it deployed on the runner itself.
+      #  A ruleset that locks the machine out now fails the job rather
+      #  than killing the agent it runs on.
       #
-      #  Turning it on is now a real test rather than a risk to the
-      #  runner: the machine is a VM whose SSH is a forwarded port, so a
-      #  ruleset that locks it out fails the job instead of killing the
-      #  agent. It filters the input hook only, trusts lo and the podman
-      #  bridges, and opens the SSH ports it reads from `sshd -T`. Both
-      #  the SSH the controller uses and the HTTP check on the forwarded
-      #  port arrive from QEMU's user-mode gateway on the machine's own
-      #  interface, so they go through the ruleset like real traffic.
+      #  It is a real test and not a formality here: the ruleset filters
+      #  the input hook with a drop policy, and both halves of what this
+      #  job checks arrive from QEMU's user-mode gateway on the
+      #  machine's own interface, so they cross it like traffic from
+      #  anywhere else. The HTTP check lands on port 80, which the role
+      #  opens for an antares_web machine. The SSH the controller uses
+      #  lands on 22, which is exactly the case
+      #  roles/hardening/tasks/facts.yml reads `sshd -T` for: behind a
+      #  forwarding, ansible_port is the outside port (2222) and the
+      #  packet reaching the machine carries the inside one.
       # ---------------------------------------------------------------
-      hardening_firewall_enabled: false
+      hardening_firewall_enabled: true
 
   children:
 
