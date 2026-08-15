@@ -150,11 +150,14 @@ jobs:
   #  against OpenHPC, SELinux enforcing, firewalld. Moving a target from
   #  `dispatch` to `always` is one word here.
   #
-  #  EL 10 is absent from that column on purpose and not by oversight:
-  #  OpenHPC 3 publishes an EL_9 tree and nothing above it, so a Slurm node
-  #  on EL 10 is stopped by the check in roles/slurm_common/tasks/repo.yml.
-  #  The 10 series is covered by the standalone job, which is the only shape
-  #  the playbook supports there.
+  #  Three of the six targets are in that column, and the three missing ones
+  #  are missing on purpose. EL 10: OpenHPC 3 publishes an EL_9 tree and
+  #  nothing above it. CentOS Stream, either series: it provides
+  #  redhat-release 9.0 and always will, being what the next RHEL minor is
+  #  built from rather than a rebuild of one, while the OpenHPC release
+  #  package requires 9.1 or later. Both are stopped with an explanation by
+  #  roles/slurm_common/tasks/repo.yml, and both keep the standalone job,
+  #  which is the only shape the playbook supports for them.
   #
   #  `web_mb`, `front_mb` and `node_mb` size the machines when the defaults
   #  in the boot step do not fit. The EL images need more per machine and
@@ -207,10 +210,7 @@ jobs:
             {
               "name":  "centos9",
               "label": "CentOS Stream 9",
-              "image": "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2",
-              "slurm": "dispatch",
-              "web_mb": 2560,
-              "node_mb": 768
+              "image": "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
             },
             {
               "name":  "centos10",
