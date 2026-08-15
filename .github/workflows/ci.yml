@@ -145,10 +145,15 @@ jobs:
   #
   #  `slurm` picks the targets the five-machine job runs on, and how often:
   #  `always` on every pull request, `dispatch` only when a run asks for it.
-  #  One per family is what a pull request pays for, because that is where
-  #  the differences are - apt against dnf, the distribution's own Slurm
-  #  against OpenHPC, SELinux enforcing, firewalld. Moving a target from
-  #  `dispatch` to `always` is one word here.
+  #  Every target that can carry a cluster is on `always` today; `dispatch`
+  #  is there for the next one that is not worth paying for on every push,
+  #  and moving a target between the two is one word here.
+  #
+  #  What that costs is not the same everywhere. Measured on the same run:
+  #  eighteen minutes for Debian 13, thirty-six for Oracle Linux 9, where
+  #  the first dnf transaction of each machine spends five minutes alone
+  #  indexing the repository metadata, and where a package task that has
+  #  nothing to do still answers in twenty seconds rather than in four.
   #
   #  Three of the six targets are in that column, and the three missing ones
   #  are missing on purpose. EL 10: OpenHPC 3 publishes an EL_9 tree and
@@ -192,7 +197,7 @@ jobs:
               "name":  "ubuntu26",
               "label": "Ubuntu 26.04",
               "image": "https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img",
-              "slurm": "dispatch"
+              "slurm": "always"
             },
             {
               "name":  "ol9",
