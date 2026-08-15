@@ -205,15 +205,11 @@ jobs:
           fi
           cluster_matrix=$(jq -c '[.[] | select(.cluster)]' <<<"$matrix")
 
-          # ---------------------------------------------------------------
-          #  TEMPORARY, and the one line to revert before merging into main:
-          #  while the cluster job is being written, a pull request run does
-          #  the cluster and not the six single-machine deployments, which
-          #  are already known to pass and would only pay for six runners.
-          #  Put `all` back to restore the full suite; a manual run can
-          #  already pick either through the `suite` input.
-          # ---------------------------------------------------------------
-          suite="${SUITE:-cluster}"
+          # A pull request runs both shapes. A manual run can narrow it down
+          # to one through the `suite` input, which is worth doing while
+          # working on either: a cluster job is one runner and eighteen
+          # minutes, the single-machine matrix is six of them.
+          suite="${SUITE:-all}"
 
           {
             echo "matrix=$matrix"
