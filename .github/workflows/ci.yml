@@ -1,22 +1,31 @@
 ---
 # ===========================================================================
-#  Build the artefacts, then deploy them, on a throwaway GitHub runner.
+#  Build the artefacts once, then deploy them on one virtual machine per
+#  distribution, in parallel.
 #
-#  The runner is the controller, the builder and the Antares-Web machine at
-#  once (see inventory/ci.yml), so one job covers the whole loop:
+#      syntax   -> the playbooks parse
+#      build    -> build.yml on the runner itself, artefacts uploaded
+#      deploy   -> one job per target: boot a VM, site.yml, curl, idempotence
 #
-#      build.yml  -> artefacts in ./artifacts on the controller
-#      site.yml   -> deployed with antarest_image_source=archive
-#      curl       -> the interface and the API actually answer
+#  The runner stays Ubuntu 26.04 and is only the controller and the builder.
+#  Every deployment happens inside a QEMU/KVM machine booted from the cloud
+#  image of the distribution under test, which is what makes Oracle Linux 9
+#  and 10 testable here at all: nested virtualisation is available on the
+#  GitHub-hosted Linux x64 runners, so /dev/kvm is real and the guest runs at
+#  native speed.
 #
-#  Ansible reaches the machine over SSH on 127.0.0.1 rather than with the
-#  local connection, so become and ansible.posix.synchronize behave the way
-#  they do on a real target. See the header of inventory/ci.yml.
+#  What that covers and deploying on the runner did not: SELinux enforcing,
+#  firewalld, the distribution's own kernel and podman, systemd as PID 1 of
+#  the target, and the artefacts actually travelling over the network to a
+#  machine that is not the controller.
+#
+#  Adding a distribution is one entry in the `targets` job below, provided
+#  its cloud image reads a NoCloud seed - every image listed there does.
 #
 #  ubuntu-26.04 is a beta runner image. If it starts misbehaving, run the
 #  workflow by hand and pick ubuntu-24.04 in the dropdown; nothing else has
-#  to change except dropping "Ubuntu 26" from supported_distros in the CI
-#  inventory, which is harmless to leave in place.
+#  to change except dropping "Ubuntu 26" from supported_distros in
+#  inventory/ci-build.yml, which is harmless to leave in place.
 # ===========================================================================
 
 name: build and deploy
@@ -28,12 +37,22 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: Runner image to build and deploy on
+        description: Runner image to build on
         type: choice
         default: ubuntu-26.04
         options:
           - ubuntu-26.04
           - ubuntu-24.04
+      only:
+        description: Deploy on a single target rather than all of them
+        type: choice
+        default: all
+        options:
+          - all
+          - debian13
+          - ubuntu26
+          - ol9
+          - ol10
 
 # A full run takes tens of minutes; a new push makes the one in flight
 # pointless.
@@ -76,10 +95,75 @@ jobs:
           ansible-galaxy collection install -r requirements.yml
 
       - name: Check the playbooks parse
-        run: ansible-playbook --syntax-check -i inventory/ci.yml site.yml build.yml
+        run: |
+          ansible-playbook --syntax-check -i inventory/ci-build.yml build.yml
+          ansible-playbook --syntax-check -i inventory/ci-vm.yml site.yml
 
-  build-deploy:
-    name: build and deploy
+  # ---------------------------------------------------------------------
+  #  The list of machines to deploy on, as data rather than as a matrix
+  #  literal, so that the `only` input can narrow it down to one. A job
+  #  level `if:` cannot do that job: the matrix context is not available
+  #  there, so every target would still appear, skipped.
+  #
+  #  `image` is the cloud image the VM boots from. Oracle publishes theirs
+  #  with the build number in the name, which is what pins them; Debian and
+  #  Ubuntu publish a `latest` that moves, which is what keeps them current.
+  #  Both are deliberate: the EL side is where this playbook does the most
+  #  distribution-specific work and a moving target there would be noise.
+  # ---------------------------------------------------------------------
+  targets:
+    name: targets
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    env:
+      ONLY: ${{ inputs.only }}
+    steps:
+      - id: pick
+        run: |
+          set -euo pipefail
+          cat > /tmp/targets.json <<'JSON'
+          [
+            {
+              "name":  "debian13",
+              "label": "Debian 13",
+              "image": "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
+            },
+            {
+              "name":  "ubuntu26",
+              "label": "Ubuntu 26.04",
+              "image": "https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img"
+            },
+            {
+              "name":  "ol9",
+              "label": "Oracle Linux 9",
+              "image": "https://yum.oracle.com/templates/OracleLinux/OL9/u8/x86_64/OL9U8_x86_64-kvm-b293.qcow2"
+            },
+            {
+              "name":  "ol10",
+              "label": "Oracle Linux 10",
+              "image": "https://yum.oracle.com/templates/OracleLinux/OL10/u1/x86_64/OL10U1_x86_64-kvm-b291.qcow2"
+            }
+          ]
+          JSON
+          only="${ONLY:-all}"
+          if [ "$only" = all ]; then
+            matrix=$(jq -c . /tmp/targets.json)
+          else
+            matrix=$(jq -c --arg n "$only" '[.[] | select(.name == $n)]' /tmp/targets.json)
+            [ "$matrix" != '[]' ] || { echo "::error::no target named $only"; exit 1; }
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          jq -r '.[].label' <<<"$matrix"
+
+  # ---------------------------------------------------------------------
+  #  One build for every target. The image and the web application are
+  #  distribution-independent - they are container layers - and the solver
+  #  tarballs are cached for both families at once, see
+  #  antares_build_solver_os in inventory/ci-build.yml.
+  # ---------------------------------------------------------------------
+  build:
+    name: build
     needs: syntax
     # inputs.runner is empty on push and pull_request, where the expression
     # falls back to the beta image.
@@ -114,9 +198,10 @@ jobs:
           ansible --version
           ansible-galaxy collection install -r requirements.yml
 
-      # rsync is what ansible.posix.synchronize drives on the controller side;
-      # the common role installs it on the target, but the controller is this
-      # same machine before any role has run.
+      # rsync is what ansible.posix.synchronize drives on the controller side,
+      # here to pull the artefacts back out of the build directory; the common
+      # role installs it on a target, but the builder is this same machine
+      # before any role has run.
       - name: Let Ansible reach the runner over SSH
         run: |
           set -euxo pipefail
@@ -131,49 +216,221 @@ jobs:
           # The name ansible connects to, and not 127.0.0.1 written out:
           # ansible.posix.synchronize takes that literal address as "same
           # machine, no SSH needed" and then rsyncs without the sudo that
-          # writing under /var needs. See inventory/ci.yml.
+          # reading under /mnt/antares-build needs. See inventory/ci-build.yml.
           echo '127.0.0.1 ci-target' | sudo tee -a /etc/hosts
           # Fails the step rather than the playbook if either half is missing.
           ssh -i ~/.ssh/id_ed25519_ci -o StrictHostKeyChecking=no \
               runner@ci-target 'id; sudo -n id'
 
       - name: Build the artefacts
-        run: ansible-playbook -i inventory/ci.yml build.yml
+        run: ansible-playbook -i inventory/ci-build.yml build.yml
 
       - name: Report what the build produced
         run: |
           ls -lh artifacts/
           cat artifacts/manifest.yml
 
+      # Around 900 MB of already-compressed archives, so no point paying for
+      # the zip: compression-level 0 stores them as they are.
+      - name: Upload the artefacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: artifacts
+          path: artifacts/
+          compression-level: 0
+          retention-days: 1
+
+  # ---------------------------------------------------------------------
+  #  One deployment per distribution, each in its own virtual machine on
+  #  its own runner. fail-fast is off: a distribution breaking is a result,
+  #  not a reason to lose the others.
+  # ---------------------------------------------------------------------
+  deploy:
+    name: ${{ matrix.target.label }}
+    needs: [targets, build]
+    runs-on: ${{ inputs.runner || 'ubuntu-26.04' }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    steps:
+
+      - uses: actions/checkout@v5
+
+      # antares_artifacts_dir defaults to ./artifacts in the checkout, which
+      # is where load_artifacts.yml reads them from before shipping them to
+      # the machine.
+      - name: Download the artefacts
+        uses: actions/download-artifact@v8
+        with:
+          name: artifacts
+          path: artifacts/
+
+      - name: Install Ansible
+        run: |
+          set -euxo pipefail
+          export PIPX_HOME="$HOME/.local/pipx"
+          export PIPX_BIN_DIR="$HOME/.local/bin"
+          pipx install --force ansible-core
+          echo "$PIPX_BIN_DIR" >> "$GITHUB_PATH"
+          export PATH="$PIPX_BIN_DIR:$PATH"
+          ansible --version
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Install QEMU and check the runner can nest a machine
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+               qemu-system-x86 qemu-utils cloud-image-utils rsync
+          # The runner images do carry /dev/kvm, root:kvm 0660, and the runner
+          # user is not in the kvm group. Neither of the two usual ways round
+          # that is right here: usermod only applies to a new login session,
+          # and every `run:` block is a child of the one that exists already,
+          # while the udev rule everyone copies has to be applied by an
+          # asynchronous `udevadm trigger` and is therefore a race. That race
+          # was lost by all four jobs of the first run of this workflow and
+          # won by the same rule in a probe minutes later, which is the worst
+          # kind of flake. chmod happens when it is called.
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::no /dev/kvm on this runner, the whole workflow depends on nested virtualisation"
+            exit 1
+          fi
+          sudo chmod 0666 /dev/kvm
+          test -w /dev/kvm
+
+      # -------------------------------------------------------------
+      #  Boot the machine.
+      #
+      #  The disk is a copy-on-write overlay on the downloaded image, sized
+      #  well past it: cloud-init grows the root filesystem to whatever it
+      #  finds, and the deployment needs room for the images and the study
+      #  workspace. cache=unsafe because the machine is destroyed with the
+      #  job, and it is worth a good deal of I/O.
+      #
+      #  Networking is QEMU's user-mode stack with two forwarded ports: 22
+      #  for Ansible and 80 for the HTTP checks. Nothing is bridged, so the
+      #  machine is reachable from this runner and from nowhere else.
+      # -------------------------------------------------------------
+      - name: Boot the ${{ matrix.target.label }} machine
+        env:
+          IMAGE: ${{ matrix.target.image }}
+        run: |
+          set -euxo pipefail
+
+          sudo mkdir -p /mnt/vm
+          sudo chown "$(id -u):$(id -g)" /mnt/vm
+
+          curl -fSL --retry 3 --retry-delay 5 -o /mnt/vm/base.img "$IMAGE"
+          # Ubuntu ships qcow2 under a .img name, so ask rather than assume.
+          fmt=$(qemu-img info --output=json /mnt/vm/base.img | jq -r .format)
+          qemu-img create -f qcow2 -F "$fmt" -b /mnt/vm/base.img \
+                          /mnt/vm/disk.qcow2 40G
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519_ci
+
+          # A NoCloud seed: the only account the machine gets is the one
+          # Ansible connects with. No package_update, the deployment
+          # installs what it needs and a distribution upgrade on first boot
+          # would only add minutes and a lock to fight.
+          cat > /mnt/vm/user-data <<EOF
+          #cloud-config
+          ssh_pwauth: false
+          package_update: false
+          package_upgrade: false
+          users:
+            - name: ansible
+              shell: /bin/bash
+              sudo: "ALL=(ALL) NOPASSWD:ALL"
+              ssh_authorized_keys:
+                - $(cat ~/.ssh/id_ed25519_ci.pub)
+          EOF
+          cat > /mnt/vm/meta-data <<'EOF'
+          instance-id: ci-vm
+          local-hostname: ci-vm
+          EOF
+          cloud-localds /mnt/vm/seed.img /mnt/vm/user-data /mnt/vm/meta-data
+
+          qemu-system-x86_64 \
+            -machine q35,accel=kvm -cpu host -smp 4 -m 8192 \
+            -drive file=/mnt/vm/disk.qcow2,if=virtio,format=qcow2,cache=unsafe,discard=unmap \
+            -drive file=/mnt/vm/seed.img,if=virtio,format=raw,readonly=on \
+            -netdev user,id=net0,hostfwd=tcp::2222-:22,hostfwd=tcp::8080-:80 \
+            -device virtio-net-pci,netdev=net0 \
+            -device virtio-rng-pci \
+            -display none -daemonize \
+            -pidfile /mnt/vm/qemu.pid \
+            -serial file:/mnt/vm/console.log
+
+          # `ci-vm` rather than 127.0.0.1 for the same reason the builder has
+          # `ci-target`: under the literal address ansible.posix.synchronize
+          # concludes both ends are the same machine and drops the elevation
+          # the far side needs. See inventory/ci-vm.yml.
+          echo '127.0.0.1 ci-vm' | sudo tee -a /etc/hosts
+
+          # Every later step shells into the machine, so the connection is
+          # written down once. ~/.local/bin is already on the path, the
+          # Ansible step above put it there.
+          mkdir -p ~/.local/bin
+          cat > ~/.local/bin/vm <<EOF
+          #!/bin/sh
+          exec ssh -i $HOME/.ssh/id_ed25519_ci -p 2222 \
+                   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                   -o LogLevel=ERROR -o ConnectTimeout=10 ansible@ci-vm "\$@"
+          EOF
+          chmod +x ~/.local/bin/vm
+
+          set +x
+          for _ in $(seq 1 120); do
+            if ~/.local/bin/vm 'sudo -n id' >/dev/null 2>&1; then
+              booted=1
+              break
+            fi
+            sleep 5
+          done
+          set -x
+          if [ "${booted:-0}" != 1 ]; then
+            echo "::error::${{ matrix.target.label }} never answered on SSH, console follows"
+            tail -n 200 /mnt/vm/console.log
+            exit 1
+          fi
+
+          ~/.local/bin/vm 'cat /etc/os-release; uname -r; getenforce || true; df -h /; free -m'
+
       - name: Deploy from the artefacts
         run: |
-          ansible-playbook -i inventory/ci.yml site.yml \
+          ansible-playbook -i inventory/ci-vm.yml site.yml \
             -e antarest_image_source=archive
 
       # site.yml already waits for /api/health before it finishes. What is
       # checked here is what a deployment is actually for: every unit up, the
-      # web application served, and nginx reaching the backend.
+      # web application served, and nginx reaching the backend. The HTTP half
+      # is driven from the runner through the forwarded port, so it also says
+      # the machine serves something to the outside rather than to itself.
       - name: Check the stack answers
         run: |
           set -euo pipefail
 
-          systemctl is-active --quiet antares-web.target
+          vm 'systemctl is-active --quiet antares-web.target'
 
           for unit in postgresql redis antarest antarest-celery-beat \
                       antarest-celery-worker antares-nginx; do
-            if ! systemctl is-active --quiet "$unit.service"; then
-              echo "::error::$unit.service is not running"
-              systemctl status --no-pager --full "$unit.service" || true
+            if ! vm "systemctl is-active --quiet $unit.service"; then
+              echo "::error::$unit.service is not running on ${{ matrix.target.label }}"
+              vm "systemctl status --no-pager --full $unit.service" || true
               exit 1
             fi
           done
 
-          sudo podman ps --format 'table {{.Names}}\t{{.Status}}'
+          vm 'sudo podman ps --format "table {{.Names}}\t{{.Status}}"'
 
           curl -fsS -o /dev/null -w 'GET /api/health -> %{http_code}\n' \
-               http://127.0.0.1/api/health
+               http://127.0.0.1:8080/api/health
 
-          curl -fsS http://127.0.0.1/ -o /tmp/index.html
+          curl -fsS http://127.0.0.1:8080/ -o /tmp/index.html
           grep -qi '<title' /tmp/index.html
 
           # Deliberately a wrong password: what is being tested is that the
@@ -182,7 +439,7 @@ jobs:
           # that matters, and it is the one the container name `antarest`
           # produces when it is wrong.
           code=$(curl -s -o /dev/null -w '%{http_code}' \
-                   -X POST http://127.0.0.1/api/v1/login \
+                   -X POST http://127.0.0.1:8080/api/v1/login \
                    -H 'Content-Type: application/json' \
                    -d '{"username":"admin","password":"wrong-on-purpose"}')
           echo "POST /api/v1/login -> $code"
@@ -200,30 +457,41 @@ jobs:
       - name: Check the deploy is idempotent
         run: |
           set -euo pipefail
-          ansible-playbook -i inventory/ci.yml site.yml \
+          ansible-playbook -i inventory/ci-vm.yml site.yml \
             -e antarest_image_source=archive --diff | tee /tmp/second-run.log
           # ANSIBLE_FORCE_COLOR paints the recap, so the host name in the log
-          # starts with an escape sequence rather than with `ci-runner`. Strip
+          # starts with an escape sequence rather than with `ci-vm`. Strip
           # them for the grep and keep the coloured copy for whoever reads it.
           sed -r 's/\x1b\[[0-9;]*m//g' /tmp/second-run.log > /tmp/second-run.txt
-          if ! grep -qE '^ci-runner[[:space:]]+:.*[[:space:]]changed=0[[:space:]]' \
+          if ! grep -qE '^ci-vm[[:space:]]+:.*[[:space:]]changed=0[[:space:]]' \
                  /tmp/second-run.txt; then
-            echo "::error::the second run of site.yml reported changes, see the recap above"
+            echo "::error::the second run of site.yml reported changes on ${{ matrix.target.label }}, see the recap above"
             exit 1
           fi
 
-      # Nobody can SSH into a runner after the fact, so everything needed to
-      # understand a failure has to be in the log.
+      # Nobody can SSH into a runner after the fact, let alone into a machine
+      # that dies with it, so everything needed to understand a failure has to
+      # be in the log. The console comes first: it is the only thing there is
+      # when the failure is the boot itself.
       - name: Collect diagnostics
         if: failure()
         run: |
           set +e
           df -h / /mnt
-          systemctl --failed --no-pager
-          sudo podman ps -a
-          sudo podman images
+          # Both guards are for a failure that happened before the machine
+          # existed, which is the one case where these would be noise rather
+          # than diagnostics.
+          if [ -f /mnt/vm/console.log ]; then
+            echo "===== serial console"
+            tail -n 200 /mnt/vm/console.log
+          fi
+          command -v vm > /dev/null || exit 0
+          vm 'systemctl --failed --no-pager'
+          vm 'sudo podman ps -a'
+          vm 'sudo podman images'
           for unit in postgresql redis antarest antarest-celery-beat \
                       antarest-celery-worker antares-nginx; do
             echo "===== $unit.service"
-            sudo journalctl -u "$unit.service" --no-pager -n 100
+            vm "sudo journalctl -u $unit.service --no-pager -n 100"
           done
+          exit 0
