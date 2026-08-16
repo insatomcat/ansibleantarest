@@ -324,6 +324,11 @@ jobs:
 
       - uses: actions/checkout@v5
 
+      # Printed before anything else so that it is in the log even when the
+      # job dies in its first minutes. See .github/actions/runner-specs.
+      - name: Runner specifications
+        uses: ./.github/actions/runner-specs
+
       # The image build, the podman store and the artefacts together need more
       # than / has free. /mnt is the runner's temp disk, which is where
       # antares_build_root points in the CI inventory.
@@ -409,6 +414,11 @@ jobs:
     steps:
 
       - uses: actions/checkout@v5
+
+      # Printed before anything else so that it is in the log even when the
+      # job dies in its first minutes. See .github/actions/runner-specs.
+      - name: Runner specifications
+        uses: ./.github/actions/runner-specs
 
       # antares_artifacts_dir defaults to ./artifacts in the checkout, which
       # is where load_artifacts.yml reads them from before shipping them to
@@ -667,8 +677,8 @@ jobs:
   #  Sizing. A runner is 2 cores, 7.9 GB of memory and a single 72 GB disk
   #  with 20 GB free once the preinstalled toolchains are counted, which is
   #  the whole difficulty of this job: five machines have to fit in what one
-  #  of them gets in the deploy job. Measured, not assumed - the step below
-  #  prints all three on every run, and the first attempt at this job asked
+  #  of them gets in the deploy job. Measured, not assumed - the first step of
+  #  the job prints all three on every run, and the first attempt at this job asked
   #  for 11.5 GB of guests, left the runner with 333 MB available and 600 MB
   #  swapped out, and starved MariaDB out of finishing its initialisation.
   #
@@ -706,6 +716,14 @@ jobs:
 
       - uses: actions/checkout@v5
 
+      # Printed before anything else so that it is in the log even when the
+      # job dies in its first minutes, and first of all here: five machines in
+      # 7.9 GB is the whole difficulty of this job, so the numbers it is sized
+      # against belong in the log of every run rather than in a comment that
+      # can go stale. See .github/actions/runner-specs.
+      - name: Runner specifications
+        uses: ./.github/actions/runner-specs
+
       - name: Download the artefacts
         uses: actions/download-artifact@v8
         with:
@@ -735,18 +753,18 @@ jobs:
           docker image prune --all --force || true
           df -h /
 
-      - name: Install QEMU and check what this runner has to offer
+      - name: Install QEMU and check the runner can nest a machine
         run: |
           set -euxo pipefail
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
                qemu-system-x86 qemu-utils cloud-image-utils dnsmasq-base \
                iproute2 rsync
-          # Five machines is enough that the numbers are worth having in the
-          # log of every run rather than in a comment that can go stale.
-          # /mnt is a directory on / here, not the separate temp disk it is
-          # on other runner sizes; everything below fits in the same 72 GB.
-          nproc; free -m; df -h /
+          # What this runner has to offer was printed by the first step of the
+          # job. Worth remembering when reading it: /mnt is a directory on /
+          # here, not the separate temp disk it is on other runner sizes, so
+          # everything this job creates fits in the same 72 GB.
+          #
           # See the deploy job: usermod would need a new login session and the
           # udev rule everyone copies is a race. chmod happens when it is
           # called.
