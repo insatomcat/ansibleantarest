@@ -68,12 +68,30 @@
          antarest_https_port if antarest_tls_enabled | default(false) | bool else antarest_http_port }}
   tasks:
 
+    # `until` rather than a single shot, and the state itself rather than the
+    # exit status: the units of the stack carry Restart=on-failure with
+    # RestartSec=10, so a container that crashed once is answered `activating`
+    # for ten seconds by a machine that is perfectly healthy ten seconds later.
+    # Asking at that instant is what makes this play the only impatient check
+    # in a file whose every other probe retries, and it has already failed a
+    # cluster that had converged, on an AntaREST backend that lost a race to
+    # create its own default admin group and was restarted by systemd.
+    #
+    # Only the transient states are waited out. `failed` - the unit gave up,
+    # its StartLimitBurst exhausted - and `inactive` are answered at once, so
+    # nothing here waits a minute to report a stack that is really down, and
+    # the assert below still names the units and their state. A unit that
+    # never leaves `activating` exhausts the retries and lands there too,
+    # since failed_when keeps the sweep itself from failing.
     - name: Ask systemd about the units of the stack
       ansible.builtin.command: "systemctl is-active {{ item }}"
       register: verify_units
       changed_when: false
       failed_when: false
       become: true
+      until: verify_units.stdout not in ['activating', 'deactivating', 'reloading']
+      retries: 12
+      delay: 5
       loop: "{{ verify_web_units }}"
       vars:
         verify_web_units: >-
@@ -88,7 +106,9 @@
         fail_msg: >-
           Not running on {{ inventory_hostname }}:
           {{ verify_units.results | rejectattr('stdout', 'equalto', 'active')
-             | map(attribute='item') | join(', ') }}.
+             | map(attribute='item') | zip(verify_units.results
+                | rejectattr('stdout', 'equalto', 'active') | map(attribute='stdout'))
+             | map('join', ' is ') | join(', ') }}.
           `systemctl status` and `journalctl -u <unit>` there say why.
         quiet: true
 

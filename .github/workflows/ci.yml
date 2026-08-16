@@ -581,10 +581,25 @@ jobs:
 
           vm 'systemctl is-active --quiet antares-web.target'
 
+          # The state rather than the exit status, and waited out rather than
+          # asked once: the units carry Restart=on-failure with RestartSec=10,
+          # so a container that crashed once answers `activating` for ten
+          # seconds on a machine that is healthy ten seconds later. Only the
+          # transient states are waited for; `failed`, where the unit gave up
+          # with its StartLimitBurst exhausted, is reported at once. Same
+          # reasoning as the unit sweep of verify.yml, which the cluster job
+          # runs instead of this step.
           for unit in postgresql redis antarest antarest-celery-beat \
                       antarest-celery-worker antares-nginx; do
-            if ! vm "systemctl is-active --quiet $unit.service"; then
-              echo "::error::$unit.service is not running on ${{ matrix.target.label }}"
+            for _ in $(seq 1 12); do
+              state=$(vm "systemctl is-active $unit.service" || true)
+              case "$state" in
+                activating | deactivating | reloading) sleep 5 ;;
+                *) break ;;
+              esac
+            done
+            if [ "$state" != active ]; then
+              echo "::error::$unit.service is $state on ${{ matrix.target.label }}"
               vm "systemctl status --no-pager --full $unit.service" || true
               exit 1
             fi
