@@ -60,6 +60,19 @@
     - antarest_nginx_upstream.stat.exists | default(false)
     - antarest_nginx_upstream.stat.checksum != antarest_nginx_upstream_sha1
 
+# Both Let's Encrypt directories have to exist before nginx starts, and neither
+# one does on the run that turns TLS on: /etc/letsencrypt is created by the
+# certbot package, which is only installed once the stack is up (certbot.yml),
+# and the webroot belongs to this deployment alone. The nginx container mounts
+# both, and podman refuses a bind mount whose source is missing rather than
+# creating it:
+#
+#   Error: statfs /etc/letsencrypt: no such file or directory
+#
+# The unit then fails with status=125, the container is never up to answer the
+# challenge, and the run dies waiting for the interface without ever reaching
+# certbot. 0755 is the mode the certbot package ships; what it puts underneath
+# (live/, archive/, 0700) is its own business and is left alone.
 - name: Create the TLS directories
   ansible.builtin.file:
     path: "{{ item }}"
@@ -67,7 +80,10 @@
     owner: root
     group: root
     mode: "0755"
-  loop: "{{ [antarest_tls_dir] + ([antarest_tls_webroot] if antarest_tls_provider == 'letsencrypt' else []) }}"
+  loop: >-
+    {{ [antarest_tls_dir]
+       + (['/etc/letsencrypt', antarest_tls_webroot]
+          if antarest_tls_provider == 'letsencrypt' else []) }}
 
 # ---------------------------------------------------------------------------
 #  SELinux and the Let's Encrypt tree
