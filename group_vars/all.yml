@@ -71,12 +71,11 @@ antares_home: "/home/{{ antares_user }}"
 #
 #  The list below is what the playbook claims, and it is meant to be read as a
 #  claim rather than as a wish. All but one line is deployed on every pull
-#  request by .github/workflows/ci.yml, most of them twice: a single machine
-#  running Antares-Web, and a five-machine cluster. CentOS Stream 9 is the
-#  exception on the second count, since it cannot carry a Slurm node, and
-#  RedHat is the exception on both: the CRB repository id and the epel-release
-#  URL are written for it, but it needs a subscription that CI has not got, so
-#  it is here on the strength of its rebuilds rather than of a run.
+#  request by .github/workflows/ci.yml, twice: a single machine running
+#  Antares-Web, and a five-machine cluster. RedHat is the exception, on both
+#  counts: the CRB repository id and the epel-release URL are written for it,
+#  but it needs a subscription that CI has not got, so it is here on the
+#  strength of its rebuilds rather than of a run.
 #
 #  What is deliberately *not* here:
 #
