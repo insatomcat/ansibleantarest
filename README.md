@@ -14,6 +14,8 @@ Three types of machines are used:
 
 Slurm is optional: with `slurm_enabled: false` only Antares-Web is deployed and studies run with the local solver on the web machine. When Slurm is enabled, both launchers are shown in the UI and `antarest_default_launcher` selects the default one.
 
+A machine may be in several of those groups. Listing the front-end in `slurm_compute` as well gives a cluster where the controller also runs jobs, which is what a two-machine or a small deployment looks like; the shared `/home` is simply local there, and nothing else changes. The number of compute nodes is whatever the inventory says: `slurm.conf` is generated from the group.
+
 ## Quick start
 
 ```bash

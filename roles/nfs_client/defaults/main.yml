@@ -1,4 +1,14 @@
 ---
+# True on the machine that exports the share, which happens when the Slurm
+# front-end is also a compute node. There is nothing to mount there: the
+# directory is local and already holds what the export serves. Mounting it on
+# the server anyway is a loopback NFS mount over the very directory being
+# exported - the kernel allows it, it hides the real /home behind a mount of
+# itself, and it is a documented way to deadlock a machine under memory
+# pressure, since the client side waits on a server that is waiting for memory.
+nfs_client_is_export_server: >-
+  {{ inventory_hostname in (groups['slurm_frontend'] | default([])) }}
+
 # nfs-common on the Debian family, nfs-utils on the RedHat one, which ships the
 # server and the client tools together.
 nfs_client_packages: "{{ _nfs_client_packages_by_family[ansible_facts['os_family']] }}"

@@ -14,12 +14,19 @@
 
 # The slurm-wlm metapackage may have dragged slurmctld in; only the front-end
 # is supposed to run a controller.
+#
+# Unless this machine *is* the front-end. A small deployment can put the
+# controller and a compute node on the same host, and site.yml runs the
+# front-end play before this one, so without this condition the run would start
+# slurmctld and then stop and disable it a few tasks later, leaving a cluster
+# with no controller and no error to explain it.
 - name: Make sure no controller runs on a compute node
   ansible.builtin.systemd:
     name: slurmctld
     enabled: false
     state: stopped
   failed_when: false
+  when: inventory_hostname not in (groups['slurm_frontend'] | default([]))
 
 - name: Start and enable slurmd
   ansible.builtin.systemd:

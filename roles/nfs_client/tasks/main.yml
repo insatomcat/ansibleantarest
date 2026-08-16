@@ -22,11 +22,13 @@
     fstype: nfs
     opts: "{{ nfs_mount_options }}"
     state: mounted
+  when: not nfs_client_is_export_server | bool
 
 - name: Check the shared home is really an NFS mount
   ansible.builtin.command: findmnt --noheadings --output FSTYPE,SOURCE --target {{ nfs_export_path }}
   register: nfs_findmnt
   changed_when: false
+  when: not nfs_client_is_export_server | bool
 
 - name: Fail when the shared home is not mounted over NFS
   ansible.builtin.assert:
@@ -35,3 +37,26 @@
       {{ nfs_export_path }} is not an NFS mount on {{ inventory_hostname }}:
       {{ nfs_findmnt.stdout }}
     quiet: true
+  when: not nfs_client_is_export_server | bool
+
+# The same question the assert above answers for a client, asked the other way
+# round on the machine that serves the share: what the jobs read has to be the
+# exported directory itself, not something mounted over it by an earlier shape
+# of this deployment.
+- name: Check the shared home of the server is its own directory
+  ansible.builtin.command: findmnt --noheadings --output FSTYPE,SOURCE --target {{ nfs_export_path }}
+  register: nfs_findmnt_server
+  changed_when: false
+  when: nfs_client_is_export_server | bool
+
+- name: Fail when the server mounts its own export
+  ansible.builtin.assert:
+    that: "'nfs' not in nfs_findmnt_server.stdout"
+    fail_msg: >-
+      {{ nfs_export_path }} on {{ inventory_hostname }} is an NFS mount, and
+      this machine is the one exporting it: {{ nfs_findmnt_server.stdout }}.
+      That hides the exported directory behind a mount of itself. Unmount it
+      ({{ nfs_export_path }}) and remove its line from /etc/fstab, then run
+      again.
+    quiet: true
+  when: nfs_client_is_export_server | bool
