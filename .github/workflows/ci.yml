@@ -155,14 +155,21 @@ jobs:
   #  indexing the repository metadata, and where a package task that has
   #  nothing to do still answers in twenty seconds rather than in four.
   #
-  #  Three of the six targets are in that column, and the three missing ones
-  #  are missing on purpose. EL 10: OpenHPC 3 publishes an EL_9 tree and
-  #  nothing above it. CentOS Stream, either series: it provides
-  #  redhat-release 9.0 and always will, being what the next RHEL minor is
-  #  built from rather than a rebuild of one, while the OpenHPC release
-  #  package requires 9.1 or later. Both are stopped with an explanation by
-  #  roles/slurm_common/tasks/repo.yml, and both keep the standalone job,
-  #  which is the only shape the playbook supports for them.
+  #  Five of the six targets are in that column, and the sixth is missing on
+  #  purpose: CentOS Stream 9 provides redhat-release 9.0 and always will,
+  #  being what the next RHEL minor is built from rather than a rebuild of
+  #  one, while the OpenHPC release package requires 9.1 or later. It is
+  #  stopped with an explanation by roles/slurm_common/tasks/repo.yml and
+  #  keeps the standalone job, which is the only shape the playbook supports
+  #  for it.
+  #
+  #  Oracle Linux 10 is on `always` since OpenHPC 4 gave EL 10 a Slurm: it is
+  #  the newest cluster target and the one whose repository handling is least
+  #  worn in. CentOS Stream 10 is on `dispatch` instead: the 10 stream is not
+  #  in the position of the 9 one, it provides redhat-release 10.0 and the
+  #  OpenHPC 4 packages resolve there, but that has been checked on packages
+  #  rather than on a five-machine cluster, so it is one word away rather
+  #  than on every pull request.
   #
   #  `web_mb`, `front_mb` and `node_mb` size the machines when the defaults
   #  in the boot step do not fit. The EL images need more per machine and
@@ -210,7 +217,10 @@ jobs:
             {
               "name":  "ol10",
               "label": "Oracle Linux 10",
-              "image": "https://yum.oracle.com/templates/OracleLinux/OL10/u1/x86_64/OL10U1_x86_64-kvm-b291.qcow2"
+              "image": "https://yum.oracle.com/templates/OracleLinux/OL10/u1/x86_64/OL10U1_x86_64-kvm-b291.qcow2",
+              "slurm": "always",
+              "web_mb": 2560,
+              "node_mb": 768
             },
             {
               "name":  "centos9",
@@ -220,7 +230,10 @@ jobs:
             {
               "name":  "centos10",
               "label": "CentOS Stream 10",
-              "image": "https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-latest.x86_64.qcow2"
+              "image": "https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-latest.x86_64.qcow2",
+              "slurm": "dispatch",
+              "web_mb": 2560,
+              "node_mb": 768
             }
           ]
           JSON
