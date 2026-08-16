@@ -58,16 +58,16 @@ antares_home: "/home/{{ antares_user }}"
 #    - Slurm, which no EL repository ships: it comes from OpenHPC, see
 #      slurm_repo below.
 #
-#  EL 9 and EL 10 are both listed below, and they are not equivalent. The
-#  antares_web machine runs on either. The Slurm roles are EL 9 only: OpenHPC 3
-#  publishes an EL_9 tree and nothing for 10, so a Slurm node on EL 10 is
-#  stopped by the check in roles/slurm_common/tasks/repo.yml rather than left
-#  to fail on a missing slurm-ohpc package.
+#  EL 9 and EL 10 both carry a Slurm node, from two different OpenHPC series:
+#  OpenHPC 3 for EL 9, OpenHPC 4 for EL 10, see slurm_openhpc_release below.
+#  A major OpenHPC does not publish for at all is stopped by the check in
+#  roles/slurm_common/tasks/repo.yml rather than left to fail on a missing
+#  slurm-ohpc package.
 #
 #  One caveat, on both families: the Slurm version differs between releases
-#  (23.11 on Ubuntu 24.04, 24.11 on Debian 13, whatever OpenHPC currently
-#  ships on EL 9) and the daemons only interoperate across a couple of majors,
-#  so a single cluster must run a single distribution.
+#  (23.11 on Ubuntu 24.04, 24.11 on Debian 13, 25.11 from OpenHPC 3 on EL 9
+#  and 25.05 from OpenHPC 4 on EL 10) and the daemons only interoperate across
+#  a couple of majors, so a single cluster must run a single distribution.
 # ---------------------------------------------------------------------------
 supported_distros:
   - "Debian 12"
@@ -307,19 +307,39 @@ slurm_partition: antares
 # Where the Slurm packages come from.
 #
 #   distro  : the distribution ships them. True on Debian and Ubuntu
-#             (slurm-wlm), false on every EL 9 rebuild: neither the base
+#             (slurm-wlm), false on every EL rebuild: neither the base
 #             repositories nor EPEL carry Slurm any more.
-#   openhpc : the OpenHPC 3 repositories, which package Slurm for EL 9 and are
+#   openhpc : the OpenHPC repositories, which package Slurm for EL and are
 #             what the HPC world actually uses there. The package names then
 #             carry an -ohpc suffix, and /etc/slurm, the systemd units and the
 #             slurm account are the same as everywhere else, so nothing beyond
 #             the names changes.
 #
-# The default follows the family. Point slurm_openhpc_release at another
-# release rpm to pin a different OpenHPC version, or set this to `distro` on a
-# RedHat machine whose Slurm you install yourself.
+# The default follows the family. Set slurm_repo to `distro` on a RedHat
+# machine whose Slurm you install yourself.
 slurm_repo: "{{ 'openhpc' if ansible_facts['os_family'] == 'RedHat' else 'distro' }}"
-slurm_openhpc_release: "http://repos.openhpc.community/OpenHPC/3/EL_9/x86_64/ohpc-release-3-1.el9.x86_64.rpm"
+
+# The release rpm that declares those repositories, per EL major, because
+# OpenHPC does not keep one series per major: OpenHPC 3 publishes EL_9 and no
+# more, OpenHPC 4 publishes EL_10 and openEuler and has no EL_9 tree. So the
+# major of the machine picks the series, and a machine whose major is not
+# listed here gets an empty string, which roles/slurm_common/tasks/repo.yml
+# turns into a named failure rather than a missing package much later.
+#
+# Consequence worth knowing before mixing majors: the two series do not carry
+# the same Slurm. OpenHPC 3 is on 25.11 today, OpenHPC 4 on 25.05, so EL 10
+# gets the *older* one. That does not matter for one cluster, which the
+# "one distribution per cluster" rule above already keeps homogeneous, and it
+# is the reason that rule is there.
+#
+# Override with a full URL to pin another version or a local mirror. The
+# check in repo.yml only compares the EL_<major> in the path with the machine.
+slurm_openhpc_release: >-
+  {{ _slurm_openhpc_release_by_major[ansible_facts['distribution_major_version']]
+     | default('') }}
+_slurm_openhpc_release_by_major:
+  "9": "http://repos.openhpc.community/OpenHPC/3/EL_9/x86_64/ohpc-release-3-1.el9.x86_64.rpm"
+  "10": "http://repos.openhpc.community/OpenHPC/4/EL_10/x86_64/ohpc-release-4-1.el10.x86_64.rpm"
 
 # Paths and system account used by the Slurm daemons. Defined here rather
 # than in the roles because several plays need them.

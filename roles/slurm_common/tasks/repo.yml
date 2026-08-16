@@ -3,45 +3,75 @@
 # none. Included from main.yml on every Slurm node, before the first install,
 # so that slurm_frontend and slurm_compute find their own packages later.
 #
-# No EL 9 repository packages Slurm: not the base repositories, not EPEL, which
+# No EL repository packages Slurm: not the base repositories, not EPEL, which
 # dropped it years ago. OpenHPC is the maintained answer, it is what the HPC
 # world runs on EL, and its packages keep /etc/slurm, the systemd unit names
 # and the slurm account exactly where every other distribution puts them. Only
 # the package names change, and those live in defaults/main.yml.
+#
+# One series per major, not one series for everything: OpenHPC 3 publishes an
+# EL_9 tree and nothing above, OpenHPC 4 publishes EL_10 and has no EL_9 tree.
+# group_vars/all.yml maps the major to the release rpm; the two checks below
+# are what happens when that mapping has nothing to say.
 
-# OpenHPC 3 publishes an EL_9 tree and nothing above it, so on an EL 10 node
-# the release rpm below would install a repository built for the previous major
-# and every slurm-ohpc package would then be missing or unresolvable. Said here,
-# where the reason is, rather than fifteen tasks later on "No package slurm-ohpc
-# available". The test is on the shipped default only: an operator who points
-# slurm_openhpc_release at another tree is taken at their word.
+# A major OpenHPC publishes nothing for, EL 8 or whatever comes after 10 before
+# OpenHPC follows. Said here, where the reason is, rather than fifteen tasks
+# later on "No package slurm-ohpc available".
 - name: Check OpenHPC publishes packages for this release
   ansible.builtin.assert:
     that:
-      - slurm_openhpc_release is not search('/EL_9/')
-        or ansible_facts['distribution_major_version'] == '9'
+      - slurm_openhpc_release | length > 0
     fail_msg: >-
       {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}
-      {{ ansible_facts['distribution_version'] }} and slurm_openhpc_release is
-      still the EL 9 one ({{ slurm_openhpc_release }}). OpenHPC 3 has no EL 10
-      tree, so there is nothing to install Slurm from on this machine. Keep the
-      Slurm nodes on EL 9, point slurm_openhpc_release at an EL 10 release rpm
-      once OpenHPC publishes one, or set slurm_repo to `distro` and install
-      Slurm yourself. The antares_web machine is not concerned: it reaches the
-      cluster over SSH and runs on either major.
+      {{ ansible_facts['distribution_version'] }} and no OpenHPC release
+      package is known for EL {{ ansible_facts['distribution_major_version'] }}
+      (see slurm_openhpc_release in group_vars/all.yml, which today maps EL 9
+      to OpenHPC 3 and EL 10 to OpenHPC 4). There is nothing to install Slurm
+      from on this machine. Put the Slurm nodes on a major OpenHPC publishes
+      for, set slurm_openhpc_release to a release rpm yourself, or set
+      slurm_repo to `distro` and install Slurm yourself. The antares_web
+      machine is not concerned: it reaches the cluster over SSH and runs on any
+      of the supported majors.
+    quiet: true
+
+# The release rpm carries the major in its path and installs repositories built
+# for it alone, so an EL_9 tree on an EL 10 machine leaves every slurm-ohpc
+# package unresolvable. Only a URL that names a tree is tested: an operator
+# pointing slurm_openhpc_release at a local mirror is taken at their word.
+- name: Check the OpenHPC release package matches this major
+  ansible.builtin.assert:
+    that:
+      - slurm_openhpc_release is not search('/EL_[0-9]+/')
+        or slurm_openhpc_release is
+           search('/EL_' ~ ansible_facts['distribution_major_version'] ~ '/')
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}
+      {{ ansible_facts['distribution_version'] }} while slurm_openhpc_release
+      points at a tree built for another major ({{ slurm_openhpc_release }}).
+      The repositories it declares would carry no package this machine can
+      install. Point it at the EL
+      {{ ansible_facts['distribution_major_version'] }} release rpm of the
+      matching OpenHPC series, or set slurm_repo to `distro` and install Slurm
+      yourself.
     quiet: true
 
 # CentOS Stream is not a rebuild of a RHEL minor, it is what the next one is
-# built from, and its release package says so: it provides `redhat-release
-# 9.0` and stays there for the life of the stream. The OpenHPC release rpm
-# requires `redhat-release >= 9.1`, so dnf answers with forty lines about
-# centos-release-automotive conflicting with centos-stream-release rather than
-# with the one fact that matters. Same reasoning as the check above, and the
-# same escape hatch: only the shipped repository is tested.
+# built from, and its release package says so: `centos-stream-release` provides
+# `redhat-release 9.0` on the 9 stream and stays there for the life of the
+# stream. The OpenHPC release rpm requires `redhat-release >= 9.1`, so dnf
+# answers with forty lines about centos-release-automotive conflicting with
+# centos-stream-release rather than with the one fact that matters.
+#
+# The 10 stream is not in that position: it provides `redhat-release 10.0`,
+# which satisfies >= 9.1 the same way any EL 10 rebuild does, and OpenHPC 4
+# installs there. So this refuses Stream 9 by name rather than CentOS as a
+# distribution. Same escape hatch as above: only the shipped repository is
+# tested.
 - name: Check the distribution can satisfy the OpenHPC release package
   ansible.builtin.assert:
     that:
       - ansible_facts['distribution'] != 'CentOS'
+        or ansible_facts['distribution_major_version'] != '9'
         or slurm_openhpc_release is not search('repos.openhpc.community')
     fail_msg: >-
       {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}
@@ -49,10 +79,33 @@
       redhat-release 9.0 and always will, while the OpenHPC release package
       requires redhat-release >= 9.1. There is nothing to install Slurm from
       on this machine. Put the Slurm nodes on a RHEL rebuild - Oracle Linux,
-      Rocky, AlmaLinux - or set slurm_repo to `distro` and install Slurm
-      yourself. The antares_web machine is not concerned: it reaches the
-      cluster over SSH and runs on CentOS Stream perfectly well.
+      Rocky, AlmaLinux - on CentOS Stream 10, which provides redhat-release
+      10.0 and is not concerned, or set slurm_repo to `distro` and install
+      Slurm yourself. The antares_web machine is not concerned either: it
+      reaches the cluster over SSH and runs on CentOS Stream perfectly well.
     quiet: true
+
+# The release rpm requires the `epel-release` capability, and that is not
+# always satisfiable on a machine that does have EPEL. Oracle ships its own
+# release package: `oracle-epel-release-el9` provides `epel-release`,
+# `oracle-epel-release-el10` does not, and Oracle's EPEL 10 mirror does not
+# carry Fedora's `epel-release` either, so on Oracle Linux 10 dnf refuses the
+# OpenHPC release rpm with "nothing provides epel-release" although EPEL is
+# configured and enabled. Asking rather than naming that distribution: the day
+# Oracle puts the Provides back, this goes back to dnf on its own.
+#
+# `rpm -q` first because it answers instantly from the rpmdb and covers every
+# machine where the common role has already installed EPEL; `dnf repoquery`
+# only when it does not, and it is the slow one on EL.
+- name: Look for something that provides epel-release
+  ansible.builtin.shell:
+    cmd: >-
+      rpm -q --whatprovides epel-release
+      || dnf -q repoquery --whatprovides epel-release | grep -q .
+  register: slurm_epel_release_provider
+  changed_when: false
+  failed_when: false
+  check_mode: false
 
 - name: Install the OpenHPC release package
   ansible.builtin.dnf:
@@ -63,6 +116,38 @@
     # that installs it there is nothing to verify against yet. Everything
     # pulled from those repositories afterwards is checked normally.
     disable_gpg_check: true
+  when: slurm_epel_release_provider.rc == 0
+
+# The other half of the task above, for the machines where dnf would refuse it
+# over `epel-release`. What that package actually contains is one .repo file
+# and one GPG key, and nothing it declares comes from EPEL: on EL 10 the whole
+# Slurm set resolves from OpenHPC plus baseos and appstream, munge and freeipmi
+# included. So the dependency is nominal here and `--nodeps` drops exactly it,
+# rather than working around a real missing package.
+#
+# Idempotence is on the NVR: `rpm -q ohpc-release` prints what the release rpm
+# is named minus the .rpm, so the two match on a machine that already has this
+# exact release, and differ on the first run and on a change of OpenHPC series.
+# A release rpm renamed away from the upstream convention would be reinstalled,
+# and rpm says so rather than looping quietly.
+- name: Read the OpenHPC release package already installed
+  ansible.builtin.command:
+    argv: [rpm, -q, ohpc-release]
+  register: slurm_ohpc_release_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: slurm_epel_release_provider.rc != 0
+
+- name: Install the OpenHPC release package, minus its epel-release dependency
+  ansible.builtin.command:
+    argv: [rpm, -Uvh, --nodeps, "{{ slurm_openhpc_release }}"]
+  register: slurm_ohpc_release_rpm
+  changed_when: slurm_ohpc_release_rpm.rc == 0
+  when:
+    - slurm_epel_release_provider.rc != 0
+    - slurm_ohpc_release_installed.stdout | default('') | trim
+      != slurm_openhpc_release | basename | regex_replace('\.rpm$', '')
 
 # OpenHPC's own recipe creates this account before installing anything, and so
 # does the slurm-ohpc package. Doing it here as well pins what the daemons run
