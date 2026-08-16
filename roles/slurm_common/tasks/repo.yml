@@ -78,10 +78,10 @@
       {{ ansible_facts['distribution_version'] }}, which provides
       redhat-release 9.0 and always will, while the OpenHPC release package
       requires redhat-release >= 9.1. There is nothing to install Slurm from
-      on this machine. Put the Slurm nodes on a RHEL rebuild - Oracle Linux,
-      Rocky, AlmaLinux - on CentOS Stream 10, which provides redhat-release
-      10.0 and is not concerned, or set slurm_repo to `distro` and install
-      Slurm yourself. The antares_web machine is not concerned either: it
+      on this machine. Put the Slurm nodes on a RHEL rebuild - Oracle Linux or
+      Rocky - on CentOS Stream 10, which provides redhat-release 10.0 and is
+      not concerned, or set slurm_repo to `distro` and install Slurm
+      yourself. The antares_web machine is not concerned either: it
       reaches the cluster over SSH and runs on CentOS Stream perfectly well.
     quiet: true
 

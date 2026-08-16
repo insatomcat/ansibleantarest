@@ -43,30 +43,6 @@ all:
       ansible_user: runner
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519_ci
 
-      # ---------------------------------------------------------------
-      #  The runner image is Ubuntu 26.04, which the shipped
-      #  supported_distros does not list: 26.04 is a GitHub beta image and
-      #  claiming it repository-wide would be claiming more than has been
-      #  tested. Listing it here is what the preflight failure message
-      #  tells you to do, and it keeps the claim scoped to CI.
-      #  Drop the last entry when running this inventory on ubuntu-24.04.
-      # ---------------------------------------------------------------
-      supported_distros:
-        - "Debian 12"
-        - "Debian 13"
-        - "Ubuntu 22"
-        - "Ubuntu 24"
-        - "OracleLinux 9"
-        - "OracleLinux 10"
-        - "RedHat 9"
-        - "RedHat 10"
-        - "Rocky 9"
-        - "Rocky 10"
-        - "AlmaLinux 9"
-        - "AlmaLinux 10"
-        - "CentOS 9"
-        - "CentOS 10"
-        - "Ubuntu 26"
 
       # ---------------------------------------------------------------
       #  One build feeds every target of the matrix, and they are not all
