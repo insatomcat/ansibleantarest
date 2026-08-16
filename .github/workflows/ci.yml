@@ -147,16 +147,42 @@ jobs:
   #  most distribution-specific work and a moving target there would be noise.
   #
   #  `slurm` picks the targets the five-machine job runs on, and how often:
-  #  `always` on every pull request, `dispatch` only when a run asks for it.
-  #  Every target that can carry a cluster is on `always` today; `dispatch`
-  #  is there for the next one that is not worth paying for on every push,
-  #  and moving a target between the two is one word here.
+  #  `always` on every pull request, `dispatch` only when the workflow is
+  #  started by hand from the Actions tab, where the `only` and `suite` inputs
+  #  can narrow a run down to one cluster. Moving a target between the two is
+  #  one word here.
+  #
+  #  Every target that can carry a cluster is on `always`. `dispatch` is not a
+  #  parking space for something that works and is merely expensive: on a
+  #  public repository the runners are free, the jobs are parallel, and a
+  #  cluster nobody thinks of starting by hand is a cluster that is not
+  #  tested. It is a waiting room for a target being qualified, which is what
+  #  each of these went through before landing here, one dispatched run each:
+  #
+  #    Ubuntu 24.04, the only podman 4 in the table - 4.9 against 5 and 6
+  #    everywhere else. The standalone job already covers the web stack there,
+  #    but slurmdbd and its MariaDB are deployed in the cluster shape alone,
+  #    so this is the only place where those quadlet units meet podman 4.
+  #
+  #    Rocky Linux 9 and 10, the rebuilds that are not Oracle Linux. What they
+  #    change is the *names* of the CRB and EPEL repositories, and one path:
+  #    Rocky's epel-release provides the capability the OpenHPC release rpm
+  #    asks for, so it installs through dnf rather than through the rpm
+  #    --nodeps path Oracle Linux 10 needs.
+  #
+  #    CentOS Stream 10, which is not in the position of the 9 stream: it
+  #    provides redhat-release 10.0 and OpenHPC 4 installs there. It is also
+  #    the only podman 6 in the table, which is where verify.yml learned that
+  #    a published container port is no longer a socket `ss` can see.
   #
   #  What that costs is not the same everywhere. Measured on the same run:
   #  eighteen minutes for Debian 13, thirty-six for Oracle Linux 9, where
   #  the first dnf transaction of each machine spends five minutes alone
   #  indexing the repository metadata, and where a package task that has
-  #  nothing to do still answers in twenty seconds rather than in four.
+  #  nothing to do still answers in twenty seconds rather than in four. The
+  #  jobs run in parallel, so what a pull request waits for is the slowest of
+  #  them, not their sum. If that ever stops being acceptable, the answer is a
+  #  nightly schedule for the targets that can afford to lag, not `dispatch`.
   #
   #  One target is in neither column and never will be: CentOS Stream 9
   #  provides redhat-release 9.0 and always will, being what the next RHEL
@@ -164,29 +190,6 @@ jobs:
   #  release package requires 9.1 or later. It is stopped with an explanation
   #  by roles/slurm_common/tasks/repo.yml and keeps the standalone job, which
   #  is the only shape the playbook supports for it.
-  #
-  #  Oracle Linux 10 is on `always` since OpenHPC 4 gave EL 10 a Slurm: it is
-  #  the newest cluster target and the one whose repository handling is least
-  #  worn in. Three others are on `dispatch`, each for its own reason, and
-  #  each one word away from being paid for on every push:
-  #
-  #    CentOS Stream 10, because the 10 stream is not in the position of the
-  #    9 one - it provides redhat-release 10.0 and the OpenHPC 4 packages
-  #    resolve there - but that was checked on packages rather than on a
-  #    five-machine cluster.
-  #
-  #    Rocky Linux 9 and 10, because what a rebuild that is not Oracle Linux
-  #    changes is the *names* of the CRB and EPEL repositories, and those are
-  #    exercised by the standalone job of every pull request. The cluster on
-  #    top of them is the same code as Oracle Linux, minus the one Oracle
-  #    quirk it does not have: Rocky's epel-release provides the capability
-  #    the OpenHPC release rpm asks for, so it takes the dnf path rather than
-  #    the rpm one.
-  #
-  #    Ubuntu 24.04, because what it guards is not the cluster but podman: it
-  #    ships 4.9 where every other target is on 5 or 6, and a quadlet key that
-  #    only exists in podman 5 fails to generate there. That shows up in the
-  #    standalone job, on the machine that runs the whole container stack.
   #
   #  `web_mb`, `front_mb` and `node_mb` size the machines when the defaults
   #  in the boot step do not fit. The EL images need more per machine and
@@ -221,7 +224,7 @@ jobs:
               "name":  "ubuntu24",
               "label": "Ubuntu 24.04",
               "image": "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img",
-              "slurm": "dispatch"
+              "slurm": "always"
             },
             {
               "name":  "ubuntu26",
@@ -249,7 +252,7 @@ jobs:
               "name":  "rocky9",
               "label": "Rocky Linux 9",
               "image": "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2",
-              "slurm": "dispatch",
+              "slurm": "always",
               "web_mb": 2560,
               "node_mb": 768
             },
@@ -257,7 +260,7 @@ jobs:
               "name":  "rocky10",
               "label": "Rocky Linux 10",
               "image": "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2",
-              "slurm": "dispatch",
+              "slurm": "always",
               "web_mb": 2560,
               "node_mb": 768
             },
@@ -270,7 +273,7 @@ jobs:
               "name":  "centos10",
               "label": "CentOS Stream 10",
               "image": "https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-latest.x86_64.qcow2",
-              "slurm": "dispatch",
+              "slurm": "always",
               "web_mb": 2560,
               "node_mb": 768
             }
