@@ -20,6 +20,34 @@
     quiet: true
   loop: "{{ antarest_quadlet_services }}"
 
+# A container that died as many times in a row as its unit allows exhausted the
+# start budget declared there (StartLimitBurst), and systemd then refuses to
+# start it again for as long as StartLimitIntervalSec runs, with "start request
+# repeated too quickly". The run that fixes the cause would fail on the previous
+# run's verdict, and say nothing about what is actually wrong. reset-failed
+# clears that, for every unit of the stack rather than for the database alone:
+# any of them can be the one that crash-looped.
+#
+# Asked first rather than run unconditionally: `systemctl reset-failed` on a
+# unit systemd has not loaded exits 1 with "Unit postgresql.service not loaded",
+# and that is the normal state of a first deployment, where the generated unit
+# has never been started. `is-failed` answers `inactive` there, and only
+# `failed` on the machine this is meant for.
+- name: Look for the units a previous run left failed
+  ansible.builtin.command: "systemctl is-failed {{ item }}"
+  loop: "{{ antarest_quadlet_services }}"
+  register: antarest_units_failed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Clear those failures
+  ansible.builtin.command: "systemctl reset-failed {{ item }}"
+  loop: >-
+    {{ antarest_units_failed.results | selectattr('stdout', 'equalto', 'failed')
+       | map(attribute='item') | list }}
+  changed_when: true
+
 - name: Create the database schema before the backend starts
   ansible.builtin.include_tasks: migrate.yml
 
@@ -29,6 +57,24 @@
     enabled: true
     state: started
     daemon_reload: true
+
+# Starting the target does not repair a stack that is half down: a target that
+# is already active is a no-op, and the container that is missing - because a
+# previous run left it failed, or because the failure was just cleared above -
+# is not pulled back up by it. `PartOf=` only carries a stop or a restart to
+# units that are running, and the handler below is only notified when something
+# was rendered anew, which the re-run that fixes a problem usually does not do.
+# So each service is asked for by name; on a healthy machine they are all
+# started already and this reports nothing.
+#
+# It is also what makes a container that refuses to start say so here, with the
+# systemd error, instead of leaving the run to time out much later in the
+# wait_for below with nothing but a port number.
+- name: Start every service of the stack
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+  loop: "{{ antarest_quadlet_services }}"
 
 - name: Apply the pending restarts now
   ansible.builtin.meta: flush_handlers
