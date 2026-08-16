@@ -41,29 +41,11 @@
     - antarest_pg_disk_major | length > 0
     - antarest_pg_image_major | length > 0
 
-# A container that died five times in a row exhausted the start budget the unit
-# declares, and systemd then refuses to start it again for as long as
-# StartLimitIntervalSec runs, with "start request repeated too quickly". The run
-# that fixes the cause would fail here, on the previous run's verdict, and say
-# nothing about what is actually wrong. reset-failed clears that.
-#
-# Asked first rather than run unconditionally: `systemctl reset-failed` on a
-# unit systemd has not loaded exits 1 with "Unit postgresql.service not
-# loaded", and that is the normal state of a first deployment, where the
-# generated unit has never been started. `is-failed` answers `inactive` there,
-# and only `failed` on the machine this is meant for.
-- name: Look for a previous failure of the database unit
-  ansible.builtin.command: systemctl is-failed postgresql.service
-  register: antarest_pg_failed
-  changed_when: false
-  failed_when: false
-  check_mode: false
-
-- name: Clear that failure
-  ansible.builtin.command: systemctl reset-failed postgresql.service
-  when: antarest_pg_failed.stdout | trim == 'failed'
-  changed_when: true
-
+# A failure postgresql.service was left in by a previous run has already been
+# cleared by the caller, see "Look for the units a previous run left failed" in
+# tasks/service.yml: without that, systemd refuses to start it again for as long
+# as its StartLimitIntervalSec runs and this task fails on the previous run's
+# verdict.
 - name: Start the database before migrating
   ansible.builtin.systemd:
     name: postgresql.service
