@@ -373,10 +373,17 @@
   gather_facts: false
   tags: [verify, firewall]
   vars:
-    # The interface counts here even though it belongs to a container: a
-    # rootful podman publishes a port by holding the socket in conmon, so it
-    # is a listener on the host like any other. What it is not is a socket
-    # the firewall can filter - see the note on the private ports below.
+    # The interface counts here even though it belongs to a container. How it
+    # is offered depends on the podman generation, which is why two questions
+    # are asked below rather than one: up to podman 5 a published port is also
+    # held as a socket on the host and `ss` sees it, from podman 6 with
+    # netavark 2 it is netfilter alone and `ss` sees nothing, on a machine
+    # where the port answers perfectly well. Measured on the same run of this
+    # file: Oracle Linux 10 with podman 5.8.2 lists 0.0.0.0:80, CentOS Stream
+    # 10 with podman 6.0.2 does not, while both served the application.
+    #
+    # What a published port is in neither case is a socket the firewall can
+    # filter - see the note on the private ports below.
     verify_expected_listeners: >-
       {{ ([antarest_http_port | int]
           + ([antarest_https_port | int] if antarest_tls_enabled | default(false) | bool else [])
@@ -393,14 +400,29 @@
       changed_when: false
       when: verify_expected_listeners | length > 0
 
+    # The other half of the question, for the ports a container publishes and
+    # `ss` may not see. Only the running containers are asked, which is the
+    # point: a published port whose container is down offers nothing, and
+    # answering "it is published" there would be exactly the vacuous pass this
+    # play exists to prevent. A machine without podman - a compute node - is
+    # not an error, it simply publishes nothing.
+    - name: Read the ports the running containers publish
+      ansible.builtin.command: podman ps --format json
+      register: verify_podman_ps
+      changed_when: false
+      failed_when: false
+      when: verify_expected_listeners | length > 0
+
     - name: Check every service this machine is supposed to offer is listening
       ansible.builtin.assert:
         that: verify_missing_listeners | length == 0
         fail_msg: >-
-          Nothing listens on {{ verify_missing_listeners | join(', ') }} on
+          Nothing offers {{ verify_missing_listeners | join(', ') }} on
           {{ inventory_hostname }}, so the probes below would pass on a
           machine that offers nothing at all. Listening sockets:
-          {{ verify_listening.stdout_lines[1:] | join(' / ') }}
+          {{ verify_listening.stdout_lines[1:] | join(' / ') | default('none', true) }}.
+          Ports published by a running container:
+          {{ verify_published_ports | join(', ') | default('none', true) }}
         quiet: true
       vars:
         # Column 4 of `ss` is the local address, port included. Loopback-only
@@ -411,7 +433,20 @@
              | map('regex_replace', '^\S+\s+\S+\s+\S+\s+(\S+)\s+.*$', '\1')
              | reject('match', '^(127\.|\[::1\])')
              | map('regex_replace', '^.*:', '') | map('int') | unique | list }}
-        verify_missing_listeners: "{{ verify_expected_listeners | reject('in', verify_listening_ports) | list }}"
+        # `podman ps --format json` carries one Ports entry per mapping, with
+        # host_ip empty when the port is published on every address. Dropped
+        # for the same reason as the loopback sockets above, and the same rc
+        # tolerance as any machine that has no podman at all.
+        verify_published_ports: >-
+          {{ (verify_podman_ps.stdout | default('[]', true) | from_json
+              if verify_podman_ps.rc | default(1) == 0 else [])
+             | selectattr('Ports') | map(attribute='Ports') | flatten
+             | rejectattr('host_ip', 'match', '^(127\.|::1$)')
+             | map(attribute='host_port') | map('int') | unique | list }}
+        verify_missing_listeners: >-
+          {{ verify_expected_listeners
+             | reject('in', verify_listening_ports + verify_published_ports)
+             | list }}
       when: verify_expected_listeners | length > 0
 
 - name: The world reaches nothing but SSH, and the interface on the web machine
