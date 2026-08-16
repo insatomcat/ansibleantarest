@@ -73,6 +73,8 @@ on:
           - ubuntu26
           - ol9
           - ol10
+          - rocky9
+          - rocky10
           - centos9
           - centos10
       suite:
@@ -137,11 +139,11 @@ jobs:
   #  level `if:` cannot do that job: the matrix context is not available
   #  there, so every target would still appear, skipped.
   #
-  #  `image` is the cloud image the VM boots from. Oracle publishes theirs
-  #  with the build number in the name, which is what pins them; Debian and
-  #  Ubuntu publish a `latest` that moves, which is what keeps them current.
-  #  Both are deliberate: the EL side is where this playbook does the most
-  #  distribution-specific work and a moving target there would be noise.
+  #  `image` is the cloud image the VM boots from. Oracle and Rocky publish
+  #  theirs with the build number in the name, which is what pins them; Debian
+  #  and Ubuntu publish a `latest` that moves, which is what keeps them
+  #  current. Both are deliberate: the EL side is where this playbook does the
+  #  most distribution-specific work and a moving target there would be noise.
   #
   #  `slurm` picks the targets the five-machine job runs on, and how often:
   #  `always` on every pull request, `dispatch` only when a run asks for it.
@@ -155,21 +157,30 @@ jobs:
   #  indexing the repository metadata, and where a package task that has
   #  nothing to do still answers in twenty seconds rather than in four.
   #
-  #  Five of the six targets are in that column, and the sixth is missing on
-  #  purpose: CentOS Stream 9 provides redhat-release 9.0 and always will,
-  #  being what the next RHEL minor is built from rather than a rebuild of
-  #  one, while the OpenHPC release package requires 9.1 or later. It is
-  #  stopped with an explanation by roles/slurm_common/tasks/repo.yml and
-  #  keeps the standalone job, which is the only shape the playbook supports
-  #  for it.
+  #  One target is in neither column and never will be: CentOS Stream 9
+  #  provides redhat-release 9.0 and always will, being what the next RHEL
+  #  minor is built from rather than a rebuild of one, while the OpenHPC
+  #  release package requires 9.1 or later. It is stopped with an explanation
+  #  by roles/slurm_common/tasks/repo.yml and keeps the standalone job, which
+  #  is the only shape the playbook supports for it.
   #
   #  Oracle Linux 10 is on `always` since OpenHPC 4 gave EL 10 a Slurm: it is
   #  the newest cluster target and the one whose repository handling is least
-  #  worn in. CentOS Stream 10 is on `dispatch` instead: the 10 stream is not
-  #  in the position of the 9 one, it provides redhat-release 10.0 and the
-  #  OpenHPC 4 packages resolve there, but that has been checked on packages
-  #  rather than on a five-machine cluster, so it is one word away rather
-  #  than on every pull request.
+  #  worn in. Three others are on `dispatch`, each for its own reason, and
+  #  each one word away from being paid for on every push:
+  #
+  #    CentOS Stream 10, because the 10 stream is not in the position of the
+  #    9 one - it provides redhat-release 10.0 and the OpenHPC 4 packages
+  #    resolve there - but that was checked on packages rather than on a
+  #    five-machine cluster.
+  #
+  #    Rocky Linux 9 and 10, because what a rebuild that is not Oracle Linux
+  #    changes is the *names* of the CRB and EPEL repositories, and those are
+  #    exercised by the standalone job of every pull request. The cluster on
+  #    top of them is the same code as Oracle Linux, minus the one Oracle
+  #    quirk it does not have: Rocky's epel-release provides the capability
+  #    the OpenHPC release rpm asks for, so it takes the dnf path rather than
+  #    the rpm one.
   #
   #  `web_mb`, `front_mb` and `node_mb` size the machines when the defaults
   #  in the boot step do not fit. The EL images need more per machine and
@@ -219,6 +230,22 @@ jobs:
               "label": "Oracle Linux 10",
               "image": "https://yum.oracle.com/templates/OracleLinux/OL10/u1/x86_64/OL10U1_x86_64-kvm-b291.qcow2",
               "slurm": "always",
+              "web_mb": 2560,
+              "node_mb": 768
+            },
+            {
+              "name":  "rocky9",
+              "label": "Rocky Linux 9",
+              "image": "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2",
+              "slurm": "dispatch",
+              "web_mb": 2560,
+              "node_mb": 768
+            },
+            {
+              "name":  "rocky10",
+              "label": "Rocky Linux 10",
+              "image": "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2",
+              "slurm": "dispatch",
               "web_mb": 2560,
               "node_mb": 768
             },
