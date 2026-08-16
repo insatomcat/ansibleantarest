@@ -39,8 +39,8 @@
 #
 #  The images are downloaded on every run and not cached. Measured on the
 #  first green run: between 5 and 8 seconds each, 110 to 165 MB/s from all
-#  three mirrors. An actions/cache round trip does not beat that, and six
-#  base images would take half of the 10 GB a repository gets. The archives
+#  the mirrors. An actions/cache round trip does not beat that, and the base
+#  images together would take more than the 10 GB a repository gets. The archives
 #  the deploy jobs consume are a different matter and do travel through the
 #  artefact store, once for all of them.
 #
@@ -295,7 +295,7 @@ jobs:
           # A pull request runs both shapes. A manual run can narrow it down
           # to one through the `suite` input, which is worth doing while
           # working on either: a cluster job is one runner and eighteen
-          # minutes, the single-machine matrix is six of them.
+          # minutes at best, and there is one of each per target.
           suite="${SUITE:-all}"
 
           {

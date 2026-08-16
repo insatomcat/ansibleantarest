@@ -5,8 +5,9 @@
 #
 #  The GitHub runner is the controller only. The `antares_web` machine is a
 #  throwaway virtual machine booted on the runner with QEMU/KVM from the
-#  cloud image of the distribution under test - Debian 13, Ubuntu 26.04,
-#  Oracle Linux 9 and 10, CentOS Stream 9 and 10, one job each. The
+#  cloud image of the distribution under test - one job per entry of the
+#  target table of the workflow, which is every line of supported_distros
+#  except RedHat, whose subscription the CI has not got. The
 #  artefacts built by the `build` job land in ./artifacts on the controller
 #  and site.yml ships them to the machine with
 #  `-e antarest_image_source=archive`.
@@ -52,28 +53,6 @@ all:
       ansible_user: ansible
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519_ci
 
-      # ---------------------------------------------------------------
-      #  Ubuntu 26.04 is not in the shipped list: it is claimed for CI
-      #  only, which is what the preflight failure message tells you to
-      #  do, and it keeps the claim scoped here. The rest is the shipped
-      #  list, repeated because a host variable replaces it wholesale.
-      # ---------------------------------------------------------------
-      supported_distros:
-        - "Debian 12"
-        - "Debian 13"
-        - "Ubuntu 22"
-        - "Ubuntu 24"
-        - "OracleLinux 9"
-        - "OracleLinux 10"
-        - "RedHat 9"
-        - "RedHat 10"
-        - "Rocky 9"
-        - "Rocky 10"
-        - "AlmaLinux 9"
-        - "AlmaLinux 10"
-        - "CentOS 9"
-        - "CentOS 10"
-        - "Ubuntu 26"
 
       # ---------------------------------------------------------------
       #  One machine, no cluster: the studies would run with the local

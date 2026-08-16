@@ -68,20 +68,39 @@ antares_home: "/home/{{ antares_user }}"
 #  (23.11 on Ubuntu 24.04, 24.11 on Debian 13, 25.11 from OpenHPC 3 on EL 9
 #  and 25.05 from OpenHPC 4 on EL 10) and the daemons only interoperate across
 #  a couple of majors, so a single cluster must run a single distribution.
+#
+#  The list below is what the playbook claims, and it is meant to be read as a
+#  claim rather than as a wish. All but one line is deployed on every pull
+#  request by .github/workflows/ci.yml, most of them twice: a single machine
+#  running Antares-Web, and a five-machine cluster. CentOS Stream 9 is the
+#  exception on the second count, since it cannot carry a Slurm node, and
+#  RedHat is the exception on both: the CRB repository id and the epel-release
+#  URL are written for it, but it needs a subscription that CI has not got, so
+#  it is here on the strength of its rebuilds rather than of a run.
+#
+#  What is deliberately *not* here:
+#
+#    Debian 12 and Ubuntu 22.04, which ship podman 4.3.1 and 3.4.4. Quadlet
+#    needs 4.4, so roles/podman refuses them by name a few tasks after this
+#    check would have let them through. Claiming a release the playbook stops
+#    on is worse than not claiming it.
+#
+#    AlmaLinux, which nothing here has ever run on. It is the same code path
+#    as Rocky Linux, which is exercised twice per pull request, so adding
+#    "AlmaLinux 9" to this list is a reasonable thing for an operator to do -
+#    which is exactly what the failure message of the check suggests. It is
+#    not a reasonable thing for this file to assert on their behalf.
 # ---------------------------------------------------------------------------
 supported_distros:
-  - "Debian 12"
   - "Debian 13"
-  - "Ubuntu 22"
   - "Ubuntu 24"
+  - "Ubuntu 26"
   - "OracleLinux 9"
   - "OracleLinux 10"
   - "RedHat 9"
   - "RedHat 10"
   - "Rocky 9"
   - "Rocky 10"
-  - "AlmaLinux 9"
-  - "AlmaLinux 10"
   - "CentOS 9"
   - "CentOS 10"
 distro_check_enabled: true

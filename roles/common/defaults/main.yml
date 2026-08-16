@@ -46,7 +46,6 @@ _common_crb_repo_by_distro:
   OracleLinux: "ol{{ ansible_facts['distribution_major_version'] }}_codeready_builder"
   RedHat: "codeready-builder-for-rhel-{{ ansible_facts['distribution_major_version'] }}-{{ ansible_facts['architecture'] }}-rpms"
   Rocky: crb
-  AlmaLinux: crb
   CentOS: crb
 
 # The package that declares EPEL. Oracle ships its own, the other rebuilds
