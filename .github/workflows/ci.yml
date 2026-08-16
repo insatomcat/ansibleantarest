@@ -184,12 +184,19 @@ jobs:
   #  them, not their sum. If that ever stops being acceptable, the answer is a
   #  nightly schedule for the targets that can afford to lag, not `dispatch`.
   #
-  #  One target is in neither column and never will be: CentOS Stream 9
-  #  provides redhat-release 9.0 and always will, being what the next RHEL
-  #  minor is built from rather than a rebuild of one, while the OpenHPC
-  #  release package requires 9.1 or later. It is stopped with an explanation
-  #  by roles/slurm_common/tasks/repo.yml and keeps the standalone job, which
-  #  is the only shape the playbook supports for it.
+  #  Every target is now in a column, CentOS Stream 9 included. It was in
+  #  neither for a while, on the grounds that it provides redhat-release 9.0
+  #  and always will - it is what the next RHEL minor is built from rather than
+  #  a rebuild of one - while the OpenHPC release rpm asks for 9.1 or later.
+  #  What made that a wall was the assumption that dnf had to be the one to
+  #  install that rpm. It contains a repository file, a GPG key and a version
+  #  stamp, and the escape hatch Oracle Linux 10 already needed for a different
+  #  nominal dependency covers this one too: see the header of
+  #  roles/slurm_common/tasks/repo.yml. Qualified before being claimed here,
+  #  the way the targets above were, on five Stream 9 machines: site.yml with
+  #  no failed task, verify.yml green - Slurm 25.11.4, three nodes idle,
+  #  a job submitted over SSH that ran on one of them - and a second run
+  #  reporting changed=0 everywhere.
   #
   #  `web_mb`, `front_mb` and `node_mb` are the floor each machine of the
   #  cluster gets, for a target where the defaults in the boot step do not
@@ -270,7 +277,10 @@ jobs:
             {
               "name":  "centos9",
               "label": "CentOS Stream 9",
-              "image": "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+              "image": "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2",
+              "slurm": "always",
+              "web_mb": 2560,
+              "node_mb": 768
             },
             {
               "name":  "centos10",
