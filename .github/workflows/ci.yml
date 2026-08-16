@@ -70,6 +70,7 @@ on:
         options:
           - all
           - debian13
+          - ubuntu24
           - ubuntu26
           - ol9
           - ol10
@@ -182,6 +183,11 @@ jobs:
   #    the OpenHPC release rpm asks for, so it takes the dnf path rather than
   #    the rpm one.
   #
+  #    Ubuntu 24.04, because what it guards is not the cluster but podman: it
+  #    ships 4.9 where every other target is on 5 or 6, and a quadlet key that
+  #    only exists in podman 5 fails to generate there. That shows up in the
+  #    standalone job, on the machine that runs the whole container stack.
+  #
   #  `web_mb`, `front_mb` and `node_mb` size the machines when the defaults
   #  in the boot step do not fit. The EL images need more per machine and
   #  give the web server less: measured on a five-machine cluster, an EL 9
@@ -210,6 +216,12 @@ jobs:
               "label": "Debian 13",
               "image": "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2",
               "slurm": "always"
+            },
+            {
+              "name":  "ubuntu24",
+              "label": "Ubuntu 24.04",
+              "image": "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img",
+              "slurm": "dispatch"
             },
             {
               "name":  "ubuntu26",

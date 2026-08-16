@@ -104,7 +104,9 @@ supported_distros:      # group_vars/all.yml
 
 The playbook aborts on unsupported distros and prints the variable to extend. A rebuild of a supported major that is not in the list is usually fine to add. Set `distro_check_enabled: false` to disable the check entirely.
 
-Podman comes from the distribution on both families and is recent enough everywhere: quadlet has been part of podman since 4.4, Debian 13 ships 5.x, Ubuntu 24.04 ships 4.9, EL 9 has been on 4.4 or later since 9.2 and EL 10 ships 5.x. The playbook checks the version and stops rather than writing units nothing would generate.
+Podman comes from the distribution on both families and is recent enough everywhere: quadlet has been part of podman since 4.4, Debian 13 ships 5.x, Ubuntu 24.04 ships 4.9, EL 9 has been on 4.4 or later since 9.2, EL 10 ships 5.x and CentOS Stream 10 is already on 6.x. The playbook checks the version and stops rather than writing units nothing would generate.
+
+4.4 is a floor the units keep honouring and not only a number that gets checked, because quadlet gained keys after it and a unit written with one of those fails to generate on the oldest supported release rather than on the version that introduced the key. That is why the `postgres` network alias goes through `PodmanArgs=--network-alias=postgres` rather than through the `NetworkAlias=` key it deserves: that key landed in podman 5. Both spellings produce the same `podman run` command line, measured on 4.9.3 and on 5.4.2. Ubuntu 24.04 is a CI target for the same reason: it is the release that would notice.
 
 Important cluster note: use one distribution per cluster. Packaged Slurm versions differ (23.11 on Ubuntu 24.04, 24.11 on Debian 13, 25.11 from OpenHPC 3 on EL 9 and 25.05 from OpenHPC 4 on EL 10) and the daemons `slurmctld` / `slurmd` / `slurmdbd` interoperate only across certain major versions. The generated `slurm.conf` works for all of them, but do not mix a front-end on Debian 13 with compute nodes on Oracle Linux 9 in the same cluster. The `antares_web` machine is unaffected: it talks to the Slurm frontend only via SSH, so a Debian web server driving an Oracle Linux cluster is fine.
 
