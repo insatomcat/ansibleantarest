@@ -152,6 +152,29 @@ jobs:
   #  can narrow a run down to one cluster. Moving a target between the two is
   #  one word here.
   #
+  #  `xpansion` deploys Antares-Xpansion on that cluster, which the shipped
+  #  defaults do not: the two releases weigh about 490 MB, downloaded from
+  #  GitHub by the front-end rather than taken from the artefacts, since
+  #  caching them would make every job of the matrix pull them along with the
+  #  image. Three targets carry it, one per thing that can actually break a
+  #  binary this playbook only unpacks:
+  #
+  #    Ubuntu 24.04, the oldest glibc of the Debian family (2.39) against the
+  #    Ubuntu 22.04 build of the releases,
+  #
+  #    Oracle Linux 9, the oldest glibc of the EL family (2.34) against their
+  #    Oracle Linux 8 build, and the Open MPI 4.1 `benders` is linked against,
+  #
+  #    Oracle Linux 10, which ships Open MPI 5.0 instead. It keeps the
+  #    libmpi.so.40 soname, so the same binary loads - and that is exactly the
+  #    kind of statement that needs a job rather than a comment.
+  #
+  #  What is checked is the deployment, not a converged optimisation: one
+  #  Benders run on the smallest example study peaks at 1.1 GB of RSS, which
+  #  does not fit in the 768 MB compute nodes of a runner. verify.yml asks
+  #  each launcher for the solver it bundles instead, which is what says the
+  #  binary starts on that distribution.
+  #
   #  Every target that can carry a cluster is on `always`. `dispatch` is not a
   #  parking space for something that works and is merely expensive: on a
   #  public repository the runners are free, the jobs are parallel, and a
@@ -234,7 +257,8 @@ jobs:
               "name":  "ubuntu24",
               "label": "Ubuntu 24.04",
               "image": "https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img",
-              "slurm": "always"
+              "slurm": "always",
+              "xpansion": true
             },
             {
               "name":  "ubuntu26",
@@ -247,6 +271,7 @@ jobs:
               "label": "Oracle Linux 9",
               "image": "https://yum.oracle.com/templates/OracleLinux/OL9/u8/x86_64/OL9U8_x86_64-kvm-b293.qcow2",
               "slurm": "always",
+              "xpansion": true,
               "web_mb": 2560,
               "node_mb": 768
             },
@@ -255,6 +280,7 @@ jobs:
               "label": "Oracle Linux 10",
               "image": "https://yum.oracle.com/templates/OracleLinux/OL10/u1/x86_64/OL10U1_x86_64-kvm-b291.qcow2",
               "slurm": "always",
+              "xpansion": true,
               "web_mb": 2560,
               "node_mb": 768
             },
@@ -1111,14 +1137,17 @@ jobs:
       - name: Deploy the cluster from the artefacts
         run: |
           ansible-playbook -i inventory/ci-cluster.yml site.yml \
-            -e antarest_image_source=archive
+            -e antarest_image_source=archive \
+            -e antares_xpansion_enabled=${{ matrix.target.xpansion || false }}
 
       # What site.yml cannot check on its own: the cluster as a whole, and
       # what each of the three rulesets looks like from the outside. The
       # runner is that outside - it is on the network and not in the
       # inventory. See the header of verify.yml.
       - name: Verify the cluster and the firewall
-        run: ansible-playbook -i inventory/ci-cluster.yml verify.yml
+        run: |
+          ansible-playbook -i inventory/ci-cluster.yml verify.yml \
+            -e antares_xpansion_enabled=${{ matrix.target.xpansion || false }}
 
       # Last on purpose: a failure here says the deployment converged but
       # does not settle, which is worth knowing and worth fixing, but only
@@ -1127,7 +1156,9 @@ jobs:
         run: |
           set -euo pipefail
           ansible-playbook -i inventory/ci-cluster.yml site.yml \
-            -e antarest_image_source=archive --diff | tee /tmp/second-run.log
+            -e antarest_image_source=archive \
+            -e antares_xpansion_enabled=${{ matrix.target.xpansion || false }} \
+            --diff | tee /tmp/second-run.log
           # ANSIBLE_FORCE_COLOR paints the recap, so a host name in the log
           # starts with an escape sequence rather than with the name itself.
           sed -r 's/\x1b\[[0-9;]*m//g' /tmp/second-run.log > /tmp/second-run.txt

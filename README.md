@@ -220,7 +220,25 @@ What arrives on the cluster is decided by Antares-Web: `antares-launcher` sends 
 
 Benders runs on a single MPI rank by default (`slurm_xpansion_mpi_procs`). Raising it is not just a number: the launch script asks for one task on one node, Open MPI counts its slots from that allocation, and inside an allocation `mpirun` goes back through Slurm, which needs the PMIx support the distribution packages do not always carry. For the same reason the Xpansion launcher is the one step of the script that is *not* wrapped in `srun`: an MPI binary started inside an `srun` step is a direct launch as far as Open MPI is concerned, and it aborts in `MPI_Init` without Slurm's PMI (`OPAL ERROR: Unreachable in ext3x_client.c`).
 
-Measured on the five-machine lab (Ubuntu 24.04, one rank, one CPU per task): the `SmallTestFiveCandidates` example converges in 22 Benders iterations, 42 seconds wall clock and 1.1 GB of RSS on the compute node, and the results (`expansion/out.json`) come back inside the simulator output archive of the zip Antares-Web collects.
+Measured on the five-machine lab (Ubuntu 24.04, one rank, one CPU per task): the `SmallTestFiveCandidates` example converges in 22 Benders iterations, 42 seconds wall clock and 1.1 GB of RSS on the compute node, and the results (`expansion/out.json`) come back inside the simulator output archive of the zip Antares-Web collects. **Size the compute nodes accordingly**: that is a five-candidate example, and it is already four times what a plain simulation of the same study needs.
+
+Both families are covered, and the only distribution-specific thing is where Open MPI puts itself. The Debian family installs `openmpi-bin` and finds `libmpi.so.40` in the default search path; EL installs `openmpi` from AppStream, which keeps its files under `/usr/lib64/openmpi`, so the launch script prepends `antares_xpansion_mpi_bin_dir` and `antares_xpansion_mpi_lib_dir` to `PATH` and `LD_LIBRARY_PATH`. Both are computed from the family and can be overridden.
+
+The supported distributions were qualified one by one, running the example study to convergence with the release each family gets:
+
+| Distribution | Open MPI | Xpansion 1.3.0 (8.8) | Xpansion 1.4.0 (9.2) |
+|---|---|---|---|
+| Debian 13 | `openmpi-bin` 5.0 | converged | converged |
+| Ubuntu 24.04 | `openmpi-bin` 4.1.6 | converged, on the cluster | converged, on the cluster |
+| Ubuntu 26.04 | `openmpi-bin` 5.0 | converged | converged |
+| Oracle Linux 9 | `openmpi` 4.1.1 | converged | converged |
+| Oracle Linux 10 | `openmpi` 5.0.2 | converged | converged |
+| Rocky Linux 9 / 10 | `openmpi` 4.1.1 / 5.0.9 | package checked | package checked |
+| CentOS Stream 9 / 10 | `openmpi` 4.1.1 / 5.0.2 | package checked | package checked |
+
+Open MPI 5.0 kept the `libmpi.so.40` soname of the 4.x line, which is why the same `benders` binary loads on an EL 10 and on an EL 9. The rebuilds are marked "package checked" the way the rest of this table works: same family, same code path, same package from the same AppStream, and the CI deploys a cluster on each of them.
+
+Ubuntu 24.04, Oracle Linux 9 and Oracle Linux 10 carry the deployment on every pull request, which is one target per thing that can break a binary the playbook only unpacks: the oldest glibc of each family, and the two Open MPI majors. What CI checks is the deployment rather than a converged optimisation, since 1.1 GB of RSS does not fit in the 768 MB compute nodes of a runner: `verify.yml` asks each launcher for the version of the solver it bundles, which both proves the binary starts there and confirms the `study_version` of the entry.
 
 ### Antares-Web
 
@@ -497,7 +515,7 @@ Without a registry, each new version means `N × size` copies with no layer dedu
 ansible-playbook site.yml --tags antares_web     # redeploy application
 ansible-playbook site.yml --tags slurm           # cluster only
 ansible-playbook site.yml --tags solver          # (re)install solvers
-ansible-playbook site.yml --tags xpansion        # (re)install Antares-Xpansion
+ansible-playbook site.yml --tags xpansion        # (re)install Antares-Xpansion (needs antares_xpansion_enabled)
 ansible-playbook site.yml --tags hardening       # firewall, fail2ban, sshd, updates
 ansible-playbook site.yml -e antarest_force_rebuild=true   # full rebuild
 ```
@@ -577,7 +595,7 @@ Same idea for MariaDB on the Slurm frontend (use `mariadb-dump` and the `slurmdb
 
 ## Known limitations
 
-- Xpansion covers the C++ implementation only, on a single MPI rank by default. The R implementation the upstream `launchAntares_v1.1.2.sh` calls needs R, the R libraries and `XpansionArgsRun.R`, none of which is deployed here, and the trajectory mode is not covered either; both are refused with a message rather than silently run as an ordinary simulation. See "Antares-Xpansion" above for what raising the number of ranks implies.
+- Xpansion covers the C++ implementation only, on a single MPI rank by default. The R implementation the upstream `launchAntares_v1.1.2.sh` calls needs R, the R libraries and `XpansionArgsRun.R`, none of which is deployed here, and the trajectory mode is not covered either; both are refused with a message rather than silently run as an ordinary simulation. See "Antares-Xpansion" above for what raising the number of ranks implies. RedHat itself is the one supported distribution where no Xpansion run has been made, for the same reason as the rest of this playbook: it needs a subscription the CI has not got, and its rebuilds are what the claim rests on.
 - The firewall filters the host only, not the `forward` hook the container traffic goes through: a port published by a unit is reachable, whatever the firewall says. See "Hardening" for why, and check the `PublishPort` lines before publishing something new.
 - The Antares-Web login jail counts the 401s nginx logs. A brute force that spreads over many addresses, or one aimed at an endpoint other than the login, is not covered.
 - Migration from a Docker-based version of this playbook: the `slurm_frontend` role stops and removes the old `slurmdb.service` unit and its `docker-compose.yml` but does not touch the docker volume `slurmdb_data`: it contains accounting history. Reusing a live DB requires a `mariadb-dump` from the old volume and restoration into the podman volume `slurmdb-data`. On the web server, data under `/var/antares-web/data` are bind mounts and are reused as-is.
