@@ -26,3 +26,12 @@ antares_build_fetch_solvers: true
 # downloading it from GitHub, so getting this wrong costs time, not a failure.
 antares_build_solver_os:
   - "{{ antares_solver_os | trim }}"
+
+# Same for the Antares-Xpansion releases, and off unless the deployment uses
+# them: a release weighs about 250 MB, and caching one nobody unpacks only
+# slows the build down. Same fallback as above, a target that finds nothing in
+# the cache downloads from GitHub - which an offline target cannot do, hence
+# this switch.
+antares_build_fetch_xpansions: "{{ antares_xpansion_enabled }}"
+antares_build_xpansion_os:
+  - "{{ antares_xpansion_os | trim }}"

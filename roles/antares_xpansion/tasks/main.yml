@@ -1,0 +1,22 @@
+---
+# Antares-Xpansion on a Slurm cluster.
+#
+# Two halves, and they land on different machines:
+#
+#   - the package itself goes into the shared /home, which only the front-end
+#     writes to; every compute node reads it over NFS, exactly like the
+#     solvers next to it,
+#   - the MPI runtime is a system package and has to be on each machine that
+#     actually runs `benders`, i.e. every node of the cluster.
+#
+# Hence a role applied to the whole `slurm` group, with the unpacking guarded
+# on the front-end rather than two roles saying half of the same thing each.
+
+- name: Install the MPI runtime the Benders binaries need
+  ansible.builtin.package:
+    name: "{{ antares_xpansion_mpi_packages }}"
+    state: present
+
+- name: Deploy the Xpansion packages into the shared home
+  ansible.builtin.include_tasks: install.yml
+  when: inventory_hostname in (groups['slurm_frontend'] | default([]))

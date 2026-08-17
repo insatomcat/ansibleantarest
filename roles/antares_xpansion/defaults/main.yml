@@ -1,0 +1,5 @@
+---
+# Directory the Xpansion archives are unpacked into, in the shared /home.
+antares_xpansion_dest: "{{ slurm_xpansion_dir }}"
+antares_xpansion_owner: "{{ antares_user }}"
+antares_xpansion_group: "{{ antares_group }}"

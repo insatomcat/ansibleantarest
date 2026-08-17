@@ -187,6 +187,41 @@ Executable names changed across generations: `antares-<X>.<Y>-solver` for the 8.
 
 `antares_solver_os` selects which build of each release is downloaded, and it is not cosmetic: the Ubuntu 22.04 build needs glibc 2.35 and does not start on EL 9, which has 2.34, while the project's Oracle Linux 8 build (glibc 2.28) runs on every rebuild. The default follows the family of each target, so a Debian web server driving an Oracle Linux cluster installs the right binary on both sides.
 
+### Antares-Xpansion
+
+Investment optimisation, off by default. A release weighs about 250 MB and pulls an MPI runtime onto every compute node, which a cluster that only runs simulations has no use for.
+
+```yaml
+antares_xpansion_enabled: true
+antares_xpansions:
+  - version: "1.3.0"           # antares-xpansion release tag
+    study_version: "8.8"       # major.minor of the solver *it bundles*
+    bin: "antares-8.8-solver"  # name of that bundled solver, 8.x naming
+    archive: "antaresXpansion-1.3.0-xpress-ubuntu-20.04.tar.gz"
+  - version: "1.4.0"
+    study_version: "9.2"
+```
+
+`study_version` is the key point. An Xpansion release ships the `antares-solver` it was built against and runs the study with that one, not with the solvers installed next to it, so the entry must carry the version of the bundled binary rather than a version of your choice. From `antares-version.json` of each tag:
+
+| Xpansion | bundled Antares | | Xpansion | bundled Antares |
+|---|---|---|---|---|
+| 1.3.0 | 8.8.3 | | 1.6.0 | 9.3.1 |
+| 1.4.0 | 9.2.1 | | 1.8.0 | 9.3.6 |
+| 1.5.0 | 9.3.0 | | 1.9.0 | 10.1.1 |
+
+The default carries one release per study version of `antares_solvers` above, so both entries of the launch dialog work with the Xpansion box ticked. Two optional keys cover the releases that break the pattern, and 1.3.0 needs both: `archive` when the asset is not named `antaresXpansion-<version>-<os>.tar.gz` (1.3.0 carries an extra `-xpress-`, ships an Ubuntu 20.04 build and an Oracle Linux 8.9 one rather than 8.10 - the shipped value is a Jinja expression picking by family), and `bin` when the bundled solver is not called `antares-solver`, which is the case of the whole 8.x line.
+
+Dropping an entry is a legitimate way to save the download: a cluster whose studies are all in 9.2 has no use for the 8.8 package.
+
+The package is unpacked once into the shared `/home` (`slurm_xpansion_dir`, next to the solvers), and the MPI runtime `benders` is linked against is installed on every machine of the `slurm` group. `ansible-playbook site.yml --tags xpansion` redeploys just that.
+
+What arrives on the cluster is decided by Antares-Web: `antares-launcher` sends the mode as the third argument of the launch script, and `launchAntares.sh` answers all four of them. `ANTARES` runs the solver as before, `ANTARES_XPANSION_CPP` runs `antares-xpansion-launcher --step full`, and the two others - the historical R implementation and the trajectory mode, which run several studies at once - fail with a message naming what is missing. They fail on purpose: running an ordinary simulation in their place returns a green study for an investment optimisation that never ran.
+
+Benders runs on a single MPI rank by default (`slurm_xpansion_mpi_procs`). Raising it is not just a number: the launch script asks for one task on one node, Open MPI counts its slots from that allocation, and inside an allocation `mpirun` goes back through Slurm, which needs the PMIx support the distribution packages do not always carry. For the same reason the Xpansion launcher is the one step of the script that is *not* wrapped in `srun`: an MPI binary started inside an `srun` step is a direct launch as far as Open MPI is concerned, and it aborts in `MPI_Init` without Slurm's PMI (`OPAL ERROR: Unreachable in ext3x_client.c`).
+
+Measured on the five-machine lab (Ubuntu 24.04, one rank, one CPU per task): the `SmallTestFiveCandidates` example converges in 22 Benders iterations, 42 seconds wall clock and 1.1 GB of RSS on the compute node, and the results (`expansion/out.json`) come back inside the simulator output archive of the zip Antares-Web collects.
+
 ### Antares-Web
 
 ```yaml
@@ -428,6 +463,7 @@ ansible-playbook site.yml -e antarest_image_source=archive  # many times
 | `thirdparty-*.tar.gz` | postgres, redis, nginx, and adminer if enabled |
 | `webapp-dist.tar.gz` | built web application |
 | `antares-*.tar.gz` | solver tarballs |
+| `antaresXpansion-*.tar.gz` | Xpansion releases, when `antares_xpansion_enabled` is on |
 | `manifest.yml` | version, commit, UID, date |
 
 In `archive` mode the target loads images idempotently (no retransfer if present), unpacks the frontend in the checked-out tree where nginx bind-mounts it, and takes solvers from the local cache instead of GitHub. Archives are transported with `rsync`, not the `copy` module, which is unsuitable for hundreds of megabytes.
@@ -453,6 +489,7 @@ Without a registry, each new version means `N × size` copies with no layer dedu
 ansible-playbook site.yml --tags antares_web     # redeploy application
 ansible-playbook site.yml --tags slurm           # cluster only
 ansible-playbook site.yml --tags solver          # (re)install solvers
+ansible-playbook site.yml --tags xpansion        # (re)install Antares-Xpansion
 ansible-playbook site.yml --tags hardening       # firewall, fail2ban, sshd, updates
 ansible-playbook site.yml -e antarest_force_rebuild=true   # full rebuild
 ```
@@ -491,6 +528,7 @@ The reference procedure dates from September 2025; several upstream changes have
 - `archive_dir`. The PDF used `/studies/archives`, a path not provided by the upstream compose, so the playbook adds the corresponding mount in the backend unit.
 - Scratch directory. As in the PDF it is placed in the shared `/home`, but the playbook creates `~/scratch/`.
 - The "NNI" field. Still present in 2.34.0 but moved from `webapp/src/components/wrappers/LoginWrapper.tsx` line 170 to `webapp/src/routes/login/index.tsx` line 149. The playbook finds it by content and replaces it with the translation key (see above).
+- Xpansion. The PDF's script keeps only the name of the final zip for Xpansion jobs and runs the ordinary solver whatever the mode; the generated one dispatches on the mode antares-launcher sends and runs the C++ Xpansion launcher, or refuses the modes this playbook does not support. See "Antares-Xpansion".
 
 ## Major database versions
 
@@ -530,7 +568,7 @@ Same idea for MariaDB on the Slurm frontend (use `mariadb-dump` and the `slurmdb
 
 ## Known limitations
 
-- Xpansion is not covered: the launcher script derives from `launchAntares_v1.1.2.sh`, which expects an R environment and environment modules that are not provided here.
+- Xpansion covers the C++ implementation only, on a single MPI rank by default. The R implementation the upstream `launchAntares_v1.1.2.sh` calls needs R, the R libraries and `XpansionArgsRun.R`, none of which is deployed here, and the trajectory mode is not covered either; both are refused with a message rather than silently run as an ordinary simulation. See "Antares-Xpansion" above for what raising the number of ranks implies.
 - The firewall filters the host only, not the `forward` hook the container traffic goes through: a port published by a unit is reachable, whatever the firewall says. See "Hardening" for why, and check the `PublishPort` lines before publishing something new.
 - The Antares-Web login jail counts the 401s nginx logs. A brute force that spreads over many addresses, or one aimed at an endpoint other than the login, is not covered.
 - Migration from a Docker-based version of this playbook: the `slurm_frontend` role stops and removes the old `slurmdb.service` unit and its `docker-compose.yml` but does not touch the docker volume `slurmdb_data`: it contains accounting history. Reusing a live DB requires a `mariadb-dump` from the old volume and restoration into the podman volume `slurmdb-data`. On the web server, data under `/var/antares-web/data` are bind mounts and are reused as-is.
