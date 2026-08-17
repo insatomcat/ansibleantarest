@@ -189,7 +189,7 @@ Executable names changed across generations: `antares-<X>.<Y>-solver` for the 8.
 
 ### Antares-Xpansion
 
-Investment optimisation, off by default. A release weighs about 250 MB and pulls an MPI runtime onto every compute node, which a cluster that only runs simulations has no use for.
+Investment optimisation, off by default. A release weighs about 250 MB and pulls an MPI runtime onto every compute node, which a cluster that only runs simulations has no use for. It needs a cluster: Antares-Web's local launcher ignores the Xpansion mode, so this is deployed on the `slurm` group and nowhere else (see "Known limitations").
 
 ```yaml
 antares_xpansion_enabled: true
@@ -596,6 +596,7 @@ Same idea for MariaDB on the Slurm frontend (use `mariadb-dump` and the `slurmdb
 ## Known limitations
 
 - Xpansion covers the C++ implementation only, on a single MPI rank by default. The R implementation the upstream `launchAntares_v1.1.2.sh` calls needs R, the R libraries and `XpansionArgsRun.R`, none of which is deployed here, and the trajectory mode is not covered either; both are refused with a message rather than silently run as an ordinary simulation. See "Antares-Xpansion" above for what raising the number of ranks implies. RedHat itself is the one supported distribution where no Xpansion run has been made, for the same reason as the rest of this playbook: it needs a subscription the CI has not got, and its rebuilds are what the claim rests on.
+- Xpansion needs the Slurm launcher, and that is upstream's doing rather than a choice made here. Antares-Web's local launcher ignores the mode: `local_launcher.py` builds its command line as the solver, the options it recognises in `other_options` and the study path, and never looks at the `xpansion` parameter. So on a `slurm_enabled: false` deployment, a study launched with the Xpansion box ticked runs an ordinary simulation and comes back green - the exact failure the launch script no longer allows on the cluster side, still there on a path this playbook does not render. Nothing in the `antares_xpansion` role would help: it deploys into the shared `/home` of a cluster that does not exist in that shape.
 - The firewall filters the host only, not the `forward` hook the container traffic goes through: a port published by a unit is reachable, whatever the firewall says. See "Hardening" for why, and check the `PublishPort` lines before publishing something new.
 - The Antares-Web login jail counts the 401s nginx logs. A brute force that spreads over many addresses, or one aimed at an endpoint other than the login, is not covered.
 - Migration from a Docker-based version of this playbook: the `slurm_frontend` role stops and removes the old `slurmdb.service` unit and its `docker-compose.yml` but does not touch the docker volume `slurmdb_data`: it contains accounting history. Reusing a live DB requires a `mariadb-dump` from the old volume and restoration into the podman volume `slurmdb-data`. On the web server, data under `/var/antares-web/data` are bind mounts and are reused as-is.
