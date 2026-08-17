@@ -290,6 +290,14 @@ slurm_repo: openhpc          # `distro` on the Debian family
 
 The release rpm is installed with the GPG check disabled, since it is what brings in the key its own repositories are signed with; everything pulled from them afterwards is verified normally. On a machine where nothing provides the `epel-release` capability the release rpm requires, Oracle Linux 10 being the case today, it is installed with `rpm -Uvh --nodeps` instead, see the table in "What a RHEL-compatible target needs on top". Package names then carry an `-ohpc` suffix (`slurm-ohpc`, `slurm-slurmctld-ohpc`, `slurm-slurmd-ohpc`, `slurm-slurmdbd-ohpc`) and nothing else moves: the daemons, `/etc/slurm`, the `slurm` account and the generated `slurm.conf` are the same as on Debian. Set `slurm_repo: distro` to install Slurm yourself and only let the playbook configure it.
 
+### The launch script and what a failed run looks like
+
+`launchAntares.sh` is rendered on the front-end from `roles/slurm_launch_script/templates/launchAntares.sh.j2` and is the script Antares-Web names in `slurm_script_path`. It is derived from `launchAntares_v1.1.2.sh` of antares-launcher, which is a template with site-specific holes in it (`/path/to/...`, `module load xpress|ampl|R`), not a runnable program.
+
+One difference is worth knowing about, because it changes what you see in the interface: **the script exits on the return code of the run**. Upstream does not, and the consequence is not theoretical. A solver killed by the kernel's OOM killer, or one that rejects an option, leaves a script that keeps going, zips the partial study, and returns 0 - so Slurm records the job as `COMPLETED` and Antares-Web shows the study green even though nothing was computed. Here the code of the solver, or of the Xpansion launcher, is captured, written into the job's `_job_data_<id>.txt` log, and used as the exit code of the script.
+
+Everything after the run still happens before that exit: the post-processing, the final zip and the cleanup of the scratch directory. That matters, and it is what makes this safe rather than a way to lose results. A job in `FAILED` state maps to `finished_with_error` in antares-launcher, which still downloads the final zip and the logs, and `_handle_failure` on the Antares-Web side still imports whatever output it finds before marking the job failed. So a failed run comes back red, with its logs, and with its partial results when there are any.
+
 ## Antares-Web server directory layout
 
 ```
@@ -528,6 +536,7 @@ The reference procedure dates from September 2025; several upstream changes have
 - `archive_dir`. The PDF used `/studies/archives`, a path not provided by the upstream compose, so the playbook adds the corresponding mount in the backend unit.
 - Scratch directory. As in the PDF it is placed in the shared `/home`, but the playbook creates `~/scratch/`.
 - The "NNI" field. Still present in 2.34.0 but moved from `webapp/src/components/wrappers/LoginWrapper.tsx` line 170 to `webapp/src/routes/login/index.tsx` line 149. The playbook finds it by content and replaces it with the translation key (see above).
+- Exit code of the launch script. The PDF's script, like the upstream template it comes from, ignores what the solver returned and ends on the code of its last command, so a run killed by the OOM killer is reported as a success. The generated script exits on the code of the run, after the zip and the cleanup. See "The launch script and what a failed run looks like".
 - Xpansion. The PDF's script keeps only the name of the final zip for Xpansion jobs and runs the ordinary solver whatever the mode; the generated one dispatches on the mode antares-launcher sends and runs the C++ Xpansion launcher, or refuses the modes this playbook does not support. See "Antares-Xpansion".
 
 ## Major database versions
