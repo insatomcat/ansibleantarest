@@ -9,6 +9,7 @@
 #    - thirdparty-*.tar.gz       postgres, redis, nginx, adminer if enabled
 #    - webapp-dist.tar.gz        the built web application
 #    - antares-*.tar.gz          the solver tarballs
+#    - antaresXpansion-*.tar.gz  the Xpansion releases, when they are enabled
 #    - manifest.yml              what is actually in there
 #
 #  Then deploy without rebuilding anything:

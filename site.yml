@@ -110,6 +110,18 @@
     - role: slurm_launch_script
       when: slurm_enabled | bool
 
+# Antares-Xpansion, off by default. The package goes into the shared /home,
+# which only the front-end writes to, while the MPI runtime `benders` is
+# linked against has to be on every machine that runs it - hence the whole
+# group here, with the role sorting out which half lands where.
+- name: Antares-Xpansion - package in the shared /home, MPI runtime everywhere
+  hosts: slurm
+  become: true
+  tags: [slurm, xpansion]
+  roles:
+    - role: antares_xpansion
+      when: slurm_enabled | bool and antares_xpansion_enabled | bool
+
 # ---------------------------------------------------------------------------
 #  Antares-Web
 #

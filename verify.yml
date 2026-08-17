@@ -311,6 +311,39 @@
         label: "{{ item.item.version }}"
       when: slurm_enabled | bool
 
+    # Same reasoning for Xpansion when it is deployed, on the launcher and on
+    # the two binaries it calls in turn.
+    - name: Look for the Xpansion binaries in the shared home
+      ansible.builtin.stat:
+        path: >-
+          {{ slurm_xpansion_dir }}/{{ (item.0.archive
+             | default('antaresXpansion-' ~ item.0.version ~ '-' ~ (antares_xpansion_os | trim) ~ '.tar.gz'))
+             | regex_replace('\.tar\.gz$', '') }}/{{ item.1 }}
+      register: verify_xpansion
+      # The launcher and Benders are named the same in every release; the
+      # bundled solver follows the generation it belongs to, hence the `bin`
+      # key of the entry, `antares-solver` from the 9.x line on.
+      loop: >-
+        {{ antares_xpansions | product(['antares-xpansion-launcher', 'bin/benders']) | list
+           + antares_xpansions | zip(antares_xpansions
+                                     | map(attribute='bin', default='antares-solver')
+                                     | map('regex_replace', '^', 'bin/') | list) | list }}
+      loop_control:
+        label: "{{ item.0.version }}/{{ item.1 }}"
+      when: slurm_enabled | bool and antares_xpansion_enabled | bool
+
+    - name: Check every Xpansion binary is there and executable
+      ansible.builtin.assert:
+        that: item.stat.xusr | default(false)
+        fail_msg: >-
+          The Xpansion binary {{ item.item.0.version }}/{{ item.item.1 }} is missing
+          from the shared home of {{ inventory_hostname }}, or is not executable there.
+        quiet: true
+      loop: "{{ verify_xpansion.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.0.version }}/{{ item.item.1 }}"
+      when: slurm_enabled | bool and antares_xpansion_enabled | bool
+
 # ---------------------------------------------------------------------------
 #  The submission path, end to end
 #

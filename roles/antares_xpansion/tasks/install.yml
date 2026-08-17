@@ -1,0 +1,90 @@
+---
+# Unpack the Xpansion releases in the shared /home. Same shape as
+# roles/antares_solver: look for a controller-side copy first, download what
+# is missing, then check what is supposed to be executable is.
+#
+# The archive name is derived from the version and the family unless the entry
+# spells one out, and the directory inside the archive is the archive name
+# without its extension - true of every release checked, both families.
+
+- name: Create the Xpansion directory
+  ansible.builtin.file:
+    path: "{{ antares_xpansion_dest }}"
+    state: directory
+    owner: "{{ antares_xpansion_owner }}"
+    group: "{{ antares_xpansion_group }}"
+    mode: "0755"
+
+- name: Look for the Xpansion tarballs in the controller-side cache
+  ansible.builtin.stat:
+    path: "{{ antares_xpansion_cache_dir }}/{{ item.archive | default(antares_xpansion_archive) }}"
+  vars:
+    antares_xpansion_archive: >-
+      antaresXpansion-{{ item.version }}-{{ antares_xpansion_os | trim }}.tar.gz
+  loop: "{{ antares_xpansions }}"
+  loop_control:
+    label: "antaresXpansion-{{ item.version }}"
+  register: antares_xpansion_cached
+  delegate_to: localhost
+  become: false
+
+- name: Unpack the cached Xpansion tarballs
+  ansible.builtin.unarchive:
+    src: "{{ antares_xpansion_cache_dir }}/{{ antares_xpansion_archive }}"
+    dest: "{{ antares_xpansion_dest }}"
+    owner: "{{ antares_xpansion_owner }}"
+    group: "{{ antares_xpansion_group }}"
+    creates: "{{ antares_xpansion_dest }}/{{ antares_xpansion_archive | regex_replace('\\.tar\\.gz$', '') }}/antares-xpansion-launcher"
+  vars:
+    antares_xpansion_archive: >-
+      {{ item.item.archive | default('antaresXpansion-' ~ item.item.version ~ '-' ~ (antares_xpansion_os | trim) ~ '.tar.gz') }}
+  loop: "{{ antares_xpansion_cached.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "antaresXpansion-{{ item.item.version }} (cache)"
+
+- name: Download and unpack the Xpansion releases that are not cached
+  ansible.builtin.unarchive:
+    src: "{{ antares_xpansion_base_url }}/v{{ item.item.version }}/{{ antares_xpansion_archive }}"
+    dest: "{{ antares_xpansion_dest }}"
+    remote_src: true
+    owner: "{{ antares_xpansion_owner }}"
+    group: "{{ antares_xpansion_group }}"
+    creates: "{{ antares_xpansion_dest }}/{{ antares_xpansion_archive | regex_replace('\\.tar\\.gz$', '') }}/antares-xpansion-launcher"
+  vars:
+    antares_xpansion_archive: >-
+      {{ item.item.archive | default('antaresXpansion-' ~ item.item.version ~ '-' ~ (antares_xpansion_os | trim) ~ '.tar.gz') }}
+  loop: "{{ antares_xpansion_cached.results | rejectattr('stat.exists') | list }}"
+  loop_control:
+    label: "antaresXpansion-{{ item.item.version }} (github)"
+
+# The launcher is what the job runs; `benders` and the bundled antares-solver
+# are what it runs in turn. All three are checked, because an archive that
+# unpacked with the executable bit lost is a failure hours later in a job's
+# stderr rather than here. The solver is checked apart because its name
+# follows the generation it belongs to, `antares-<major>.<minor>-solver` up to
+# the 8.x line and `antares-solver` from 9.x on, exactly like antares_solvers.
+- name: Check the Xpansion binaries are there and executable
+  ansible.builtin.file:
+    path: "{{ antares_xpansion_dest }}/{{ antares_xpansion_archive | regex_replace('\\.tar\\.gz$', '') }}/{{ item.1 }}"
+    owner: "{{ antares_xpansion_owner }}"
+    group: "{{ antares_xpansion_group }}"
+    mode: "0755"
+  vars:
+    antares_xpansion_archive: >-
+      {{ item.0.archive | default('antaresXpansion-' ~ item.0.version ~ '-' ~ (antares_xpansion_os | trim) ~ '.tar.gz') }}
+  loop: "{{ antares_xpansions | product(['antares-xpansion-launcher', 'bin/benders']) | list }}"
+  loop_control:
+    label: "antaresXpansion-{{ item.0.version }}/{{ item.1 }}"
+
+- name: Check the solver bundled with each Xpansion release is there and executable
+  ansible.builtin.file:
+    path: "{{ antares_xpansion_dest }}/{{ antares_xpansion_archive | regex_replace('\\.tar\\.gz$', '') }}/bin/{{ item.bin | default('antares-solver') }}"
+    owner: "{{ antares_xpansion_owner }}"
+    group: "{{ antares_xpansion_group }}"
+    mode: "0755"
+  vars:
+    antares_xpansion_archive: >-
+      {{ item.archive | default('antaresXpansion-' ~ item.version ~ '-' ~ (antares_xpansion_os | trim) ~ '.tar.gz') }}
+  loop: "{{ antares_xpansions }}"
+  loop_control:
+    label: "antaresXpansion-{{ item.version }}/{{ item.bin | default('antares-solver') }}"
