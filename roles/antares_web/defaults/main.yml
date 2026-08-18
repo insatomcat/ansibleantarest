@@ -86,9 +86,13 @@ antarest_celery_concurrency: 1
 # antarest_data_dir/celerybeat.
 antarest_celerybeat_dir: /celerybeat
 
-# What the collectors are allowed to delete. Upstream defaults all four to
-# false, i.e. destructive from the first run; this deployment starts them in
-# dry run, where they log what they would delete and delete nothing. Read a few
+# What the collectors are allowed to delete. There are two upstream positions
+# here and they disagree: `core/config.py` defaults every one of these switches
+# to false, i.e. destructive from the first run, while the reference
+# `resources/deploy/config.prod.yaml` shields exactly one of them with
+# `matrix_gc_dry_run: true` and leaves the rest at the code default. This
+# deployment applies to all of them the choice upstream made for the matrix
+# collector: they log what they would delete and delete nothing. Read a few
 # cycles in `journalctl -u antarest-celery-worker` before turning one off.
 #
 # Nothing has ever been reclaimed on a deployment that ran the upstream compose
@@ -98,11 +102,33 @@ antarest_matrix_gc_dry_run: true
 antarest_blob_gc_dry_run: true
 antarest_variable_view_gc_dry_run: true
 
+# The fourth collector deletes rows of the task table older than
+# `tasks_gc_retention_days` (30 upstream). What it reclaims is history rather
+# than space, since nothing but the task list of the interface reads those
+# rows, but it is destructive by the same upstream default as the others.
+#
+# It only became settable from the configuration file in 2.34.0, which rewrote
+# the config loader with pydantic: the hand-written StorageConfig.from_dict of
+# 2.33 and earlier read every neighbouring key but not this one, so the field
+# kept its `False` default whatever the file said. Pinning antarest_version
+# back to a 2.33 is the one case where this variable is written and ignored.
+antarest_tasks_gc_dry_run: true
+
 # The auto archiver is not a collector: it moves studies untouched for
 # `auto_archive_threshold_days` (60 upstream) into the archive directory, which
 # is visible to users. Left in dry run so that turning the maintenance stack on
 # does not silently archive half the studies of an existing instance.
 antarest_auto_archive_dry_run: true
+
+# The watcher scan is the one `*_dry_run` of the set that is not a safety
+# switch, so it is the one left at the upstream value. Dry run there still
+# walks the workspaces and reports what it found, but `sync_studies_on_disk` is
+# never called, so a study dropped in a workspace never appears in the
+# interface: that is the feature being off rather than a deletion being held
+# back. It is written out all the same, because a scan that reports what it
+# sees without touching the database is what you want when a study fails to
+# show up and the question is whether the scan finds it at all.
+antarest_watcher_scan_dry_run: false
 
 # The ports the interface is published on (antarest_http_port,
 # antarest_https_port) live in group_vars/all.yml, next to the TLS settings:
