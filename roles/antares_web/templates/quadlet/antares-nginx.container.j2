@@ -9,12 +9,26 @@
 
 [Unit]
 Description=Antares-Web nginx
+# Requires=, not Wants=: without the backend running there is no `antarest`
+# name on the podman network, and nginx refuses to start at all rather than
+# serving the front end alone (`host not found in upstream "antarest"`, the
+# upstream name being resolved once, when the configuration is parsed).
+# antarest.service carries the Upholds= that brings this unit back up once the
+# backend recovers.
 Requires=antarest.service
 After=antarest.service
 PartOf={{ antarest_service_name }}.target
-# Start budget for the Restart= below: five attempts, then the unit gives up.
-StartLimitIntervalSec=300
-StartLimitBurst=5
+# No start budget, unlike every other unit of the stack, and this one is the
+# exception on purpose. The ordinary failure of this container is not a broken
+# nginx, it is a backend that is not there yet, which it cannot start without
+# (see Requires= above); retrying until the backend is back is the recovery,
+# not a loop to cut short. A budget here turns a backend outage of a few
+# minutes into a front end that stays down: the attempts are spent while the
+# backend crash-loops, the unit lands in `failed`, and from there even the
+# Upholds= of the backend is turned away with `Start request repeated too
+# quickly`. The price is that a genuinely broken nginx retries every
+# RestartSec instead of stopping; its journal gives the reason each time.
+StartLimitIntervalSec=0
 
 [Container]
 ContainerName={{ antarest_nginx_container }}
@@ -34,8 +48,11 @@ Volume={{ volume }}
 LogDriver=journald
 
 [Service]
-# on-failure, not always: a container that keeps dying exhausts the budget in
-# [Unit] and stays `failed` instead of looping out of sight. See the README.
+# on-failure, and with no budget in [Unit] to stop it: the front end retries
+# every RestartSec for as long as it takes the backend to come back. What this
+# does not cover is being stopped rather than failed, which is what the
+# Requires= does when the backend goes down; the Upholds= of antarest.service
+# is the other half of that.
 Restart=on-failure
 RestartSec=10
 
