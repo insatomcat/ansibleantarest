@@ -394,14 +394,20 @@ The broker is Redis, on database 1 (the event bus uses 0). The application deriv
 
 Upgrading a deployment made before this change takes the `antarest-watcher` and `antarest-matrix-gc` containers down: they stay listed in `antarest_quadlet_all_units`, which is the list of units the role stops and removes once it no longer writes them. Never run both mechanisms at once, two watchers scan the workspaces twice.
 
-**The collectors start in dry run.** Upstream defaults them to destructive from the first run; here all four write only what they *would* delete, which matters because an instance deployed from the compose file has never reclaimed anything and the first real run has a lot of catching up to do.
+**The collectors start in dry run.** Upstream is of two minds about this: `core/config.py` defaults every one of them to destructive, while the reference `resources/deploy/config.prod.yaml` shields exactly one, the matrix collector, with `matrix_gc_dry_run: true`. This deployment applies that same protection to the other four, which matters because an instance deployed from the compose file has never reclaimed anything and the first real run has a lot of catching up to do.
 
 ```yaml
 antarest_matrix_gc_dry_run: true         # roles/antares_web/defaults/main.yml
 antarest_blob_gc_dry_run: true
 antarest_variable_view_gc_dry_run: true
+antarest_tasks_gc_dry_run: true
 antarest_auto_archive_dry_run: true
+antarest_watcher_scan_dry_run: false
 ```
+
+The last one is the odd member of the set and is the one left at the upstream value. Dry run for the watcher scan holds no deletion back: the scan still walks the workspaces and logs how many studies it found, but `sync_studies_on_disk` is never called, so a study dropped in a workspace never reaches the interface. Setting it to `true` is a way to ask what the scan sees without letting it write, not a safety measure to relax later.
+
+`tasks_gc` is the mildest of the four collectors: it deletes rows of the task table older than `tasks_gc_retention_days` (30 days), which is history rather than reclaimed space, since nothing but the task list of the interface reads them. It is also the one switch that needs `antarest_version` to be 2.34.0 or later to have any effect. That release rewrote the configuration loader with pydantic, where every declared field is read; the hand-written `StorageConfig.from_dict` it replaced looked up every neighbouring key but not this one, so on 2.33 and earlier the collector deletes whatever the file says.
 
 ```bash
 journalctl -u antarest-celery-worker -f    # what the tasks did, or would have done
