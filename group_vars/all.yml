@@ -569,3 +569,9 @@ slurm_launcher_nb_cores_default: "{{ [2, slurm_launcher_nb_cores_max | int] | mi
 # Slurm launcher timings (seconds), as in the reference procedure.
 slurm_launcher_default_wait_time: 900
 slurm_launcher_default_time_limit: 172800
+
+# Port sshd answers on at the front-end, which is how the Slurm launcher of
+# Antares-Web submits its jobs. Next to the other launcher settings rather than
+# in the role, because the day that port moves it will move in the hardening
+# role, and a role default is only in scope for the play that runs the role.
+slurm_launcher_ssh_port: 22

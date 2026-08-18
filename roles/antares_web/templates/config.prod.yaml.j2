@@ -9,8 +9,10 @@ security:
     admin:
       pwd: "{{ antarest_admin_password }}"
   external_auth:
-    url: ""
-    default_group_role: 10
+    url: "{{ antarest_external_auth_url }}"
+    default_group_role: {{ antarest_external_auth_default_group_role }}
+    add_ext_groups: {{ antarest_external_auth_add_ext_groups | bool | lower }}
+    group_mapping: {{ antarest_external_auth_group_mapping | to_json }}
 
 db:
   url: "postgresql://postgres:{{ antarest_db_password }}@postgresql:5432/postgres"
@@ -47,10 +49,11 @@ storage:
   # by nothing else: the API process starts no background service, since
   # `server.services` is left unset.
   #
-  # Only the `*_dry_run` switches are written here. Every interval keeps its
-  # upstream default, see docs/configuration.md for the `*_sleeping_time` and
-  # `*_cron` keys. Note that auto_archive_sleeping_time and auto_archive_cron
-  # are mutually exclusive: setting both makes the application refuse to start.
+  # The `*_dry_run` switches and the retention thresholds they go with are
+  # written here. Every interval keeps its upstream default, see
+  # docs/configuration.md for the `*_sleeping_time` and `*_cron` keys. Note
+  # that auto_archive_sleeping_time and auto_archive_cron are mutually
+  # exclusive: setting both makes the application refuse to start.
   #
   # watcher_scan_dry_run is written out too, although it holds the upstream
   # value, so that `grep dry_run config.prod.yaml` answers what this deployment
@@ -69,13 +72,37 @@ storage:
   # registering the studies it finds. See the defaults of the role.
   watcher_scan_dry_run: {{ antarest_watcher_scan_dry_run | bool | lower }}
 
+  # How old a thing has to be before the tasks above take it. Seconds for the
+  # matrix collector, days for the other three; the blob collector has no such
+  # key upstream. See the defaults of the role.
+  matrix_gc_retention_time: {{ antarest_matrix_gc_retention_time }}
+  variable_view_gc_retention_days: {{ antarest_variable_view_gc_retention_days }}
+  tasks_gc_retention_days: {{ antarest_tasks_gc_retention_days }}
+  auto_archive_threshold_days: {{ antarest_auto_archive_threshold_days }}
+
+  # Declared in the defaults of the role, where what an entry may carry is
+  # written out. `default` is required and is the only one the watcher leaves
+  # alone; in the others, a directory holding a file named AW_NO_SCAN is
+  # skipped by the scan.
+  #
+  # The paths are the container side of the single /workspaces mount, so a
+  # workspace is a directory under antarest_data_dir/workspaces on the host and
+  # the role creates it.
   workspaces:
-    # required, no filter applied, this folder is not watched
-    default:
-      path: /workspaces/internal_studies/
-    # place a file named AW_NO_SCAN in a directory to keep the watcher out
-    tmp:
-      path: /workspaces/studies/
+{% for _ws_name, _ws in antarest_workspaces.items() %}
+{% set _ws = _ws or {} %}
+    {{ _ws_name }}:
+      path: /workspaces/{{ _ws.dir | default(_ws_name) }}/
+{% if _ws.filter_in is defined %}
+      filter_in: {{ _ws.filter_in | to_json }}
+{% endif %}
+{% if _ws.filter_out is defined %}
+      filter_out: {{ _ws.filter_out | to_json }}
+{% endif %}
+{% if _ws.groups is defined %}
+      groups: {{ _ws.groups | to_json }}
+{% endif %}
+{% endfor %}
 
 # ---------------------------------------------------------------------------
 # Launchers
@@ -91,7 +118,13 @@ launcher:
       name: Local solver
       type: local
       local_workspace: /local_workspace/local
-      enable_nb_cores_detection: true
+      enable_nb_cores_detection: {{ antarest_local_launcher_nb_cores_detection | bool | lower }}
+{% if not antarest_local_launcher_nb_cores_detection | bool %}
+      nb_cores:
+        min: {{ antarest_local_launcher_nb_cores.min }}
+        default: {{ antarest_local_launcher_nb_cores.default }}
+        max: {{ antarest_local_launcher_nb_cores.max }}
+{% endif %}
       binaries:
 {% for s in antares_solvers %}
         "{{ s.study_version }}": /antares_simulator/antares-{{ s.version }}-{{ antares_solver_os }}/bin/{{ s.bin }}
@@ -104,7 +137,7 @@ launcher:
       local_workspace: /local_workspace/slurm
       username: {{ antares_user }}
       hostname: {{ slurm_frontend_ip | trim }}
-      port: 22
+      port: {{ slurm_launcher_ssh_port }}
       private_key_file: "/id_rsa"
       default_wait_time: {{ slurm_launcher_default_wait_time }}
       default_time_limit: {{ slurm_launcher_default_time_limit }}
@@ -130,10 +163,10 @@ debug: false
 root_path: "api"
 
 server:
-  worker_threadpool_size: 12
+  worker_threadpool_size: {{ antarest_worker_threadpool_size }}
 
 logging:
-  level: INFO
+  level: {{ antarest_log_level }}
 
 # Redis is required when the application runs with several workers in a
 # preforked model, which is what gunicorn does here. It is also, on database 1,

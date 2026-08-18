@@ -60,6 +60,89 @@ antarest_service_name: antares-web
 antarest_gunicorn_workers: 4
 
 # ---------------------------------------------------------------------------
+#  Application configuration
+#
+#  The parts of config.prod.yaml a deployment is expected to differ on. What
+#  stays written in the template is what is coupled to something else on this
+#  machine: the container paths are the other half of the mounts in
+#  vars/main.yml, and `root_path: api` is the other half of the `location
+#  /api/` of the nginx configuration.
+# ---------------------------------------------------------------------------
+
+# The study directories the application exposes, one entry per workspace.
+#
+# `default` is required and is not a workspace like the others: it is where the
+# managed studies live, the ones the interface creates itself, and it is the
+# one directory the watcher never scans (`name != DEFAULT_WORKSPACE_NAME` in
+# antarest/study/storage/rawstudy/watcher.py), since nothing ever arrives in it
+# from outside. Its studies are named after their id, which is why the folder
+# tree of the interface shows nothing there and answers "no folder found".
+#
+# Every other entry is a workspace of studies "on disk": a directory the
+# watcher walks, whose sub-directories show up in the interface under the name
+# of the workspace. `tmp` is the one the upstream reference configuration
+# declares, kept here under the same name and the same directory so that an
+# existing deployment reads as unchanged.
+#
+# Keys of an entry, all optional:
+#   dir        leaf directory under antarest_data_dir/workspaces, defaults to
+#              the name of the workspace. This is also the path studies are
+#              recorded with in the database, so changing the directory of a
+#              workspace that already holds studies leaves those rows pointing
+#              at a path that no longer exists.
+#   filter_in  regular expressions matched against the name of each
+#   filter_out sub-directory, to take it in or leave it out of the scan.
+#              Upstream defaults are everything in, nothing out.
+#   groups     restricts the studies found there to these groups. Empty, the
+#              upstream default, applies no restriction.
+#
+# To expose a tree that already exists elsewhere, an NFS study directory for
+# instance, mount it on antarest_data_dir/workspaces/<dir> on the host and
+# declare the workspace here. The mount has to be in place before the
+# containers start: /workspaces is bind-mounted into them, and a filesystem
+# mounted underneath it afterwards stays invisible inside a running container.
+antarest_workspaces:
+  default:
+    dir: internal_studies
+  tmp:
+    dir: studies
+
+# Authentication delegated to an external service, the LDAP gateway upstream
+# calls the auth service. Left empty, the application only knows its local
+# accounts, the admin included.
+antarest_external_auth_url: ""
+# Role the users arriving that way are given in their groups, as the RoleType
+# enum of antarest/core/roles.py: 10 reader, 20 runner, 30 writer, 40 admin.
+# 10 is the upstream default and the lowest of the four.
+antarest_external_auth_default_group_role: 10
+# Whether the groups returned by that service are created in the application,
+# and how their names are translated to local ones. The mapping is only read
+# when the groups are added.
+antarest_external_auth_add_ext_groups: false
+antarest_external_auth_group_mapping: {}
+
+# Log level shared by every antarest process: the backend, the celery beat and
+# the celery worker all read this file.
+antarest_log_level: INFO
+
+# Size of the thread pool fastapi runs blocking endpoints in. 12 is the value
+# of the upstream reference configuration, the default in core/config.py being
+# 5.
+antarest_worker_threadpool_size: 12
+
+# The local launcher runs the solver on the web machine itself, and by default
+# sizes the choice offered in the launch dialog from the cores it finds there
+# (`apply_cpu_detection` overwrites whatever nb_cores says as long as detection
+# is on). The values below are therefore only read once detection is off, and
+# they are worth setting then: the upstream fallback is a 22-core default on a
+# 24-core maximum, whatever the machine actually has.
+antarest_local_launcher_nb_cores_detection: true
+antarest_local_launcher_nb_cores:
+  min: 1
+  default: 2
+  max: "{{ ansible_facts['processor_vcpus'] | default(4) }}"
+
+# ---------------------------------------------------------------------------
 #  Background maintenance tasks
 #
 #  Scheduled by the antarest-celery-beat container and executed by
@@ -129,6 +212,23 @@ antarest_auto_archive_dry_run: true
 # sees without touching the database is what you want when a study fails to
 # show up and the question is whether the scan finds it at all.
 antarest_watcher_scan_dry_run: false
+
+# What "old enough to be deleted" means for the tasks above that delete
+# something. Four of the five have such a threshold, the blob collector being
+# the exception: upstream gives it a sleeping time and a dry run and nothing
+# else. Every value here is the upstream one.
+#
+# They are written out because a dry_run switch exposed without its threshold
+# is half a setting: antarest_auto_archive_dry_run decides *that* studies are
+# archived, this decides *which*, and 60 days is a threshold an instance where
+# a study is opened once a quarter will not want.
+#
+# matrix_gc_retention_time is the odd one, seconds rather than days: it is how
+# long a matrix is kept after nothing references it any more.
+antarest_matrix_gc_retention_time: 3600
+antarest_variable_view_gc_retention_days: 30
+antarest_tasks_gc_retention_days: 30
+antarest_auto_archive_threshold_days: 60
 
 # The ports the interface is published on (antarest_http_port,
 # antarest_https_port) live in group_vars/all.yml, next to the TLS settings:
