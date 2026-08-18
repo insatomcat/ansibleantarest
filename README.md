@@ -288,6 +288,8 @@ Each entry becomes `{{ antarest_data_dir }}/workspaces/<dir>` on the host, creat
 
 To expose a tree that already exists elsewhere, an NFS study directory for instance, mount it on `{{ antarest_data_dir }}/workspaces/<dir>` on the host and declare the workspace. The mount has to be in place before the containers start: `/workspaces` is bind-mounted into them, and a filesystem mounted underneath it afterwards stays invisible inside a running container.
 
+Two workspaces may not share a directory, and `dir` has to be a plain directory name rather than a path, so that one cannot nest inside another. The application refuses such a configuration while reading it (`ValueError: Overlapping workspace paths found`), which means the backend never boots: it crash-loops until it exhausts its start budget, and `antares-nginx`, which requires it, goes down with it and does not come back by itself once the file is fixed (`systemctl start antares-web.target`, or another run of the play). The play checks for it before writing the file rather than leaving that to be discovered in a journal.
+
 A directory holding a file named `AW_NO_SCAN` is skipped by the scan, and a study only reaches the interface once the watcher has run for real, see the maintenance tasks below.
 
 ### TLS
