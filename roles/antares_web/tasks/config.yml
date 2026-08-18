@@ -12,6 +12,31 @@
       Antares-Web writes the studies it creates itself.
     quiet: true
 
+# Antares-Web refuses a configuration where one workspace path contains
+# another: `validate_workspaces` raises `ValueError: Overlapping workspace
+# paths found`, and since that happens while the configuration is read, the
+# backend never boots. It crash-loops until it exhausts StartLimitBurst, and
+# antares-nginx, which requires it, is taken down with it and does not come
+# back on its own once the configuration is fixed. Two entries with the same
+# `dir` are all it takes, and a leaf name is checked for so that a `dir` of
+# `studies/sub` cannot nest under another workspace either.
+- name: Check the workspaces do not overlap
+  ansible.builtin.assert:
+    that:
+      - _antarest_workspace_dirs | length == _antarest_workspace_dirs | unique | length
+      - _antarest_workspace_dirs | select('search', '/') | list | length == 0
+    fail_msg: >-
+      Every workspace of antarest_workspaces needs a directory of its own, and
+      `dir` must be a single directory name, not a path. Declared:
+      {{ _antarest_workspace_dirs | join(', ') }}
+    quiet: true
+  vars:
+    _antarest_workspace_dirs: >-
+      {{ (antarest_workspaces | dict2items
+          | map(attribute='value.dir', default='') | reject('eq', '') | list)
+         + (antarest_workspaces | dict2items
+            | rejectattr('value.dir', 'defined') | map(attribute='key') | list) }}
+
 - name: Create the Antares-Web data directories
   ansible.builtin.file:
     path: "{{ item }}"
