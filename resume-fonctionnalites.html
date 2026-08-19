@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8">
+<title>Ansible Antares-Web + Slurm</title>
+<style>
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    width: 210mm; height: 297mm; padding: 10mm 12mm 12mm;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 7.5pt; line-height: 1.32; color: #1c2430;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  :root {
+    --navy: #123a5c; --cyan: #1ba1d8; --ink: #1c2430;
+    --grey: #5d6b7a; --rule: #d8e0e8; --bg: #f4f7fa;
+  }
+
+  /* ---------- en-tete ---------- */
+  header { display: flex; align-items: center; gap: 9mm;
+           border-bottom: 2.2pt solid var(--navy); padding-bottom: 3.2mm; }
+  .logos { display: flex; align-items: center; gap: 5mm; flex: none; }
+  .logos img, .logos svg { display: block; }
+  .plus { font-size: 15pt; color: var(--rule); font-weight: 300; }
+  h1 { margin: 0 0 1mm; font-size: 17pt; letter-spacing: -.3pt;
+       color: var(--navy); font-weight: 700; }
+  .sub { margin: 0; font-size: 8.3pt; color: var(--grey); }
+  .sub b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- resume ---------- */
+  .lede { margin: 2.6mm 0 2.8mm; padding: 2.6mm 3.2mm; background: var(--bg);
+          border-left: 2.2pt solid var(--cyan); font-size: 8.2pt; }
+  .lede b { color: var(--navy); }
+
+  /* ---------- grille ---------- */
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 7mm; }
+  h2 { font-size: 7.4pt; text-transform: uppercase; letter-spacing: .7pt;
+       color: var(--navy); margin: 0 0 1.6mm; padding-bottom: .9mm;
+       border-bottom: .6pt solid var(--rule); font-weight: 700; }
+  section { margin-bottom: 2.5mm; break-inside: avoid; }
+  .feat { margin-bottom: 1.9mm; }
+  .feat h3 { margin: 0; font-size: 7.7pt; font-weight: 700; color: var(--ink); display: inline; }
+  .feat h3::after { content: " "; }
+  .feat p { margin: 0; display: inline; color: #35424f; }
+  code, .mono { font-family: "SF Mono", Menlo, Consolas, monospace;
+                font-size: 6.7pt; background: #eef3f8; color: var(--navy);
+                padding: .2mm .7mm; border-radius: 1pt; }
+
+  /* ---------- tableau ---------- */
+  table { width: 100%; border-collapse: collapse; margin-bottom: 1mm; }
+  td { padding: 1.05mm 0; vertical-align: top; border-bottom: .4pt solid var(--rule); }
+  td.k { width: 30%; padding-right: 2mm; }
+  td.k span { font-family: "SF Mono", Menlo, Consolas, monospace;
+              font-size: 6.7pt; color: var(--navy); font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+
+  /* ---------- listes ---------- */
+  ul { margin: 0; padding-left: 3.2mm; }
+  li { margin-bottom: .9mm; }
+  li::marker { color: var(--cyan); }
+
+  /* ---------- bandeau distros ---------- */
+  .chips { display: flex; flex-wrap: wrap; gap: 1.1mm; margin-top: 1.4mm; }
+  .chip { font-size: 6.6pt; padding: .5mm 1.5mm; border: .5pt solid var(--rule);
+          border-radius: 6pt; background: #fff; color: #3b4a59; }
+  .chip.na { color: #94a2b1; border-style: dashed; }
+
+  /* ---------- commandes ---------- */
+  .cmds { background: #10283d; border-radius: 2pt; padding: 2.6mm 3.2mm;
+          display: grid; grid-template-columns: 1fr 1fr; gap: 1.1mm 6mm; }
+  .cmds div { font-size: 6.4pt; line-height: 1.3; color: #8ba5b9; }
+  .cmds code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 6.4pt;
+               background: none; color: #9fd0ea; padding: 0; display: block; }
+  .cmds code b { color: #eaf4fb; font-weight: 600; }
+
+  footer { position: absolute; bottom: 6mm; left: 12mm; right: 12mm;
+           display: flex; justify-content: space-between;
+           font-size: 6.3pt; color: #93a1b0;
+           border-top: .5pt solid var(--rule); padding-top: 1.6mm; }
+</style></head><body>
+
+<header>
+  <div class="logos">
+    <img src="data:image/png;base64,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" alt="AntaREST" style="width:15mm;height:15mm">
+    <span class="plus">+</span>
+    <svg width="15mm" height="15mm" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-label="Ansible">
+      <path fill="#000000" d="M10.617 11.473l4.686 3.695-3.102-7.662zM12 0C5.371 0 0 5.371 0 12s5.371 12 12 12 12-5.371 12-12S18.629 0 12 0zm5.797 17.305c-.011.418-.372.789-.797.789a.788.788 0 0 1-.485-.176l-6.113-4.859-2.098 5.035H6.202L11.13 6.234c.089-.203.322-.472.652-.472.32 0 .559.223.65.472l5.257 12.63a.831.831 0 0 1 .108.441z"/>
+    </svg>
+  </div>
+  <div>
+    <h1>Déploiement Ansible d'Antares-Web + Slurm</h1>
+    <p class="sub">Playbook <b>ansibleantarest</b> : d'une VM nue à une instance Antares-Web exploitable en une commande, cluster de calcul compris.</p>
+  </div>
+</header>
+
+<p class="lede">Un playbook Ansible qui déploie <b>Antares-Web (AntaREST)</b> et, en option, un <b>cluster Slurm</b> complet, sur Debian / Ubuntu comme sur les rebuilds RHEL. Conteneurs podman + quadlet, TLS, durcissement, build d'artefacts réutilisables et playbook de vérification post-déploiement.</p>
+
+<div class="cols">
+<div>
+
+<section>
+  <h2>Architecture déployée</h2>
+  <table>
+    <tr><td class="k"><span>antares_web</span></td><td>Build et exécution d'Antares-Web (podman + quadlet, TLS optionnel)</td></tr>
+    <tr><td class="k"><span>slurm_frontend</span></td><td>Contrôleur Slurm, base de comptabilité, serveur NFS pour <code>/home</code></td></tr>
+    <tr><td class="k"><span>slurm_compute</span></td><td>Nœuds de calcul, montage du <code>/home</code> partagé</td></tr>
+  </table>
+  <p style="margin:1.4mm 0 0">Une même machine peut cumuler plusieurs groupes. Slurm est facultatif : <code>slurm_enabled: false</code> donne un Antares-Web seul avec solveur local. Le nombre de nœuds vient de l'inventaire, <code>slurm.conf</code> étant généré depuis les facts.</p>
+</section>
+
+<section>
+  <h2>Conteneurs et exploitation</h2>
+  <div class="feat"><h3>Ni Docker ni compose.</h3><p>Chaque conteneur est une unité quadlet systemd (<code>antarest</code>, <code>celery-beat</code>, <code>celery-worker</code>, <code>postgresql</code>, <code>redis</code>, <code>antares-nginx</code>), regroupée sous une <code>antares-web.target</code> qui remplace <code>compose up/down</code>.</p></div>
+  <div class="feat"><h3>Redémarrage maîtrisé.</h3><p><code>Restart=on-failure</code> avec budget systemd : un conteneur qui boucle finit en <code>failed</code>, visible dans <code>systemctl --failed</code>, plutôt que de redémarrer indéfiniment.</p></div>
+  <div class="feat"><h3>Podman rootful.</h3><p>Le rootless remapperait les UID et casserait la cohérence de propriété des fichiers avec le <code>/home</code> NFS.</p></div>
+</section>
+
+<section>
+  <h2>Multi-distribution, vérifié en CI</h2>
+  <p>Tout passe par <code>ansible.builtin.package</code> ; les différences (CRB/EPEL, noms de paquets, OpenHPC pour Slurm sur EL) sont résolues en un seul endroit par rôle. Chaque distribution est déployée à chaque PR, en machine seule <b>et</b> en cluster de cinq VM.</p>
+  <div class="chips">
+    <span class="chip">Debian 13</span><span class="chip">Ubuntu 24 / 26</span>
+    <span class="chip">Oracle Linux 9 / 10</span><span class="chip">Rocky 9 / 10</span>
+    <span class="chip">CentOS Stream 9 / 10</span><span class="chip na">RHEL 9 / 10 (sans abonnement CI)</span>
+  </div>
+</section>
+
+<section>
+  <h2>Solveurs et Antares-Xpansion</h2>
+  <div class="feat"><h3>Binaires Antares Simulator.</h3><p>Séries 8.8.x et 9.2.x, avec choix automatique du build selon la glibc de la famille (Ubuntu 22.04 ou Oracle Linux 8).</p></div>
+  <div class="feat"><h3>Xpansion en option.</h3><p>Implémentation C++, runtime MPI sur les nœuds, déployé uniquement sur le cluster puisque le launcher local d'Antares-Web ignore le mode Xpansion.</p></div>
+  <div class="feat"><h3>Script de lancement corrigé.</h3><p><code>launchAntares.sh</code> sort sur le code de retour du run : un solveur tué par l'OOM killer remonte en rouge au lieu d'un faux vert, après le post-traitement et le zip.</p></div>
+</section>
+
+<section>
+  <h2>Limites assumées</h2>
+  <ul>
+    <li>Xpansion en C++ uniquement, et sur cluster seulement.</li>
+    <li>Le firewall filtre l'hôte, pas le trafic conteneur : les <code>PublishPort</code> font foi.</li>
+    <li>La jail du formulaire de login bannit à l'adresse IP (10 échecs en 10 min) : une attaque répartie sur beaucoup d'adresses passe sous le seuil.</li>
+    <li>EL 8, Debian 12 et Ubuntu 22.04 exclus : podman trop ancien pour quadlet.</li>
+    <li>RHEL listé sur la foi de ses rebuilds, faute d'abonnement en CI.</li>
+  </ul>
+</section>
+
+</div>
+<div>
+
+<section>
+  <h2>TLS et tâches de fond</h2>
+  <div class="feat"><h3>TLS intégré.</h3><p>Le nginx déjà présent termine le TLS : Let's Encrypt (certbot, http-01 servi par le stack lui-même), auto-signé ou certificat fourni. Premier run en une seule passe, HSTS et redirection incluses.</p></div>
+  <div class="feat"><h3>Le mécanisme de fond actuel.</h3><p>Les tâches périodiques tournent dans <code>celery-beat</code> et <code>celery-worker</code>, le schéma que le projet privilégie aujourd'hui, et non dans les conteneurs <code>watcher</code> / <code>matrix_gc</code> qui sont en voie d'obsolescence. Neuf tâches couvertes au lieu de deux.</p></div>
+  <div class="feat"><h3>Ménage en marche à blanc.</h3><p>Les collecteurs et l'archiveur démarrent en journalisant ce qu'ils supprimeraient, sans rien supprimer. L'exploitant lit quelques cycles dans <code>journalctl -u antarest-celery-worker</code>, vérifie que la liste est celle qu'il attend, puis les autorise un par un à supprimer pour de bon.</p></div>
+</section>
+
+<section>
+  <h2>Durcissement</h2>
+  <p>Le rôle <code>hardening</code> s'exécute tôt, avant tout déploiement, en quatre blocs indépendants :</p>
+  <ul>
+    <li><b>nftables</b> dans une table dédiée, sans toucher au hook <code>forward</code> ni à <code>/etc/nftables.conf</code>.</li>
+    <li><b>fail2ban</b> : jail sshd et jail sur le formulaire de login Antares, bans posés en <code>prerouting</code> car un ban en <code>input</code> ne voit pas le trafic DNATé vers les conteneurs.</li>
+    <li><b>sshd</b> sans mot de passe, avec contrôle préalable des clés autorisées et <code>sshd -t</code> avant application.</li>
+    <li><b>Mises à jour de sécurité</b> automatiques, sans reboot : une étude tourne parfois des heures.</li>
+  </ul>
+  <p style="margin-top:1.2mm">Le rôle signale aussi les secrets restés à leur valeur d'exemple, et peut refuser de déployer dans ce cas.</p>
+</section>
+
+<section>
+  <h2>Build once, deploy everywhere</h2>
+  <p><code>build.yml</code> produit sur une machine de build les artefacts dans <code>./artifacts</code> : image backend (UID gravé), images tierces, frontend, tarballs solveurs et <code>manifest.yml</code>. Les cibles se déploient ensuite sans npm ni build, les archives étant transportées en rsync. Le playbook de build réutilise les mêmes fichiers de tâches que le déploiement, donc les artefacts ne peuvent pas être produits par une autre recette.</p>
+</section>
+
+<section>
+  <h2>Vérification post-déploiement</h2>
+  <p><code>verify.yml</code> contrôle ce que <code>site.yml</code> ne peut pas voir depuis une seule machine, sans rien modifier :</p>
+  <ul>
+    <li><code>slurmctld</code> vivant et voyant tous les nœuds de l'inventaire, cluster enregistré en comptabilité ;</li>
+    <li>montage NFS réellement effectif : marqueur écrit d'un côté, lu de l'autre ;</li>
+    <li>job soumis exactement comme le backend le fait, en SSH avec la clé générée ;</li>
+    <li>les trois rulesets firewall, vus des deux côtés.</li>
+  </ul>
+</section>
+
+
+</div>
+</div>
+
+<div class="cmds">
+  <div><code><b>ansible-playbook</b> site.yml</code>déploiement complet des trois groupes</div>
+  <div><code><b>ansible-playbook</b> build.yml</code>construit les artefacts dans ./artifacts</div>
+  <div><code>site.yml <b>-e</b> slurm_enabled=false</code>Antares-Web seul, solveur local</div>
+  <div><code>site.yml <b>-e</b> antarest_image_source=archive</code>déploie les artefacts, sans npm ni build</div>
+  <div><code>site.yml <b>--tags</b> antares_web|slurm|hardening</code>ne rejouer qu'une partie du déploiement</div>
+  <div><code><b>ansible-playbook</b> verify.yml</code>à lancer depuis une machine hors inventaire</div>
+</div>
+
+<footer>
+  <span>ansibleantarest &middot; résumé des fonctionnalités</span>
+  <span>Antares-Web (AntaREST) &middot; Antares Simulator 8.8 / 9.2 &middot; Slurm &middot; podman + quadlet</span>
+</footer>
+
+</body></html>
