@@ -1,0 +1,151 @@
+---
+# Everything under antarest_data_dir is the state that has to outlive the
+# machine: the studies, the matrix store, the archives and the PostgreSQL
+# cluster. On a cloud instance that argues for a volume of its own rather than
+# room carved out of the boot disk, which can be neither resized nor moved to
+# another instance without going through the image.
+#
+# Only runs when antarest_data_device names a device; see the variable in
+# defaults/main.yml for why the volume is mounted on antarest_data_dir itself
+# rather than under a path of its own.
+
+- name: Check the data filesystem is one this role can create
+  ansible.builtin.assert:
+    that: antarest_data_fstype in antarest_data_fs_packages
+    fail_msg: >-
+      antarest_data_fstype is `{{ antarest_data_fstype }}`, and only
+      {{ antarest_data_fs_packages.keys() | join(' and ') }} are supported.
+    quiet: true
+
+- name: Install the tools that create the data filesystem
+  ansible.builtin.package:
+    name: "{{ antarest_data_fs_packages[antarest_data_fstype] }}"
+    state: present
+
+- name: Look the data device up
+  ansible.builtin.stat:
+    path: "{{ antarest_data_device }}"
+    follow: true
+  register: antarest_data_stat
+
+# A missing device is nearly always a volume that is attached but not visible
+# yet rather than a typo: on OCI the paravirtualized attachment only appears
+# under /dev/oracleoci once oci-utils has run, and an iSCSI one not until it
+# has been logged into.
+- name: Check the data device is a block device
+  ansible.builtin.assert:
+    that: antarest_data_stat.stat.isblk | default(false)
+    fail_msg: >-
+      antarest_data_device is set to `{{ antarest_data_device }}`, which is not
+      a block device on this host. Attach the volume, or leave the variable
+      empty to keep the state on the boot disk.
+    quiet: true
+
+- name: Read what the data device already holds
+  ansible.builtin.command:
+    cmd: lsblk --json --output NAME,FSTYPE,UUID,MOUNTPOINT {{ antarest_data_device }}
+  register: antarest_data_lsblk
+  changed_when: false
+  check_mode: false
+
+- name: Record the state of the data device
+  ansible.builtin.set_fact:
+    antarest_data_disk: >-
+      {{ (antarest_data_lsblk.stdout | from_json).blockdevices | first }}
+
+# Three ways of naming the wrong device, and all three destroy something. A
+# partition table means the disk belongs to a system, most likely this one's;
+# a filesystem that is not the one asked for means somebody else's data; a
+# mount somewhere else means it is in use right now. mkfs is refused in all
+# three cases rather than put behind a force flag: no run of this play
+# legitimately reformats a device that is not blank.
+- name: Check the data device is free to use
+  ansible.builtin.assert:
+    that:
+      - antarest_data_disk.children is not defined
+      - antarest_data_disk.fstype in [none, antarest_data_fstype]
+      - antarest_data_disk.mountpoint in [none, antarest_data_dir]
+    fail_msg: >-
+      {{ antarest_data_device }} is not blank. lsblk reports
+      fstype={{ antarest_data_disk.fstype }},
+      mountpoint={{ antarest_data_disk.mountpoint }},
+      partitions={{ antarest_data_disk.children | default([]) | length }}.
+      This play only formats a device that holds nothing at all: wipe it by
+      hand, or point antarest_data_device at the right one.
+    quiet: true
+
+- name: Create the data filesystem
+  ansible.builtin.command:
+    cmd: mkfs.{{ antarest_data_fstype }} {{ antarest_data_device }}
+  when: antarest_data_disk.fstype is none
+  changed_when: true
+
+# check_mode: false so that a --check run over a machine that already has its
+# volume still reads the UUID, instead of skipping and leaving the mount below
+# with nothing to work from. On a blank device under --check there is no
+# filesystem to read, mkfs having been skipped, and the mount is skipped too.
+- name: Read the UUID of the data filesystem
+  ansible.builtin.command:
+    cmd: lsblk --nodeps --noheadings --output UUID {{ antarest_data_device }}
+  register: antarest_data_uuid
+  changed_when: false
+  check_mode: false
+
+# Mounting over a directory hides what is in it, it does not move it. On a
+# machine that has been running, that means the studies and the database stay
+# on the boot disk, out of sight, while PostgreSQL initialises an empty cluster
+# on the volume and the interface comes back up with nothing in it. Refused
+# here rather than discovered then: moving the state is a one-off the operator
+# does with the stack stopped, see the README.
+- name: Look for the data directory on the boot disk
+  ansible.builtin.stat:
+    path: "{{ antarest_data_dir }}"
+  register: antarest_data_dir_stat
+  when: antarest_data_disk.mountpoint is none
+
+- name: Look for state already on the boot disk
+  ansible.builtin.find:
+    paths: "{{ antarest_data_dir }}"
+    file_type: any
+    hidden: true
+  register: antarest_data_existing
+  when: antarest_data_dir_stat.stat.exists | default(false)
+
+- name: Check mounting the volume would not hide existing state
+  ansible.builtin.assert:
+    that: (antarest_data_existing.matched | default(0)) == 0
+    fail_msg: >-
+      {{ antarest_data_dir }} already holds
+      {{ antarest_data_existing.matched | default(0) }} entries on the boot
+      disk, and mounting {{ antarest_data_device }} over it would hide them
+      rather than move them. Stop {{ antarest_service_name }}.target, move the
+      tree onto the volume by hand, then run this play again. See "Putting the
+      state on its own volume" in the README.
+    quiet: true
+  when: antarest_data_disk.mountpoint is none
+
+# By UUID rather than by the name the variable holds: /dev/oracleoci/oraclevdb
+# is a symlink oci-utils maintains and /dev/sdb is not stable across a reboot
+# that reorders the attachments, while the UUID is a property of the filesystem
+# and survives being moved to another instance.
+- name: Mount the data volume
+  ansible.posix.mount:
+    path: "{{ antarest_data_dir }}"
+    src: "UUID={{ antarest_data_uuid.stdout | trim }}"
+    fstype: "{{ antarest_data_fstype }}"
+    opts: "{{ antarest_data_mount_opts }}"
+    state: mounted
+  register: antarest_data_mounted
+  when: antarest_data_uuid.stdout | trim | length > 0
+
+# A fresh filesystem carries no security xattrs, so its root comes out
+# `unlabeled_t`, which no confined domain is allowed to traverse. The :z on the
+# bind mounts relabels the directories that are mounted into the containers,
+# not the mount point above them, so that one is ours to fix.
+- name: Label the data volume for SELinux
+  ansible.builtin.command:
+    cmd: restorecon -R {{ antarest_data_dir }}
+  when:
+    - antarest_data_mounted.changed | default(false)
+    - (ansible_facts.selinux.status | default('disabled')) == 'enabled'
+  changed_when: true

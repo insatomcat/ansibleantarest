@@ -1,4 +1,11 @@
 ---
+# Before the checkout, which is what creates antarest_data_dir: a directory
+# made on the boot disk and then mounted over is a directory nothing can read
+# again.
+- name: Put the persistent state on its own volume
+  ansible.builtin.include_tasks: data_volume.yml
+  when: antarest_data_device | length > 0
+
 - name: Fetch the AntaREST sources
   ansible.builtin.include_tasks: checkout.yml
 

@@ -20,6 +20,11 @@ PartOf={{ antarest_service_name }}.target
 # Start budget for the Restart= below: five attempts, then the unit gives up.
 StartLimitIntervalSec=300
 StartLimitBurst=5
+{% if antarest_data_device %}
+# The state is on a volume mounted with nofail. Without this the unit would
+# start on the empty mount point of the boot disk instead of failing visibly.
+RequiresMountsFor={{ antarest_data_dir }}
+{% endif %}
 
 [Container]
 ContainerName=postgresql

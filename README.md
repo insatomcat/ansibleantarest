@@ -265,6 +265,41 @@ What stays written in the template is what is coupled to something else on the m
 
 The local launcher reads the cores of the machine as long as `antarest_local_launcher_nb_cores_detection` is on, and *overwrites* whatever `antarest_local_launcher_nb_cores` says. Turn detection off and the map is used, which is worth doing on a shared machine: the upstream fallback offers 22 cores out of 24 whatever the machine really has.
 
+### Putting the state on its own volume
+
+Everything the deployment has to keep lives under `antarest_data_dir`, that is `/var/antares-web/data`: the studies, the matrix store, the archives, the logs and the PostgreSQL cluster. By default that sits on the boot disk. On a cloud instance it is usually worth giving it a volume of its own, which can be resized, snapshotted and re-attached to another machine without going through the image.
+
+```yaml
+antarest_data_device: /dev/oracleoci/oraclevdb  # empty: stay on the boot disk
+antarest_data_fstype: xfs                       # or ext4
+antarest_data_mount_opts: "defaults,nofail"
+```
+
+Set the device per host in the inventory rather than in `group_vars`, since the name is a property of one machine. The play formats it, writes it into `/etc/fstab` by UUID and mounts it on `/var/antares-web/data`, before the directory tree is created.
+
+It is mounted on that path rather than somewhere else that `antarest_data_dir` would then point at, and that is deliberate: a workspace path is what its studies are recorded with in the database, so it has to read the same whether the state sits on a volume or on the boot disk. Adding or removing the volume then stays a decision about hardware alone.
+
+The device is formatted whole, with no partition table. Growing it afterwards is the volume in the cloud console followed by `xfs_growfs /var/antares-web/data`, online, with no partition to extend first.
+
+**A device that is not blank is refused.** A partition table, a filesystem other than `antarest_data_fstype`, or a mount anywhere but `/var/antares-web/data`: all three stop the play with what `lsblk` reported. There is no force flag, because no run of this playbook legitimately reformats a disk that holds something.
+
+**`nofail`, and what makes it safe.** Without it, a volume that failed to attach leaves a cloud machine in emergency mode with no way in. With it alone, the machine boots, the containers start on the empty mount point and PostgreSQL initialises a fresh cluster: the interface comes back up with no studies in it while the real state sits hidden on the boot disk. So the four units that write under the data directory, `postgresql`, `antarest`, `antarest-celery-beat` and `antarest-celery-worker`, carry `RequiresMountsFor=/var/antares-web/data` as soon as `antarest_data_device` is set. A volume that did not come back is then a failed unit in `systemctl --failed`, which is the visible failure the mount option gave up.
+
+On OCI, attach the volume as **paravirtualized**: the device is there at boot as `/dev/oracleoci/oraclevdb` with nothing to run first. An iSCSI attachment is logged into by `oci-utils` once the network is up, so it needs `_netdev` added to `antarest_data_mount_opts`.
+
+**On a machine that already holds studies**, the play refuses to mount over a non-empty `/var/antares-web/data`: mounting hides a tree, it does not move it. Moving it is a one-off, done once with the stack stopped:
+
+```bash
+systemctl stop antares-web.target
+mkfs.xfs /dev/oracleoci/oraclevdb
+mount /dev/oracleoci/oraclevdb /mnt
+rsync -aHAX --numeric-ids /var/antares-web/data/ /mnt/
+umount /mnt
+mv /var/antares-web/data /var/antares-web/data.bak
+```
+
+Then set `antarest_data_device` and run the play again: it finds the filesystem already there, mounts it and brings the stack back up. Keep `data.bak` until the interface has shown its studies, then remove it.
+
 ### Study workspaces
 
 The directories the application exposes, one entry per workspace:
@@ -371,6 +406,7 @@ Everything after the run still happens before that exit: the post-processing, th
 ├── deploy/       config.prod.yaml, id_rsa, solvers
 ├── image/        derived image build context
 └── data/         persistent state: studies, matrices, PostgreSQL, logs
+                  a block device of its own when antarest_data_device is set
 
 /etc/containers/systemd/     quadlet container units
 /etc/systemd/system/antares-web.target
@@ -380,7 +416,7 @@ Everything after the run still happens before that exit: the post-processing, th
 /var/www/certbot/            ACME challenge webroot, served by nginx
 ```
 
-Configuration and data live outside the git checkout: changing `antarest_version` and re-running the playbook updates the application without touching the data.
+Configuration and data live outside the git checkout: changing `antarest_version` and re-running the playbook updates the application without touching the data. `data/` is the one directory worth putting on a volume of its own, see "Putting the state on its own volume" above.
 
 ## Containers: podman and quadlet
 
@@ -601,8 +637,9 @@ ansible-playbook verify.yml
 ansible-playbook verify.yml --tags firewall      # only the rulesets
 ```
 
-It changes nothing beyond one marker file in the shared `/home`, which the last play removes, so it is safe against a production deployment. Two halves, each skipped where it does not apply (`slurm_enabled`, `hardening_firewall_enabled`):
+It changes nothing beyond one marker file in the shared `/home`, which the last play removes, so it is safe against a production deployment. The cluster and firewall halves skip themselves where they do not apply (`slurm_enabled`, `hardening_firewall_enabled`):
 
+- **Antares-Web.** Every unit of the stack is `active`, the backend answers `/api/health`, nginx serves the built front-end and routes `/api/` to the backend, all of it asked from the controller so the answer crosses the firewall and the published port rather than a loopback. When `antarest_data_device` is set, the data directory is checked to really be that volume's mount point and to have its entry in `/etc/fstab`: a stack that answers proves nothing about *where* it is writing, and a volume that did not come back leaves the units on the empty mount point of the boot disk, with an empty database behind a working interface. With the variable empty the state belongs on the boot disk and the check does not apply.
 - **The cluster.** `slurmctld` is alive and sees every compute node of the inventory in a healthy state, the cluster is registered in the accounting database, the compute nodes really mount the front-end's `/home` (a marker written on one side and read on the other) and can execute the solvers installed in it, and a job submitted exactly the way the backend submits one - over SSH, with the key generated on the web machine, to the `antares` account of the front-end - runs on a compute node.
 - **The firewall.** The three rulesets a deployment produces, checked from both sides. Each port that matters is looked at twice: a daemon is really listening on it, and the controller still cannot reach it while the machines that need it can. **Run this from a machine that is not in the inventory**, which the controller normally is not: a machine of the deployment is in every ruleset's trusted set, and from there every "the world cannot reach this" check is a tautology.
 
