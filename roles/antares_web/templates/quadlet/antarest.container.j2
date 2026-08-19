@@ -29,6 +29,11 @@ StartLimitBurst=5
 # `systemctl stop antares-nginx` no longer holds while the backend runs; stop
 # the target, or the backend, to take the front end down.
 Upholds=antares-nginx.service
+{% if antarest_data_device %}
+# The state is on a volume mounted with nofail. Without this the unit would
+# start on the empty mount point of the boot disk instead of failing visibly.
+RequiresMountsFor={{ antarest_data_dir }}
+{% endif %}
 
 [Container]
 ContainerName=antarest

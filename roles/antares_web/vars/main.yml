@@ -152,3 +152,15 @@ antarest_quadlet_services: >-
       'antares-nginx.service',
       'antares-web-network.service']
      + (['antarest-adminer.service'] if antarest_enable_adminer | bool else []) }}
+
+# ===========================================================================
+#  Data volume
+# ===========================================================================
+
+# The tool that creates the filesystem asked for by antarest_data_fstype, and
+# at the same time the list of filesystems tasks/data_volume.yml is willing to
+# create. e2fsprogs is on every image already; xfsprogs is not, on the minimal
+# ones. The package name is the same on both families.
+antarest_data_fs_packages:
+  xfs: xfsprogs
+  ext4: e2fsprogs
