@@ -70,6 +70,22 @@ all:
       antarest_jwt_key: "ci-jwt-not-a-secret"
       antarest_admin_password: "ci-admin-not-a-secret"
       antarest_db_password: "ci-db-not-a-secret"
+      keycloak_admin_password: "ci-keycloak-not-a-secret"
+      keycloak_db_password: "ci-keycloak-db-not-a-secret"
+      keycloak_client_secret: "ci-keycloak-client-not-a-secret"
+
+      # ---------------------------------------------------------------
+      #  Keycloak, and the connector that puts it to use. Deployed on every
+      #  shape of the CI, this one included: the identity provider is one
+      #  more container, one more database created in the stack's
+      #  PostgreSQL before it starts, one more route through the front door
+      #  and, right after the first start, the temporary administrator
+      #  replaced over the admin API. None of that is exercised by a
+      #  deployment that leaves it off. The artefacts carry both images
+      #  because inventory/ci-build.yml builds with the same two settings.
+      # ---------------------------------------------------------------
+      keycloak_enabled: true
+      antares_auth_provider: keycloak
 
       # ---------------------------------------------------------------
       #  On, which the shipped default is not: the nftables table and,
