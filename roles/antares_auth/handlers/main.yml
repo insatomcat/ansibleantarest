@@ -1,0 +1,10 @@
+---
+# The connector alone, not the whole target: a new client secret or a new
+# directory address has no reason to restart the backend and the studies with
+# it. Antares-Web resolves the connector at each login, so it picks the new
+# container up on its own.
+- name: Restart the authentication connector
+  ansible.builtin.systemd:
+    name: "{{ antares_auth_container }}.service"
+    state: restarted
+    daemon_reload: true

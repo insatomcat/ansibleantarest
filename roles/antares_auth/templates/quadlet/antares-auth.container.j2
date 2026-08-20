@@ -1,0 +1,57 @@
+{{ ansible_managed | comment }}
+#
+# The bridge between the `security.external_auth` hook of Antares-Web and
+# {{ 'Keycloak' if antares_auth_provider == 'keycloak' else 'the LDAP directory' }}. ContainerName is load-bearing: it is the name the
+# backend resolves on the podman network, see antarest_external_auth_url.
+#
+# Published nowhere. Only the containers of the stack have any business calling
+# it, and what it answers is who somebody is.
+
+[Unit]
+Description=Antares-Web authentication connector ({{ antares_auth_provider }})
+PartOf={{ antarest_service_name }}.target
+{% if antares_auth_provider == 'keycloak' and keycloak_enabled | bool %}
+# Ordering alone, deliberately not Requires=: the connector resolves Keycloak
+# at each request rather than at startup, so it starts, and answers 502, while
+# Keycloak is coming up. A login then fails and Antares-Web falls back to its
+# local accounts, which is what an administrator needs to get in and fix it.
+After={{ keycloak_container }}.service
+{% endif %}
+# Start budget for the Restart= below: five attempts, then the unit gives up.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Container]
+ContainerName={{ antares_auth_container }}
+Image={{ antares_auth_image }}
+Network={{ antarest_service_name }}.network
+User={{ antares_uid }}:{{ antares_gid }}
+Environment=LOG_LEVEL={{ antares_auth_log_level }}
+{% if antares_auth_provider == 'keycloak' %}
+Environment=KEYCLOAK_URL={{ antares_auth_keycloak_url | trim }}
+Environment=KEYCLOAK_REALM={{ keycloak_realm }}
+Environment=KEYCLOAK_CLIENT_ID={{ keycloak_client_id }}
+Environment=KEYCLOAK_CLIENT_SECRET={{ keycloak_client_secret }}
+Environment=KEYCLOAK_GROUP_KEY={{ antares_auth_keycloak_group_key }}
+{% else %}
+Environment=LDAP_HOST={{ antares_auth_ldap_host }}
+Environment=LDAP_PORT={{ antares_auth_ldap_port }}
+Environment=LDAP_USE_SSL={{ antares_auth_ldap_use_ssl | bool | lower }}
+Environment=LDAP_BASE_DN={{ antares_auth_ldap_base_dn }}
+Environment=LDAP_USER_OU={{ antares_auth_ldap_user_ou }}
+Environment=LDAP_GROUP_OU={{ antares_auth_ldap_group_ou }}
+Environment=LDAP_USER_ATTR={{ antares_auth_ldap_user_attr }}
+Environment=LDAP_BIND_DN={{ antares_auth_ldap_bind_dn }}
+Environment=LDAP_BIND_PASSWORD={{ antares_auth_ldap_bind_password }}
+Environment=LDAP_GROUP_KEY={{ antares_auth_ldap_group_key }}
+{% endif %}
+LogDriver=journald
+
+[Service]
+# on-failure, not always: a container that keeps dying exhausts the budget in
+# [Unit] and stays `failed` instead of looping out of sight. See the README.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy={{ antarest_service_name }}.target
