@@ -25,6 +25,7 @@ Everything is written in English, README included. Keep it that way.
 | build once, deploy with `archive` | Build once, deploy everywhere |
 | How to re-run only one part | Useful tags |
 | What `verify.yml` proves | Checking a deployment |
+| One machine that is also its own cluster | The cluster on the web machine itself |
 | Where this diverges from the reference PDF | Differences from the PDF |
 | Postgres major upgrades | Major database versions |
 
@@ -42,7 +43,8 @@ Everything is written in English, README included. Keep it that way.
   and the three firewall rulesets from both sides). Run it from a machine that
   is not in the inventory.
 - `inventory/hosts.yml` - the example inventory, and the documentation of the
-  three host groups. `inventory/ci-*.yml` are what the CI runs.
+  three host groups. `inventory/ci-*.yml` are what the CI runs, including
+  `ci-standalone-slurm.yml`, one host listed in the three groups at once.
 - `group_vars/all.yml` - the fleet-wide knobs (587 lines, heavily commented).
   `group_vars/slurm.yml` for the cluster only.
 
@@ -99,8 +101,9 @@ straight to the file whose name matches the question.
   after 4.4 fail to generate on the oldest supported release. Hence
   `PodmanArgs=--network-alias=` rather than `NetworkAlias=`.
 - **One distribution per cluster.** Packaged Slurm majors differ per distro and
-  the daemons only interoperate across some of them. The web machine is exempt:
-  it only talks SSH.
+  the daemons only interoperate across some of them. The web machine is exempt
+  as long as it only talks SSH, which stops being true in the
+  `standalone-slurm` shape, where it is a Slurm node like any other.
 - **`artifacts/` and `.facts/` are gitignored.** Hundreds of megabytes,
   rebuildable. Never commit them.
 - Third-party images are pinned to majors on purpose. Changing a tag
@@ -108,8 +111,9 @@ straight to the file whose name matches the question.
 
 ## CI
 
-`.github/workflows/ci.yml`, five jobs: `syntax`, `targets`, `build`,
-`standalone` (one machine per distribution) and `slurm` (a five-VM cluster on
-one runner). There is no linter and no molecule: the CI is real deployments.
-A change that touches a role should be reasoned about against both the
-`standalone` and the `slurm` matrices.
+`.github/workflows/ci.yml`, six jobs: `syntax`, `targets`, `build`,
+`standalone` (one machine per distribution), `slurm` (a five-VM cluster on one
+runner) and `standalone-slurm` (that cluster collapsed onto the web machine,
+which is the only shape where Xpansion works without a second machine). There
+is no linter and no molecule: the CI is real deployments. A change that touches
+a role should be reasoned about against the three matrices.

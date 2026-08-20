@@ -38,6 +38,8 @@ ansible-playbook site.yml -e slurm_enabled=false
 
 The inventory should then contain only the `antares_web` group.
 
+On one machine, cluster included: list that machine in the three groups. It then runs Antares-Web *and* the cluster it submits to, which is what buys Antares-Xpansion on a single-machine site. See "The cluster on the web machine itself" below.
+
 ## Example inventories
 
 `inventory/hosts.yml` is the default (set in `ansible.cfg`) and shows the full three-group layout. Two ready-to-copy inventories cover the simple cases, each carrying the options that are worth setting per machine, commented:
@@ -101,7 +103,7 @@ supported_distros:      # group_vars/all.yml
   - "CentOS 10"
 ```
 
-That list is a claim, not a wish. Every line but one is deployed on every pull request by the CI, twice over: one machine running Antares-Web on its own, and a five-machine cluster. RedHat is the exception, on both counts: the CRB repository id and the `epel-release` URL are written for it, but it needs a subscription the CI has not got, so it is listed on the strength of its rebuilds rather than of a run.
+That list is a claim, not a wish. Every line but one is deployed on every pull request by the CI, three times over: one machine running Antares-Web on its own, a five-machine cluster, and one machine playing every part at once. RedHat is the exception, on both counts: the CRB repository id and the `epel-release` URL are written for it, but it needs a subscription the CI has not got, so it is listed on the strength of its rebuilds rather than of a run.
 
 Two things are deliberately absent. **Debian 12 and Ubuntu 22.04**, which ship podman 4.3.1 and 3.4.4 where quadlet needs 4.4: the playbook would stop on them a few tasks after the distribution check, so claiming them would be worse than leaving them out. **AlmaLinux**, which nothing here has ever run on; it is the same code path as Rocky Linux, exercised twice per pull request, so adding `"AlmaLinux 9"` yourself is reasonable, it is just not something this repository asserts on your behalf.
 
@@ -202,7 +204,7 @@ Executable names changed across generations: `antares-<X>.<Y>-solver` for the 8.
 
 ### Antares-Xpansion
 
-Investment optimisation, off by default. A release weighs about 250 MB and pulls an MPI runtime onto every compute node, which a cluster that only runs simulations has no use for. It needs a cluster: Antares-Web's local launcher ignores the Xpansion mode, so this is deployed on the `slurm` group and nowhere else (see "Known limitations").
+Investment optimisation, off by default. A release weighs about 250 MB and pulls an MPI runtime onto every compute node, which a cluster that only runs simulations has no use for. It needs a cluster: Antares-Web's local launcher ignores the Xpansion mode, so this is deployed on the `slurm` group and nowhere else (see "Known limitations"). A single machine can be that cluster, which is the point of "The cluster on the web machine itself" below.
 
 ```yaml
 antares_xpansion_enabled: true
@@ -402,6 +404,41 @@ slurm_repo: openhpc          # `distro` on the Debian family
 ```
 
 The release rpm is installed with the GPG check disabled, since it is what brings in the key its own repositories are signed with; everything pulled from them afterwards is verified normally. On a machine where nothing provides the `epel-release` capability the release rpm requires, Oracle Linux 10 being the case today, it is installed with `rpm -Uvh --nodeps` instead, see the table in "What a RHEL-compatible target needs on top". Package names then carry an `-ohpc` suffix (`slurm-ohpc`, `slurm-slurmctld-ohpc`, `slurm-slurmd-ohpc`, `slurm-slurmdbd-ohpc`) and nothing else moves: the daemons, `/etc/slurm`, the `slurm` account and the generated `slurm.conf` are the same as on Debian. Set `slurm_repo: distro` to install Slurm yourself and only let the playbook configure it.
+
+### The cluster on the web machine itself
+
+One machine can play every part: the web application, the Slurm controller, the accounting database, the NFS export and the single compute node that runs the studies. It is one inventory away, and nothing in the roles is specific to it - each of them decides what it installs from the groups the host is in rather than from the play it sits in, so a host listed three times gets the union of the three behaviours.
+
+```yaml
+all:
+  hosts:
+    antares1:
+      ansible_host: 203.0.113.20
+
+  children:
+    antares_web:
+      hosts:
+        antares1:
+    slurm:
+      children:
+        slurm_frontend:
+          hosts:
+            antares1:
+        slurm_compute:
+          hosts:
+            antares1:
+```
+
+**Why bother, when a single machine already runs studies with the local launcher.** Because the local launcher ignores the Xpansion mode: a study launched with the box ticked runs an ordinary simulation and comes back green, see "Known limitations". Xpansion is the Slurm launcher's only, and this is the smallest deployment that has one. Two other things come with it: a queue, so a second study waits instead of competing for the same cores, and the return code of the run, which `launchAntares.sh` turns into a failed job rather than a green study over nothing.
+
+What it costs, in the order the costs actually bite:
+
+- **The machine has to be shared, and Slurm does not know that.** `slurm_node_real_memory` defaults to 95 % of the machine's memory, which is right for a compute node that does nothing else and wrong here: Postgres, Redis, the backend, nginx and MariaDB live on the same kernel, and a Benders run peaking at 1.1 GB in an allocation that was granted everything ends with the OOM killer choosing among them. Pin the two knobs in the inventory, on that host: `slurm_node_real_memory` to what is left once the web stack has its share, and `slurm_node_cpus` to the cores you are willing to hand out. `slurm_launcher_nb_cores_max` follows the second one, since it is capped to the smallest compute node.
+- **Size it for Xpansion, not for the interface.** Measured on the five-machine lab: 1.4 GB for the web stack, 499 MB for the front-end daemons, 271 MB for slurmd, and 1.1 GB more for the `SmallTestFiveCandidates` example - which is a five-candidate toy. That is the floor of a machine that only has to prove it works.
+- **The web machine stops being exempt from "one distribution per cluster".** It is exempt today because it only talks SSH; here it is a Slurm node, and on EL that means the OpenHPC repository and its packages land on the machine that faces the internet.
+- **Two copies of the solvers.** One under `antarest_base_dir` for the local launcher, one in the shared `/home` for the Slurm one, plus about 250 MB per Xpansion release. And the scratch directories and the zipped results of every run land in `/home/antares`, which "Putting the state on its own volume" does not cover: that section is about `/var/antares-web`.
+
+The CI deploys this shape on every distribution that can carry a Slurm node, on every pull request: see the `standalone-slurm` job of `.github/workflows/ci.yml` and `inventory/ci-standalone-slurm.yml`. `verify.yml` runs on it whole, the firewall included, which is where the one thing that is genuinely new gets checked - a single ruleset that is the union of the three a cluster spreads over three machines.
 
 ### The launch script and what a failed run looks like
 
@@ -666,7 +703,7 @@ It changes nothing beyond one marker file in the shared `/home`, which the last 
 
 - **The firewall.** The three rulesets a deployment produces, checked from both sides. Each port that matters is looked at twice: a daemon is really listening on it, and the controller still cannot reach it while the machines that need it can. **Run this from a machine that is not in the inventory**, which the controller normally is not: a machine of the deployment is in every ruleset's trusted set, and from there every "the world cannot reach this" check is a tautology.
 
-The same playbook runs in CI, on five virtual machines booted on one GitHub runner: see the `slurm` job of `.github/workflows/ci.yml` and `inventory/ci-cluster.yml`.
+The same playbook runs in CI, on five virtual machines booted on one GitHub runner: see the `slurm` job of `.github/workflows/ci.yml` and `inventory/ci-cluster.yml`. It also runs on the single machine of the `standalone-slurm` job, where the cluster half is the machine itself: two of its checks become tautologies there - the shared `/home` is read on the machine that exported it, and the submitted job lands on the node it was submitted from - and everything else, the firewall included, asks exactly what it asks of a cluster.
 
 ## Differences from the PDF
 
@@ -726,7 +763,7 @@ Same idea for MariaDB on the Slurm frontend (use `mariadb-dump` and the `slurmdb
 ## Known limitations
 
 - Xpansion covers the C++ implementation only, on a single MPI rank by default. The R implementation the upstream `launchAntares_v1.1.2.sh` calls needs R, the R libraries and `XpansionArgsRun.R`, none of which is deployed here, and the trajectory mode is not covered either; both are refused with a message rather than silently run as an ordinary simulation. See "Antares-Xpansion" above for what raising the number of ranks implies. RedHat itself is the one supported distribution where no Xpansion run has been made, for the same reason as the rest of this playbook: it needs a subscription the CI has not got, and its rebuilds are what the claim rests on.
-- Xpansion needs the Slurm launcher, and that is upstream's doing rather than a choice made here. Antares-Web's local launcher ignores the mode: `local_launcher.py` builds its command line as the solver, the options it recognises in `other_options` and the study path, and never looks at the `xpansion` parameter. So on a `slurm_enabled: false` deployment, a study launched with the Xpansion box ticked runs an ordinary simulation and comes back green - the exact failure the launch script no longer allows on the cluster side, still there on a path this playbook does not render. Nothing in the `antares_xpansion` role would help: it deploys into the shared `/home` of a cluster that does not exist in that shape.
+- Xpansion needs the Slurm launcher, and that is upstream's doing rather than a choice made here. Antares-Web's local launcher ignores the mode: `local_launcher.py` builds its command line as the solver, the options it recognises in `other_options` and the study path, and never looks at the `xpansion` parameter. So on a `slurm_enabled: false` deployment, a study launched with the Xpansion box ticked runs an ordinary simulation and comes back green - the exact failure the launch script no longer allows on the cluster side, still there on a path this playbook does not render. Nothing in the `antares_xpansion` role would help: it deploys into the shared `/home` of a cluster that does not exist in that shape. The answer on a single machine is to give it that cluster rather than to do without: see "The cluster on the web machine itself".
 - The firewall filters the host only, not the `forward` hook the container traffic goes through: a port published by a unit is reachable, whatever the firewall says. See "Hardening" for why, and check the `PublishPort` lines before publishing something new.
 - The interface cannot name a second administrator. A user is an administrator when it holds a role in the group named `admin`, and the web application hides that group everywhere: out of the group list, out of the permissions of the user form, and refused as a name when creating one, which is why it answers "this value already exists" for a group it has just told you does not exist. The backend does not object, so it is one API call, as the admin user: `POST /api/v1/roles` with `{"type": 40, "group_id": "admin", "identity_id": <the user id>}`, `40` being `RoleType.ADMIN`. Groups are read into the JWT at login, so the promoted user has to sign out and back in. They then hold the rights without ever seeing the group.
 - The Antares-Web login jail counts the 401s nginx logs. A brute force that spreads over many addresses, or one aimed at an endpoint other than the login, is not covered.

@@ -8,6 +8,9 @@
 #      standalone -> one job per target: boot a VM, site.yml, curl, idempotence
 #      slurm      -> one job per target: boot five VMs on a bridge, site.yml,
 #                    verify.yml, idempotence
+#      standalone-slurm -> one job per target: boot one VM on a bridge and
+#                    give it every role at once, site.yml, verify.yml,
+#                    idempotence
 #
 #  The runner stays Ubuntu 26.04 and is only the controller and the builder.
 #  Every deployment happens inside a QEMU/KVM machine booted from the cloud
@@ -86,6 +89,7 @@ on:
           - all
           - standalone
           - slurm
+          - standalone-slurm
 
 # A full run takes tens of minutes; a new push makes the one in flight
 # pointless.
@@ -133,6 +137,8 @@ jobs:
           ansible-playbook --syntax-check -i inventory/ci-vm.yml site.yml
           ansible-playbook --syntax-check -i inventory/ci-cluster.yml site.yml
           ansible-playbook --syntax-check -i inventory/ci-cluster.yml verify.yml
+          ansible-playbook --syntax-check -i inventory/ci-standalone-slurm.yml site.yml
+          ansible-playbook --syntax-check -i inventory/ci-standalone-slurm.yml verify.yml
 
   # ---------------------------------------------------------------------
   #  The list of machines to deploy on, as data rather than as a matrix
@@ -146,11 +152,13 @@ jobs:
   #  current. Both are deliberate: the EL side is where this playbook does the
   #  most distribution-specific work and a moving target there would be noise.
   #
-  #  `slurm` picks the targets the five-machine job runs on, and how often:
+  #  `slurm` picks the targets that carry a Slurm node, and how often:
   #  `always` on every pull request, `dispatch` only when the workflow is
   #  started by hand from the Actions tab, where the `only` and `suite` inputs
   #  can narrow a run down to one cluster. Moving a target between the two is
-  #  one word here.
+  #  one word here. It feeds two jobs rather than one: the five-machine
+  #  `slurm` job and the single-machine `standalone-slurm` job, which is the
+  #  same cluster collapsed onto the web server.
   #
   #  `xpansion` deploys Antares-Xpansion on that cluster, which the shipped
   #  defaults do not: the two releases weigh about 490 MB, downloaded from
@@ -331,9 +339,9 @@ jobs:
             '[.[] | select(.slurm) | select($ev != "pull_request" or .slurm == "always")]' \
             <<<"$matrix")
 
-          # A pull request runs both shapes. A manual run can narrow it down
-          # to one through the `suite` input, which is worth doing while
-          # working on either: a cluster job is one runner and eighteen
+          # A pull request runs the three shapes. A manual run can narrow it
+          # down to one through the `suite` input, which is worth doing while
+          # working on any of them: a cluster job is one runner and eighteen
           # minutes at best, and there is one of each per target.
           suite="${SUITE:-all}"
 
@@ -443,7 +451,7 @@ jobs:
   standalone:
     name: standalone on ${{ matrix.target.label }}
     needs: [targets, build]
-    if: ${{ needs.targets.outputs.suite != 'slurm' }}
+    if: ${{ needs.targets.outputs.suite == 'all' || needs.targets.outputs.suite == 'standalone' }}
     runs-on: ${{ inputs.runner || 'ubuntu-26.04' }}
     timeout-minutes: 90
     strategy:
@@ -760,7 +768,7 @@ jobs:
   slurm:
     name: slurm on ${{ matrix.target.label }}
     needs: [targets, build]
-    if: ${{ needs.targets.outputs.suite != 'standalone' && needs.targets.outputs.slurm_matrix != '[]' }}
+    if: ${{ (needs.targets.outputs.suite == 'all' || needs.targets.outputs.suite == 'slurm') && needs.targets.outputs.slurm_matrix != '[]' }}
     runs-on: ${{ inputs.runner || 'ubuntu-26.04' }}
     timeout-minutes: 150
     strategy:
@@ -1208,5 +1216,346 @@ jobs:
                       antarest-celery-worker antares-nginx; do
             echo "===== $unit.service"
             vm antares-web "sudo journalctl -u $unit.service --no-pager -n 100"
+          done
+          exit 0
+
+  # ---------------------------------------------------------------------
+  #  The third shape: one machine that is also its own cluster.
+  #
+  #      antares-solo  192.168.77.11   the web application, slurmctld,
+  #                                    slurmdbd, the NFS export and the one
+  #                                    slurmd that runs the studies
+  #
+  #  What it is for. Antares-Web's local launcher ignores the Xpansion mode,
+  #  so the `standalone` job above deploys a machine on which an investment
+  #  optimisation cannot be run at all - see "Known limitations" in the
+  #  README. Putting the whole cluster on that same machine gets the Slurm
+  #  launcher, and with it Xpansion, on whatever computing capacity the
+  #  machine has. It is the shape a single-machine site that needs Xpansion
+  #  ends up with, and it is deployed by the roles that were already there:
+  #  every one of them decides what it does from `inventory_hostname in
+  #  groups[...]` rather than from the play it sits in, so a host listed in
+  #  the three groups gets the union of the three behaviours. This job is
+  #  what says that union works, on every distribution that can carry a
+  #  Slurm node.
+  #
+  #  On a bridge, like the cluster job and unlike the single machine of the
+  #  `standalone` job, for one reason: verify.yml probes from the controller
+  #  and the controller has to be outside. The runner is on the bridge at
+  #  192.168.77.1 and is not in the inventory, so its probes cross the input
+  #  hook exactly like traffic from the internet. This machine carries the
+  #  union of the three rulesets, which is precisely the thing worth probing
+  #  from out there.
+  #
+  #  Sizing. One machine has to hold what five hold in the cluster job, so
+  #  the floor is the sum of their floors and the cap is what a single VM
+  #  gets in the `standalone` job. Both are printed at boot: a run that had
+  #  to fall back on the floor says so in its own log.
+  # ---------------------------------------------------------------------
+  standalone-slurm:
+    name: standalone-slurm on ${{ matrix.target.label }}
+    needs: [targets, build]
+    if: ${{ (needs.targets.outputs.suite == 'all' || needs.targets.outputs.suite == 'standalone-slurm') && needs.targets.outputs.slurm_matrix != '[]' }}
+    runs-on: ${{ inputs.runner || 'ubuntu-26.04' }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.slurm_matrix) }}
+    env:
+      # The same network as the cluster job, with one machine on it instead
+      # of five and the runner on .1 as the gateway and as the outside world.
+      NET: 192.168.77
+      BRIDGE: br-antares
+    steps:
+
+      - uses: actions/checkout@v5
+
+      # Printed before anything else so that it is in the log even when the
+      # job dies in its first minutes. See .github/actions/runner-specs.
+      - name: Runner specifications
+        uses: ./.github/actions/runner-specs
+
+      - name: Download the artefacts
+        uses: actions/download-artifact@v8
+        with:
+          name: artifacts
+          path: artifacts/
+
+      - name: Install Ansible
+        run: |
+          set -euxo pipefail
+          export PIPX_HOME="$HOME/.local/pipx"
+          export PIPX_BIN_DIR="$HOME/.local/bin"
+          pipx install --force ansible-core
+          echo "$PIPX_BIN_DIR" >> "$GITHUB_PATH"
+          export PATH="$PIPX_BIN_DIR:$PATH"
+          ansible --version
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Install QEMU and check the runner can nest a machine
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+               qemu-system-x86 qemu-utils cloud-image-utils dnsmasq-base \
+               iproute2 rsync
+          # See the other two deploy jobs: usermod would need a new login
+          # session and the udev rule everyone copies is a race. chmod
+          # happens when it is called.
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::no /dev/kvm on this runner, the whole workflow depends on nested virtualisation"
+            exit 1
+          fi
+          sudo chmod 0666 /dev/kvm
+          test -w /dev/kvm
+
+      # -------------------------------------------------------------
+      #  The network the machine lives on.
+      #
+      #  A bridge with the runner on .1, one tap, masquerading so that apt
+      #  and dnf reach their mirrors, and dnsmasq for the lease and for
+      #  DNS. The address is handed out by MAC rather than written into
+      #  the image: every cloud image DHCPs on its first interface out of
+      #  the box, whereas a static NoCloud network-config has to go
+      #  through whichever renderer that particular distribution ships.
+      # -------------------------------------------------------------
+      - name: Build the network
+        run: |
+          set -euxo pipefail
+
+          sudo mkdir -p /mnt/vm
+          sudo chown "$(id -u):$(id -g)" /mnt/vm
+
+          sudo sysctl -w net.ipv4.ip_forward=1
+          sudo ip link add "$BRIDGE" type bridge
+          sudo ip addr add "$NET.1/24" dev "$BRIDGE"
+          sudo ip link set "$BRIDGE" up
+
+          # Docker is installed on the runner and sets the FORWARD policy to
+          # DROP. These two rules go in front of everything it wrote.
+          sudo iptables -I FORWARD -i "$BRIDGE" -j ACCEPT
+          sudo iptables -I FORWARD -o "$BRIDGE" -j ACCEPT
+          sudo iptables -t nat -A POSTROUTING -s "$NET.0/24" ! -o "$BRIDGE" -j MASQUERADE
+
+          # The same name in the runner's own /etc/hosts, so that the log,
+          # the inventory and the ssh helper all speak of `antares-solo`
+          # rather than of an address.
+          echo "$NET.11 antares-solo" | sudo tee -a /etc/hosts
+
+          # No --no-resolv: the upstream is whatever resolves for the
+          # runner, which is the one resolver known to work here. The two
+          # public ones are a fallback, not a preference.
+          sudo dnsmasq \
+            --interface="$BRIDGE" --bind-interfaces --except-interface=lo \
+            --dhcp-range="$NET.200,$NET.220,1h" --dhcp-authoritative \
+            --dhcp-option=option:router,"$NET.1" \
+            --dhcp-option=option:dns-server,"$NET.1" \
+            --server=1.1.1.1 --server=8.8.8.8 \
+            --log-facility=/mnt/vm/dnsmasq.log --log-dhcp \
+            --pid-file=/mnt/vm/dnsmasq.pid \
+            --dhcp-host=52:54:00:77:00:0b,"$NET.11",antares-solo
+
+          ip addr show "$BRIDGE"
+          sudo iptables -S FORWARD | head -n 5
+
+      # -------------------------------------------------------------
+      #  Boot it. The disk is a copy-on-write overlay on the downloaded
+      #  image, sized well past it: cloud-init grows the root filesystem
+      #  to whatever it finds, and this machine holds the images, the
+      #  study workspace, the shared /home with the solvers in it and,
+      #  where the target carries it, the Xpansion packages.
+      # -------------------------------------------------------------
+      - name: Boot the ${{ matrix.target.label }} machine
+        env:
+          IMAGE: ${{ matrix.target.image }}
+          # The floor is what the five machines of the cluster job are given
+          # on the EL side, added up: 2560 for the web machine, 1280 for the
+          # front-end and 768 for a compute node. The cap is what one machine
+          # gets in the standalone job. Between the two, what the runner can
+          # spare.
+          MEM_FLOOR: 4608
+          MEM_CAP: 8192
+        run: |
+          set -euxo pipefail
+
+          curl -fSL --retry 3 --retry-delay 5 -o /mnt/vm/base.img "$IMAGE"
+          # Ubuntu ships qcow2 under a .img name, so ask rather than assume.
+          fmt=$(qemu-img info --output=json /mnt/vm/base.img | jq -r .format)
+          qemu-img create -f qcow2 -F "$fmt" -b /mnt/vm/base.img \
+                          /mnt/vm/disk.qcow2 40G
+
+          # A fifth of the runner kept back for ansible, qemu and a gigabyte
+          # of artefacts, and never less than the 1.75 GB the small runner
+          # was left with by the cluster job.
+          set +x
+          total_mb=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)
+          reserve_mb=$(( total_mb / 5 ))
+          [ "$reserve_mb" -ge 1792 ] || reserve_mb=1792
+          mem_mb=$(( total_mb - reserve_mb ))
+          [ "$mem_mb" -le "$MEM_CAP" ] || mem_mb=$MEM_CAP
+          mem_mb=$(( mem_mb / 128 * 128 ))
+          if [ "$mem_mb" -lt "$MEM_FLOOR" ]; then
+            echo "::warning::this runner has ${total_mb} MB, less than the ${MEM_FLOOR} MB one machine playing every part was measured to need plus the ${reserve_mb} MB the runner keeps. Allocating the floor and counting on swap."
+            mem_mb=$MEM_FLOOR
+          fi
+          echo "runner    : ${total_mb} MB, ${reserve_mb} MB kept back"
+          echo "floor/cap : ${MEM_FLOOR} / ${MEM_CAP} MB"
+          echo "allocated : ${mem_mb} MB"
+          set -x
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519_ci
+
+          sudo ip tuntap add dev tap0 mode tap user "$(id -un)"
+          sudo ip link set tap0 master "$BRIDGE" up
+
+          # A NoCloud seed: the only account the machine gets is the one
+          # Ansible connects with. No package_update, the deployment
+          # installs what it needs and a distribution upgrade on first boot
+          # would only add minutes and a lock to fight. The half gigabyte of
+          # swap is what keeps a spike from reaching the OOM killer.
+          cat > /mnt/vm/user-data <<EOF
+          #cloud-config
+          ssh_pwauth: false
+          package_update: false
+          package_upgrade: false
+          users:
+            - name: ansible
+              shell: /bin/bash
+              sudo: "ALL=(ALL) NOPASSWD:ALL"
+              ssh_authorized_keys:
+                - $(cat ~/.ssh/id_ed25519_ci.pub)
+          swap:
+            filename: /swap.img
+            size: 512M
+          EOF
+          # local-hostname is not cosmetic: slurmd matches the machine's own
+          # `hostname -s` against the NodeName lines of slurm.conf, which are
+          # generated from the inventory name.
+          cat > /mnt/vm/meta-data <<'EOF'
+          instance-id: antares-solo
+          local-hostname: antares-solo
+          EOF
+          cloud-localds /mnt/vm/seed.img /mnt/vm/user-data /mnt/vm/meta-data
+
+          qemu-system-x86_64 \
+            -machine q35,accel=kvm -cpu host -smp 4 -m "$mem_mb" \
+            -drive file=/mnt/vm/disk.qcow2,if=virtio,format=qcow2,cache=unsafe,discard=unmap \
+            -drive file=/mnt/vm/seed.img,if=virtio,format=raw,readonly=on \
+            -netdev tap,id=net0,ifname=tap0,script=no,downscript=no \
+            -device virtio-net-pci,netdev=net0,mac=52:54:00:77:00:0b \
+            -device virtio-rng-pci \
+            -display none -daemonize \
+            -pidfile /mnt/vm/qemu.pid \
+            -serial file:/mnt/vm/console.log
+
+          # Every later step shells into the machine, so the connection is
+          # written down once. ~/.local/bin is already on the path, the
+          # Ansible step above put it there.
+          mkdir -p ~/.local/bin
+          cat > ~/.local/bin/vm <<EOF
+          #!/bin/sh
+          exec ssh -i $HOME/.ssh/id_ed25519_ci \
+                   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                   -o LogLevel=ERROR -o ConnectTimeout=10 ansible@antares-solo "\$@"
+          EOF
+          chmod +x ~/.local/bin/vm
+
+          set +x
+          for _ in $(seq 1 120); do
+            if ~/.local/bin/vm 'sudo -n id' >/dev/null 2>&1; then
+              booted=1
+              break
+            fi
+            sleep 5
+          done
+          set -x
+          if [ "${booted:-0}" != 1 ]; then
+            echo "::error::${{ matrix.target.label }} never answered on SSH, console follows"
+            tail -n 200 /mnt/vm/console.log
+            exit 1
+          fi
+
+          # DNS through dnsmasq and a route out of the bridge are what every
+          # package install of the deployment depends on. Failing here says
+          # so plainly, rather than through apt three minutes later.
+          if ! ~/.local/bin/vm 'getent hosts deb.debian.org > /dev/null'; then
+            echo "::error::antares-solo cannot resolve a mirror, see the dnsmasq log"
+            tail -n 50 /mnt/vm/dnsmasq.log
+            exit 1
+          fi
+
+          ~/.local/bin/vm 'cat /etc/os-release; uname -r; getenforce || true; ip -brief addr; df -h /; free -m'
+
+      - name: Deploy from the artefacts
+        run: |
+          ansible-playbook -i inventory/ci-standalone-slurm.yml site.yml \
+            -e antarest_image_source=archive \
+            -e antares_xpansion_enabled=${{ matrix.target.xpansion || false }}
+
+      # The whole of verify.yml, the firewall plays included: the runner is
+      # on the bridge and not in the inventory, which is what makes them mean
+      # something. This is also where the point of the shape is checked - a
+      # job submitted over SSH the way the backend submits one, and, on the
+      # targets that carry Xpansion, each launcher asked for the solver it
+      # bundles.
+      - name: Verify the machine and the firewall
+        run: |
+          ansible-playbook -i inventory/ci-standalone-slurm.yml verify.yml \
+            -e antares_xpansion_enabled=${{ matrix.target.xpansion || false }}
+
+      # Last on purpose: a failure here says the deployment converged but
+      # does not settle, which is worth knowing and worth fixing, but only
+      # after the steps above have said whether it works at all.
+      - name: Check the deploy is idempotent
+        run: |
+          set -euo pipefail
+          ansible-playbook -i inventory/ci-standalone-slurm.yml site.yml \
+            -e antarest_image_source=archive \
+            -e antares_xpansion_enabled=${{ matrix.target.xpansion || false }} \
+            --diff | tee /tmp/second-run.log
+          # ANSIBLE_FORCE_COLOR paints the recap, so the host name in the log
+          # starts with an escape sequence rather than with the name itself.
+          sed -r 's/\x1b\[[0-9;]*m//g' /tmp/second-run.log > /tmp/second-run.txt
+          if ! grep -qE '^antares-solo[[:space:]]+:.*[[:space:]]changed=0[[:space:]]' \
+                 /tmp/second-run.txt; then
+            echo "::error::the second run of site.yml reported changes on ${{ matrix.target.label }}, see the recap above"
+            exit 1
+          fi
+
+      # Nobody can SSH into a runner after the fact, let alone into a machine
+      # that dies with it, so everything needed to understand a failure has
+      # to be in the log. The console comes first: it is the only thing there
+      # is when the failure is the boot itself.
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          set +e
+          df -h / /mnt
+          free -m
+          if [ -f /mnt/vm/console.log ]; then
+            echo "===== serial console"
+            tail -n 200 /mnt/vm/console.log
+          fi
+          command -v vm > /dev/null || exit 0
+          # free and the OOM killer first: on a machine carrying every role
+          # at once, memory is the likeliest explanation for anything else
+          # printed below.
+          vm 'hostname; free -m; sudo dmesg | grep -i "out of memory" | tail -n 5;
+              systemctl --failed --no-pager; ss -lntp;
+              sudo nft list table inet antares_fw'
+          echo "===== the cluster as slurmctld sees it"
+          vm 'sinfo -N -l; scontrol ping; sudo tail -n 50 /var/log/slurm/slurmctld.log'
+          vm 'sudo systemctl status --no-pager --full slurmctld slurmdbd slurmd'
+          echo "===== the accounting database"
+          vm 'sudo podman ps -a; sudo podman logs --tail 80 slurmdb-mariadb'
+          echo "===== the shared home"
+          vm 'showmount -e localhost; ls -l /home/antares'
+          for unit in postgresql redis antarest antarest-celery-beat \
+                      antarest-celery-worker antares-nginx; do
+            echo "===== $unit.service"
+            vm "sudo journalctl -u $unit.service --no-pager -n 100"
           done
           exit 0
