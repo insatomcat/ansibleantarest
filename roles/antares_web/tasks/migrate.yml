@@ -95,3 +95,43 @@
       {{ (antarest_migration.stdout ~ antarest_migration.stderr)
          | regex_findall('Running upgrade [^\n]*') | join('; ')
          | default('schema already at head', true) }}
+
+# AntaREST inserts its admin with an explicit primary key (`ADMIN_ID = 1`, in
+# init_admin_user, antarest/login/model.py), so nothing ever calls nextval on
+# identity_id_seq and the sequence still hands out 1 the first time an operator
+# creates a user from the interface:
+#
+#   duplicate key value violates unique constraint "identities_pkey"
+#   DETAIL: Key (id)=(1) already exists.
+#
+# The failed INSERT does consume the value - nextval is not transactional - so a
+# second click succeeds and the whole thing passes for a glitch. That is why the
+# bug has survived upstream since the sequence was introduced, unreported: the
+# local and desktop installs run on SQLite, where SQLAlchemy ignores the
+# Sequence and the id comes from the rowid, and only PostgreSQL deployments see
+# it, once. Recalled here rather than left to the operator's retry.
+#
+# COALESCE(MAX(id), 1) is correct on both paths. On a first deployment the table
+# is still empty at this point, since the admin row is written by the backend
+# further down; setting the sequence to 1 leaves the next identity at 2, which
+# is exactly what the explicit id=1 admin frees. On an existing database it
+# lands on the highest identity in the table. The comparison keeps the task from
+# reporting a change on every run, and never lowers a sequence that is already
+# ahead - identities deleted since do not give their ids back.
+- name: Look at the identity sequence
+  ansible.builtin.command:
+    cmd: >-
+      {{ container_cmd }} exec postgresql
+      psql -U postgres -d postgres -tAc
+      "SELECT COALESCE(pg_sequence_last_value('identity_id_seq'), 0) < (SELECT COALESCE(MAX(id), 1) FROM identities)"
+  register: antarest_identity_seq
+  changed_when: false
+
+- name: Advance it past the identities already stored
+  ansible.builtin.command:
+    cmd: >-
+      {{ container_cmd }} exec postgresql
+      psql -U postgres -d postgres -tAc
+      "SELECT setval('identity_id_seq', (SELECT COALESCE(MAX(id), 1) FROM identities))"
+  when: antarest_identity_seq.stdout | trim == 't'
+  changed_when: true
