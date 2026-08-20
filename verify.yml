@@ -547,7 +547,9 @@
         fail_msg: >-
           journald on {{ inventory_hostname }} holds
           {{ verify_journal_persistent | length }} file(s) under /var/log/journal
-          and {{ verify_journal_runtime | length }} under /run/log/journal, so
+          and {{ verify_journal_runtime | length }} under
+          /run/log/journal/{{ verify_machine_id }}
+          ({{ verify_journal_runtime | join(', ') | default('none', true) }}), so
           this machine loses {{ 'part of' if verify_journal_persistent | length > 0
           else 'all of' }} its logs at the next reboot. Check
           /etc/systemd/journald.conf.d/10-antares.conf and what
@@ -560,10 +562,26 @@
              | map('regex_replace', '^File path: ', '') | list }}
         verify_journal_persistent: >-
           {{ verify_journal_files | select('match', '^/var/log/journal/') | list }}
+        # Empty rather than absent would match every runtime directory, which
+        # is the old reading of this check and the safe way to be wrong.
+        verify_machine_id: "{{ ansible_facts['machine_id'] | default('') }}"
         # Written before /var is usable and moved by systemd-journal-flush at
-        # boot, so anything still here belongs to a machine that never flushed.
+        # boot, so anything left under this machine's own id belongs to a
+        # machine that never flushed.
+        #
+        # Under its own id, and only an EL 9 says why that matters. Its cloud
+        # images ship a committed /etc/machine-id, which cloud-init resets on
+        # the first boot: journald runs for five seconds under the image's id,
+        # is restarted under the new one, and flushes that one alone. What it
+        # leaves behind is /run/log/journal/<the image's id>/system.journal,
+        # OFFLINE, holding the first five seconds of the first boot. Nothing
+        # writes to it, no reboot brings it back, and no flush can move it,
+        # since journald only ever flushes its own id. It is not a journal this
+        # machine is losing, and counting it failed three EL 9 clusters that
+        # were keeping their logs exactly as asked.
         verify_journal_runtime: >-
-          {{ verify_journal_files | select('match', '^/run/log/journal/') | list }}
+          {{ verify_journal_files
+             | select('match', '^/run/log/journal/' ~ (verify_machine_id | regex_escape)) | list }}
       when:
         - hardening_enabled | bool
         - hardening_journal_persistent | bool
