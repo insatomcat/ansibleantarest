@@ -35,7 +35,8 @@
       {{ antarest_data_dir }}/db/pgdata holds a PostgreSQL
       {{ antarest_pg_disk_major }} cluster and antarest_postgres_image is
       {{ antarest_postgres_image }}. PostgreSQL will not start on it. Changing
-      major is a dump and a restore, see "Major database versions" in the README.
+      major is a dump and a restore, see "Major database versions" in
+      docs/operations.md.
     quiet: true
   when:
     - antarest_pg_disk_major | length > 0

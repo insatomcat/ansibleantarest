@@ -3,8 +3,9 @@
 #  The authentication connectors
 #
 #  Antares-Web delegates authentication to one URL it POSTs a username and a
-#  password to (`security.external_auth`, see the README). It speaks no OIDC,
-#  no SAML and no LDAP, so the translation is a small web service, and this
+#  password to (`security.external_auth`, see docs/authentication.md). It
+#  speaks no OIDC, no SAML and no LDAP, so the translation is a small web
+#  service, and this
 #  role holds two of them:
 #
 #    keycloak  files/kc-rest    against the Keycloak of the keycloak role, or
