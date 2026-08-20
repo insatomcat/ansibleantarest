@@ -133,6 +133,33 @@
 #  is answered through it, once there is something to serve.
 # ---------------------------------------------------------------------------
 
+# Before the stack starts, not after it: the backend polls the load of the
+# Slurm launcher over SSH every 30 seconds from the moment it comes up, and a
+# key that is only authorised at the end of the run turns that into minutes of
+# failed authentications against the front-end - the length of everything that
+# happens in between, Keycloak included. An sshd that answers by refusing the
+# next connections from that address then makes the deployment look broken
+# when it is not. The two plays are the pair they were before, only moved: the
+# key has to exist before it can be authorised, hence the first one.
+- name: The key Antares-Web submits jobs with
+  hosts: antares_web
+  become: true
+  tags: [antares_web, ssh]
+  tasks:
+    - name: Create the SSH key used to reach the Slurm front-end
+      ansible.builtin.include_role:
+        name: antares_web
+        tasks_from: ssh_key
+      when: slurm_enabled | bool
+
+- name: Authorise Antares-Web to submit jobs on the Slurm front-end
+  hosts: slurm_frontend
+  become: true
+  tags: [antares_web, ssh]
+  roles:
+    - role: antares_ssh_access
+      when: slurm_enabled | bool
+
 - name: Antares-Web server
   hosts: antares_web
   become: true
@@ -153,11 +180,3 @@
       tags: auth
     - role: antares_edge
       tags: edge
-
-- name: Authorise Antares-Web to submit jobs on the Slurm front-end
-  hosts: slurm_frontend
-  become: true
-  tags: [antares_web, ssh]
-  roles:
-    - role: antares_ssh_access
-      when: slurm_enabled | bool
