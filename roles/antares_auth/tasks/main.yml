@@ -1,0 +1,17 @@
+---
+- name: Check the connector provider is one this role knows
+  ansible.builtin.assert:
+    that: antares_auth_provider in (['none'] + antares_auth_connectors.keys() | list)
+    fail_msg: >-
+      antares_auth_provider is `{{ antares_auth_provider }}`. It is one of
+      none, {{ antares_auth_connectors.keys() | join(', ') }}.
+    quiet: true
+
+# First, so that switching provider takes the old connector down before the new
+# one comes up rather than leaving the two side by side.
+- name: Take down the connectors this deployment does not use
+  ansible.builtin.include_tasks: stale.yml
+
+- name: Deploy the authentication connector
+  ansible.builtin.include_tasks: install.yml
+  when: antares_auth_provider != 'none'

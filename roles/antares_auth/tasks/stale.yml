@@ -1,0 +1,36 @@
+---
+# Deleting the unit file is not enough: the next daemon-reload makes the
+# service unknown to systemd, but the container it started keeps running and
+# nothing carries a stop to something systemd has forgotten. So stop first,
+# while the service still exists, then remove.
+- name: Look for the connector units this run must take down
+  ansible.builtin.stat:
+    path: "/etc/containers/systemd/{{ item }}.container"
+  loop: "{{ antares_auth_all_containers | difference([antares_auth_container]) }}"
+  register: antares_auth_stale
+
+# No `enabled: false` to go with it: systemctl refuses to disable a unit the
+# quadlet generator produced, which would make this task fail before it got to
+# the stop. Removing the .container file below is what takes the WantedBy= of
+# the target away with it.
+- name: Stop them
+  ansible.builtin.systemd:
+    name: "{{ item.item }}.service"
+    state: stopped
+  loop: "{{ antares_auth_stale.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Remove their units
+  ansible.builtin.file:
+    path: "/etc/containers/systemd/{{ item.item }}.container"
+    state: absent
+  loop: "{{ antares_auth_stale.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: antares_auth_stale_removed
+
+- name: Reload systemd so the generator forgets them
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: antares_auth_stale_removed is changed

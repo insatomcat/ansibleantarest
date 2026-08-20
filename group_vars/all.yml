@@ -401,6 +401,30 @@ keycloak_db_password: "changeme-keycloak-db"
 keycloak_client_secret: "changeme-keycloak-client"
 
 # ---------------------------------------------------------------------------
+#  The authentication connector
+#
+#  Which of the two connectors of the antares_auth role is deployed, and
+#  therefore what antarest_external_auth_url points Antares-Web at. Only one is
+#  ever deployed: the application reads a single URL.
+#
+#    none      only the local accounts of Antares-Web exist
+#    keycloak  the kc-rest connector, against keycloak_enabled above or any
+#              other Keycloak (antares_auth_keycloak_url)
+#    ldap      the ldap-rest connector, against a directory that already
+#              exists. Everything it needs is in the role defaults, and the
+#              role refuses to deploy without it.
+#
+#  Set where the *builder* sees it too, like antarest_enable_adminer: build.yml
+#  only archives the connector it is told about.
+# ---------------------------------------------------------------------------
+antares_auth_provider: none
+
+# Port the connector listens on, and the container name the backend resolves.
+# One port for either connector: they never run together.
+antares_auth_port: 8870
+antares_auth_container: "antares-auth-{{ antares_auth_provider }}"
+
+# ---------------------------------------------------------------------------
 #  Containers
 #
 #  The stack runs on podman, driven by quadlet: each container is a systemd

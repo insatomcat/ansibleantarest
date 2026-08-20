@@ -1,0 +1,78 @@
+---
+# ===========================================================================
+#  The authentication connectors
+#
+#  Antares-Web delegates authentication to one URL it POSTs a username and a
+#  password to (`security.external_auth`, see the README). It speaks no OIDC,
+#  no SAML and no LDAP, so the translation is a small web service, and this
+#  role holds two of them:
+#
+#    keycloak  files/kc-rest    against the Keycloak of the keycloak role, or
+#                               any other one
+#    ldap      files/ldap-rest  against a directory that already exists
+#
+#  antares_auth_provider (group_vars/all.yml) picks one, and picking one is
+#  also what points antarest_external_auth_url at it. They never run together:
+#  the application reads a single URL.
+#
+#  The images are built from the sources in files/, either on the target or
+#  once on the builder like everything else - see tasks/build_images.yml, which
+#  build.yml reuses.
+# ===========================================================================
+
+# Base image of both connectors. Fully qualified, and pinned to a minor.
+antares_auth_python_image: "{{ container_registry }}/python:3.13-slim"
+
+# gunicorn workers. Two is plenty: a login is a handful of HTTP calls and the
+# rate is what a human types at.
+antares_auth_workers: 2
+
+# Where the build context is assembled on the machine that builds the image.
+antares_auth_build_dir: "{{ antarest_base_dir }}/auth"
+
+# Rebuild the image even when its sources have not changed.
+antares_auth_force_rebuild: false
+
+antares_auth_log_level: INFO
+
+# ---------------------------------------------------------------------------
+#  keycloak connector
+# ---------------------------------------------------------------------------
+
+# The Keycloak it talks to, on the podman network. Pointed at the one this
+# deployment runs; set it to an external URL to use a Keycloak that is not
+# ours, in which case the realm and the client below have to exist there and
+# keycloak_enabled can stay off.
+antares_auth_keycloak_url: >-
+  http://{{ keycloak_container | default('keycloak') }}:{{ keycloak_http_port | default(8080) }}{{ keycloak_relative_path }}
+
+# Which field of a Keycloak group becomes the id of the Antares group: `name`,
+# `path` or `id` (a UUID). That id is what an operator writes in
+# antarest_external_auth_group_mapping, hence the readable default.
+antares_auth_keycloak_group_key: name
+
+# ---------------------------------------------------------------------------
+#  ldap connector
+#
+#  Nothing here has a usable default: a directory is something that already
+#  exists, with its own tree. The role asserts what it needs before deploying.
+# ---------------------------------------------------------------------------
+antares_auth_ldap_host: ""
+antares_auth_ldap_port: 389
+antares_auth_ldap_use_ssl: false
+antares_auth_ldap_base_dn: ""
+
+# Where the users and the groups sit under the base DN, and the attribute a
+# user is named by. The defaults are the usual posixAccount layout, where a
+# user is uid=<login>,ou=users,<base> and a group carries memberUid.
+antares_auth_ldap_user_ou: "ou=users"
+antares_auth_ldap_group_ou: "ou=groups"
+antares_auth_ldap_user_attr: uid
+
+# The read-only account the connector binds with to read names and groups.
+# The user's own bind is what authenticates them; this one is for the rest.
+antares_auth_ldap_bind_dn: ""
+antares_auth_ldap_bind_password: ""
+
+# `cn` (analysts) or `gidNumber` (5001) as the id of the Antares group.
+antares_auth_ldap_group_key: cn

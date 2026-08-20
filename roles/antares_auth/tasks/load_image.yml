@@ -1,0 +1,36 @@
+---
+# antarest_image_source is `archive`: the image comes from what build.yml
+# produced, and antares_web has already rsynced the archives to the target.
+# Loaded here rather than by load_artifacts.yml of that role, which only loads
+# when one of *its* images is missing - and this one is not in its list.
+
+- name: Look for the connector image
+  ansible.builtin.command: "{{ container_cmd }} image inspect {{ antares_auth_image }}"
+  register: antares_auth_archive_image
+  changed_when: false
+  failed_when: false
+
+- name: Look for the archive on the target
+  ansible.builtin.stat:
+    path: "{{ antarest_base_dir }}/artifacts/{{ antares_auth_archive }}"
+  register: antares_auth_archive_file
+  when: antares_auth_archive_image.rc != 0
+
+- name: Fail when the connector image was not built
+  ansible.builtin.assert:
+    that: antares_auth_archive_file.stat.exists
+    fail_msg: >-
+      {{ antares_auth_image }} is not on {{ inventory_hostname }} and
+      {{ antares_auth_archive }} is not in the artefacts either, so nothing can
+      provide it. Re-run `ansible-playbook build.yml` with
+      antares_auth_provider set to `{{ antares_auth_provider }}`, or deploy
+      with -e antarest_image_source=build to build it on the target.
+    quiet: true
+  when: antares_auth_archive_image.rc != 0
+
+- name: Load the connector image
+  ansible.builtin.command: >-
+    {{ container_cmd }} load -i {{ antarest_base_dir }}/artifacts/{{ antares_auth_archive }}
+  when: antares_auth_archive_image.rc != 0
+  changed_when: true
+  notify: Restart the authentication connector
