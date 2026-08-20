@@ -165,6 +165,19 @@ Set secrets in `group_vars/all.yml` (or an ansible-vault encrypted file):
 
 The PostgreSQL password is read only at the first initialization of the data volume; changing it later requires clearing `/var/antares-web/data/db`.
 
+`antarest_admin_password` has the same shape: AntaREST writes it when it creates the `admin` row and never again, so it seeds an empty database and nothing more. Setting it on a deployment that already ran, and re-running the play, changes nothing. The password lives as a bcrypt hash in the `users` table, and the interface has no way to change one, so it is an update in the database:
+
+```bash
+HASH=$(podman exec antarest python -c \
+  "import bcrypt; print(bcrypt.hashpw(b'the new password', bcrypt.gensalt()).decode())")
+podman exec -i postgresql psql -U postgres -d postgres -v h="$HASH" \
+  -c "UPDATE users SET _pwd = :'h' WHERE id = 1;"
+```
+
+It takes effect on the next login, no restart needed. The variable is still worth setting, for the database the next deployment initializes and for the `hardening` check below.
+
+Creating the first user from the interface is the other thing that surprises: AntaREST inserts its admin with an explicit id and so never advances the sequence the other identities are numbered from, which then hands out that same id and is rejected. The deployment recalls that sequence in `roles/antares_web/tasks/migrate.yml`, before the backend starts, so it does not happen here.
+
 The `hardening` role reports any of these still holding the shipped value, and refuses to deploy if `hardening_fail_on_default_secrets` is on. On anything reachable from the internet, also turn TLS on and read "Hardening" below.
 
 ## Main variables
@@ -705,6 +718,7 @@ Same idea for MariaDB on the Slurm frontend (use `mariadb-dump` and the `slurmdb
 - Xpansion covers the C++ implementation only, on a single MPI rank by default. The R implementation the upstream `launchAntares_v1.1.2.sh` calls needs R, the R libraries and `XpansionArgsRun.R`, none of which is deployed here, and the trajectory mode is not covered either; both are refused with a message rather than silently run as an ordinary simulation. See "Antares-Xpansion" above for what raising the number of ranks implies. RedHat itself is the one supported distribution where no Xpansion run has been made, for the same reason as the rest of this playbook: it needs a subscription the CI has not got, and its rebuilds are what the claim rests on.
 - Xpansion needs the Slurm launcher, and that is upstream's doing rather than a choice made here. Antares-Web's local launcher ignores the mode: `local_launcher.py` builds its command line as the solver, the options it recognises in `other_options` and the study path, and never looks at the `xpansion` parameter. So on a `slurm_enabled: false` deployment, a study launched with the Xpansion box ticked runs an ordinary simulation and comes back green - the exact failure the launch script no longer allows on the cluster side, still there on a path this playbook does not render. Nothing in the `antares_xpansion` role would help: it deploys into the shared `/home` of a cluster that does not exist in that shape.
 - The firewall filters the host only, not the `forward` hook the container traffic goes through: a port published by a unit is reachable, whatever the firewall says. See "Hardening" for why, and check the `PublishPort` lines before publishing something new.
+- The interface cannot name a second administrator. A user is an administrator when it holds a role in the group named `admin`, and the web application hides that group everywhere: out of the group list, out of the permissions of the user form, and refused as a name when creating one, which is why it answers "this value already exists" for a group it has just told you does not exist. The backend does not object, so it is one API call, as the admin user: `POST /api/v1/roles` with `{"type": 40, "group_id": "admin", "identity_id": <the user id>}`, `40` being `RoleType.ADMIN`. Groups are read into the JWT at login, so the promoted user has to sign out and back in. They then hold the rights without ever seeing the group.
 - The Antares-Web login jail counts the 401s nginx logs. A brute force that spreads over many addresses, or one aimed at an endpoint other than the login, is not covered.
 - Migration from a Docker-based version of this playbook: the `slurm_frontend` role stops and removes the old `slurmdb.service` unit and its `docker-compose.yml` but does not touch the docker volume `slurmdb_data`: it contains accounting history. Reusing a live DB requires a `mariadb-dump` from the old volume and restoration into the podman volume `slurmdb-data`. On the web server, data under `/var/antares-web/data` are bind mounts and are reused as-is.
 - The NNI label patch modifies source before the build. The checkout is reset each run (`git force`), so the patch is reapplied every time; a build stamp (`deploy/.frontend-build-stamp`) prevents rebuilding the frontend if nothing changed. Changing `antarest_login_username_label` triggers a rebuild.
