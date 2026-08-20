@@ -58,6 +58,12 @@ Environment=KC_HOSTNAME_STRICT=false
 # Seeds the first administrator of the master realm, and only that: like the
 # admin password of Antares-Web, it is read when the database is empty and
 # ignored ever after. Changing it later is done from the console.
+#
+# Keycloak marks the account it creates this way temporary and repeats on every
+# page of the console that it should be replaced. tasks/admin.yml replaces it
+# right after the first start, with one of the same name and the same password
+# that Keycloak has nothing to say about, so what is seeded here is what the
+# operator ends up logging in with.
 Environment=KC_BOOTSTRAP_ADMIN_USERNAME={{ keycloak_admin_user }}
 Environment=KC_BOOTSTRAP_ADMIN_PASSWORD={{ keycloak_admin_password }}
 {% if keycloak_java_opts | trim | length > 0 %}

@@ -664,6 +664,19 @@ That overwrites the realm, users and groups included.
 
 `keycloak_admin_password` has the same shape as `antarest_admin_password`: it seeds the first administrator when the database is empty and is ignored ever after. Changing it later is done from the console. The other two secrets are read at every start, and `keycloak_db_password` is reconciled by the playbook, which checks the role can still log in with it and sets it when it cannot.
 
+**The temporary administrator.** The account Keycloak creates from that password is a *temporary* administrator, and its console says so on every page: *You are logged in as a temporary admin user. To harden security, create a permanent admin account and delete the temporary one.* The flag behind the message is an attribute on the user, `is_temporary_admin`, and the admin API refuses to write it: a request that drops it answers 204 and changes nothing. Only what the message asks for works, another administrator and that one deleted.
+
+`keycloak_admin_permanent` does it, at the end of the run that first starts Keycloak, over the admin API on the loopback port:
+
+```yaml
+keycloak_admin_permanent: true              # roles/keycloak/defaults/main.yml
+keycloak_admin_rotate_user: "{{ keycloak_admin_user }}-rotate"
+```
+
+A scratch administrator is created (the configured name is held by the temporary account until it is deleted, and something has to be logged in to delete it), the temporary account goes, `keycloak_admin_user` is created again as a normal user with `keycloak_admin_password`, that login is checked, and the scratch account is deleted. Nothing outside the `master` realm is read or written, and the operator logs in with what the inventory says, as before, without the message.
+
+Re-running costs three GETs: an administrator carrying no attribute is left alone. So is a master realm `keycloak_admin_password` no longer opens, which is what a password changed from the console looks like: the playbook says so and leaves it be. The scratch account carries the same password on purpose, so a run interrupted in the middle leaves an administrator whose credentials are in the inventory rather than a locked-out realm, and the next run picks the work up where it stopped. Set `keycloak_admin_permanent: false` for a `master` realm managed by hand.
+
 Without TLS the Keycloak console is reachable only from a private address: its realms are imported with `sslRequired: none`, but the `master` realm the console lives in keeps the Keycloak default and refuses a plain-http login from anywhere else. Turn TLS on, or tunnel: `ssh -L 8082:127.0.0.1:8082 <machine>`, then `http://127.0.0.1:8082/auth/admin/`.
 
 Turning `keycloak_enabled` back off stops and removes the container. It leaves the database alone: turning it on again finds its realms, its users and its groups where they were.
