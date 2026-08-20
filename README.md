@@ -658,6 +658,12 @@ keycloak_client_secret: "..."
 
 The playbook imports a realm at the first start, and only then: Keycloak skips a realm that already exists, which is what keeps the users and groups created since. That realm holds one client, `antares-auth`, with a direct access grant (to check a password) and a service account carrying `view-users` (to read the groups of the user who just logged in). Nothing here holds a credential of the `master` realm. Users and groups are created afterwards, from the console at `https://<domain>/auth/admin/`.
 
+That realm is also imported with `email`, `firstName` and `lastName` optional, which the profile Keycloak ships is not. Its own makes the three required for the `user` role and enables the `VERIFY_PROFILE` action, so an account created from the console with a username and a password alone is incomplete in its eyes: the direct access grant the connector logs people in with answers `Account is not fully set up`, and that reaches the operator as a refused login, for a user the console shows as enabled, with a valid password and nothing in its required actions. The action is derived from the profile and never written on the account, which is what makes it invisible there. The fields still exist and are still validated when filled; requiring them again is a change in Realm settings > User profile.
+
+Filling the names is worth it anyway. Antares-Web displays `firstName lastName` as the name of the account, and the connector falls back to the username when the first name is missing, so a user created without them shows up under their login.
+
+A realm created before this change keeps Keycloak's profile, and re-running the playbook does not fix it, since the import is skipped: either fill the three fields on the accounts that already exist, drop the `required` keys in Realm settings > User profile, or replay the import below, which replaces the realm wholesale.
+
 To replay a change to `roles/keycloak/templates/realm.json.j2` on a machine whose realm holds nothing worth keeping:
 
 ```bash
