@@ -85,6 +85,22 @@ all:
       antarest_admin_password: "ci-admin-not-a-secret"
       antarest_db_password: "ci-db-not-a-secret"
       slurmdbd_db_password: "ci-slurmdb-not-a-secret"
+      keycloak_admin_password: "ci-keycloak-not-a-secret"
+      keycloak_db_password: "ci-keycloak-db-not-a-secret"
+      keycloak_client_secret: "ci-keycloak-client-not-a-secret"
+
+      # ---------------------------------------------------------------
+      #  Keycloak, and the connector that puts it to use. Deployed on every
+      #  shape of the CI: the identity provider is one more container, one
+      #  more database in the stack's PostgreSQL and one more route through
+      #  the front door, and here it is also one more port in the union of
+      #  rulesets this machine carries - published on the loopback, so the
+      #  probes of verify.yml reach it through the front door alone. The
+      #  artefacts carry both images because inventory/ci-build.yml builds
+      #  with the same two settings.
+      # ---------------------------------------------------------------
+      keycloak_enabled: true
+      antares_auth_provider: keycloak
 
       # Four gunicorn workers of the default formula would each load the
       # whole application, on a machine that is also running the daemons of

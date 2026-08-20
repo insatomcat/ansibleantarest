@@ -57,6 +57,19 @@ all:
         - "Ubuntu-22.04"
         - "OracleServer-8.10"
 
+      # ---------------------------------------------------------------
+      #  Keycloak and the connector that puts it to use. They belong on the
+      #  builder because this is where they decide what ends up in the
+      #  artefacts: keycloak_enabled is what adds keycloak_image to
+      #  antarest_thirdparty_images, and antares_auth_provider is what
+      #  build.yml builds a connector image at all for. The deploy jobs run
+      #  with antarest_image_source=archive, where nothing pulls, so a
+      #  target turning either of them on without this would fail on an
+      #  image that was never shipped.
+      # ---------------------------------------------------------------
+      keycloak_enabled: true
+      antares_auth_provider: keycloak
+
       # Left at the default of group_vars/all.yml, which is true. The builder
       # is not a cluster node, but this is also what decides whether the
       # accounting database's images are archived, and the `slurm` and
