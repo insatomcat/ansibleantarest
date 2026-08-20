@@ -23,7 +23,13 @@
    sslRequired follows antarest_tls_enabled: `external`, the Keycloak default,
    refuses the account and console pages to any client that is not on a private
    address unless the request came over https, which on a deployment served on
-   plain http means nobody can log in. #}
+   plain http means nobody can log in.
+
+   The components block carries the user profile of the realm, which Keycloak
+   stores as the configuration of a provider rather than as a field of its own,
+   and reads as a *string* holding JSON - hence the two to_json. What is in it,
+   and why the profile Keycloak ships would refuse every account created here,
+   is in roles/keycloak/vars/main.yml. #}
 {
   "realm": {{ keycloak_realm | to_json }},
   "enabled": true,
@@ -54,5 +60,17 @@
         "realm-management": ["view-users"]
       }
     }
-  ]
+  ],
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "name": "Declarative User Profile",
+        "providerId": "declarative-user-profile",
+        "subComponents": {},
+        "config": {
+          "kc.user.profile.config": [{{ keycloak_user_profile | to_json | to_json }}]
+        }
+      }
+    ]
+  }
 }
