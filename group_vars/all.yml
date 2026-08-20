@@ -554,6 +554,16 @@ slurmdbd_dir: /var/slurmdb
 # deliberate dump and restore, not something a re-run should trigger.
 slurmdbd_mariadb_image: "{{ container_registry }}/mariadb:11"
 slurmdbd_adminer_image: "{{ container_registry }}/adminer:5"
+
+# The images the accounting database needs, beyond the packaged daemons. The
+# counterpart of antarest_thirdparty_images for the Slurm half: build.yml
+# archives this very list and slurm_frontend loads it, so the two cannot drift.
+# It lives here rather than in roles/slurm_frontend/vars/ because the builder
+# reads it and never runs that role - same reason as keycloak_image above.
+slurmdbd_thirdparty_images: >-
+  {{ [slurmdbd_mariadb_image]
+     + ([slurmdbd_adminer_image] if slurmdbd_enable_adminer | bool else []) }}
+
 # The reference procedure uses 12G, which does not fit a small front-end VM.
 slurmdbd_innodb_buffer_pool_size: "1G"
 slurmdbd_enable_adminer: false
