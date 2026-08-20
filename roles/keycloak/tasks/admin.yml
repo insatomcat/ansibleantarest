@@ -1,0 +1,282 @@
+---
+# Keycloak 26 marks the administrator it bootstraps from KC_BOOTSTRAP_ADMIN_*
+# as temporary. The account has every right, but the console repeats on every
+# page that it should be replaced, and the attribute that says so
+# (`is_temporary_admin`, which the admin API shows on the user) is one it
+# refuses to write: a PUT dropping it answers 204 and changes nothing. The way
+# out is the one the message asks for, another administrator created by hand
+# and that one deleted.
+#
+# So the playbook does it, over the admin API on the loopback port the front
+# door proxies to, and ends on exactly the account the operator configured -
+# keycloak_admin_user with keycloak_admin_password, a normal user this time.
+# It takes a detour through a scratch administrator because the name is held by
+# the temporary account until it is deleted, and something has to be logged in
+# to delete it. That scratch account carries the same password, so a run that
+# stops halfway leaves an administrator whose credentials are in the inventory
+# rather than a locked-out realm, and the next run picks the work up there.
+#
+# Nothing outside the `master` realm is read or written, and a deployment that
+# is already in order costs three GETs: an administrator carrying no attribute
+# is left alone, and so is a master realm this password no longer opens.
+
+- name: Log in as the configured administrator
+  ansible.builtin.uri:
+    url: "{{ keycloak_local_url }}/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      client_id: admin-cli
+      grant_type: password
+      username: "{{ keycloak_admin_user }}"
+      password: "{{ keycloak_admin_password }}"
+    # A refusal is an answer and not a failure: the password of the master realm
+    # can have been changed from the console since, and then this has no
+    # business touching it. Keycloak 26 answers 400 (`invalid_grant`) both for
+    # a wrong password and for a user that does not exist; 401 is listed for
+    # the versions and the front ends that prefer it.
+    status_code: [200, 400, 401]
+  register: keycloak_login
+  changed_when: false
+  no_log: true
+
+- name: Log in as the scratch administrator a previous run may have left
+  ansible.builtin.uri:
+    url: "{{ keycloak_local_url }}/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      client_id: admin-cli
+      grant_type: password
+      username: "{{ keycloak_admin_rotate_user }}"
+      password: "{{ keycloak_admin_password }}"
+    # Most of the time there is no such user, which is the 400 above.
+    status_code: [200, 400, 401]
+  register: keycloak_login_scratch
+  changed_when: false
+  no_log: true
+  when: keycloak_login.status != 200
+
+- name: Hold on to the token that answered
+  ansible.builtin.set_fact:
+    keycloak_token: >-
+      {{ keycloak_login.json.access_token if keycloak_login.status == 200
+         else (keycloak_login_scratch.json.access_token
+               if (keycloak_login_scratch.status | default(0)) == 200 else '') }}
+  no_log: true
+
+- name: Say so when the master realm is out of reach
+  ansible.builtin.debug:
+    msg: >-
+      Neither {{ keycloak_admin_user }} nor {{ keycloak_admin_rotate_user }}
+      opens the master realm with keycloak_admin_password, so the temporary
+      administrator, if there is still one, stays where it is. That is what a
+      password changed from the console looks like. Replace it by hand, or set
+      keycloak_admin_permanent to false to stop looking.
+  when: keycloak_token | length == 0
+
+- name: Look at the administrator the master realm holds
+  ansible.builtin.uri:
+    url: >-
+      {{ keycloak_local_url }}/admin/realms/master/users?username={{ keycloak_admin_user | urlencode }}&exact=true
+    headers:
+      Authorization: "Bearer {{ keycloak_token }}"
+  register: keycloak_admin_account
+  changed_when: false
+  when: keycloak_token | length > 0
+
+- name: Decide what is left to do
+  ansible.builtin.set_fact:
+    # The configured administrator is the one Keycloak bootstrapped.
+    keycloak_admin_rotate: >-
+      {{ (keycloak_admin_account.json | default([]) | length > 0)
+         and ((keycloak_admin_account.json[0].attributes | default({}))
+              ['is_temporary_admin'] | default([]) | length > 0) }}
+    # A previous run deleted it and stopped before putting the permanent one
+    # back: the scratch administrator is the only one answering.
+    keycloak_admin_resume: "{{ keycloak_login.status != 200 }}"
+  when: keycloak_token | length > 0
+
+- name: Create the scratch administrator
+  ansible.builtin.uri:
+    url: "{{ keycloak_local_url }}/admin/realms/master/users"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ keycloak_token }}"
+    body_format: json
+    body:
+      username: "{{ keycloak_admin_rotate_user }}"
+      enabled: true
+      credentials:
+        - type: password
+          value: "{{ keycloak_admin_password }}"
+          # Without this the password is one Keycloak asks to change at the
+          # first login, and the direct access grant below refuses it.
+          temporary: false
+    # 409: one is already there, from a run that stopped halfway. It carries
+    # this password, so it is usable as it is.
+    status_code: [201, 409]
+  changed_when: true
+  no_log: true
+  when: keycloak_admin_rotate | default(false) | bool
+
+- name: Read the realm role that makes an administrator
+  ansible.builtin.uri:
+    url: "{{ keycloak_local_url }}/admin/realms/master/roles/admin"
+    headers:
+      Authorization: "Bearer {{ keycloak_token }}"
+  register: keycloak_admin_role
+  changed_when: false
+  when: (keycloak_admin_rotate | default(false) | bool) or (keycloak_admin_resume | default(false) | bool)
+
+- name: Find the scratch administrator
+  ansible.builtin.uri:
+    url: >-
+      {{ keycloak_local_url }}/admin/realms/master/users?username={{ keycloak_admin_rotate_user | urlencode }}&exact=true
+    headers:
+      Authorization: "Bearer {{ keycloak_token }}"
+  register: keycloak_scratch_account
+  changed_when: false
+  when: keycloak_admin_rotate | default(false) | bool
+
+# The mapping is what the account is for: a user of the master realm without
+# `admin` cannot read the realm, let alone delete a user in it.
+- name: Make the scratch administrator an administrator
+  ansible.builtin.uri:
+    url: >-
+      {{ keycloak_local_url }}/admin/realms/master/users/{{ keycloak_scratch_account.json[0].id }}/role-mappings/realm
+    method: POST
+    headers:
+      Authorization: "Bearer {{ keycloak_token }}"
+    body_format: json
+    body: "{{ [keycloak_admin_role.json] }}"
+    status_code: [204]
+  changed_when: true
+  when: keycloak_admin_rotate | default(false) | bool
+
+- name: Log in as the scratch administrator
+  ansible.builtin.uri:
+    url: "{{ keycloak_local_url }}/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      client_id: admin-cli
+      grant_type: password
+      username: "{{ keycloak_admin_rotate_user }}"
+      password: "{{ keycloak_admin_password }}"
+    # No 401 here: it was just created with this password, and the deletion
+    # below has to be done by something that works.
+    status_code: [200]
+  register: keycloak_login_rotate
+  changed_when: false
+  no_log: true
+  when: keycloak_admin_rotate | default(false) | bool
+
+- name: Work from the scratch administrator now
+  ansible.builtin.set_fact:
+    keycloak_token: "{{ keycloak_login_rotate.json.access_token }}"
+  no_log: true
+  when: keycloak_admin_rotate | default(false) | bool
+
+- name: Delete the temporary administrator
+  ansible.builtin.uri:
+    url: "{{ keycloak_local_url }}/admin/realms/master/users/{{ keycloak_admin_account.json[0].id }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ keycloak_token }}"
+    status_code: [204]
+  changed_when: true
+  when: keycloak_admin_rotate | default(false) | bool
+
+- name: Create the permanent administrator under the configured name
+  ansible.builtin.uri:
+    url: "{{ keycloak_local_url }}/admin/realms/master/users"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ keycloak_token }}"
+    body_format: json
+    body:
+      username: "{{ keycloak_admin_user }}"
+      enabled: true
+      credentials:
+        - type: password
+          value: "{{ keycloak_admin_password }}"
+          temporary: false
+    status_code: [201, 409]
+  changed_when: true
+  no_log: true
+  when: (keycloak_admin_rotate | default(false) | bool) or (keycloak_admin_resume | default(false) | bool)
+
+- name: Find it back
+  ansible.builtin.uri:
+    url: >-
+      {{ keycloak_local_url }}/admin/realms/master/users?username={{ keycloak_admin_user | urlencode }}&exact=true
+    headers:
+      Authorization: "Bearer {{ keycloak_token }}"
+  register: keycloak_permanent_account
+  changed_when: false
+  when: (keycloak_admin_rotate | default(false) | bool) or (keycloak_admin_resume | default(false) | bool)
+
+- name: Make it an administrator
+  ansible.builtin.uri:
+    url: >-
+      {{ keycloak_local_url }}/admin/realms/master/users/{{ keycloak_permanent_account.json[0].id }}/role-mappings/realm
+    method: POST
+    headers:
+      Authorization: "Bearer {{ keycloak_token }}"
+    body_format: json
+    body: "{{ [keycloak_admin_role.json] }}"
+    status_code: [204]
+  changed_when: true
+  when: (keycloak_admin_rotate | default(false) | bool) or (keycloak_admin_resume | default(false) | bool)
+
+# Proof before the scratch account goes, rather than after: this is the login
+# the operator will use, and a 401 here has to stop the run while there is
+# still an administrator with a known password in the realm.
+- name: Check the permanent administrator logs in
+  ansible.builtin.uri:
+    url: "{{ keycloak_local_url }}/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      client_id: admin-cli
+      grant_type: password
+      username: "{{ keycloak_admin_user }}"
+      password: "{{ keycloak_admin_password }}"
+    status_code: [200]
+  register: keycloak_login_permanent
+  changed_when: false
+  no_log: true
+  when: (keycloak_admin_rotate | default(false) | bool) or (keycloak_admin_resume | default(false) | bool)
+
+- name: Work from the permanent administrator now
+  ansible.builtin.set_fact:
+    keycloak_token: "{{ keycloak_login_permanent.json.access_token }}"
+  no_log: true
+  when: (keycloak_admin_rotate | default(false) | bool) or (keycloak_admin_resume | default(false) | bool)
+
+# Unconditional, and not only after a rotation: an administrator with a
+# password written in the inventory has no reason to outlive the few seconds it
+# is needed for, and a run interrupted between its creation and here would
+# otherwise leave one behind for good.
+- name: Look for a scratch administrator to take away
+  ansible.builtin.uri:
+    url: >-
+      {{ keycloak_local_url }}/admin/realms/master/users?username={{ keycloak_admin_rotate_user | urlencode }}&exact=true
+    headers:
+      Authorization: "Bearer {{ keycloak_token }}"
+  register: keycloak_scratch_left
+  changed_when: false
+  when: keycloak_token | length > 0
+
+- name: Delete the scratch administrator
+  ansible.builtin.uri:
+    url: "{{ keycloak_local_url }}/admin/realms/master/users/{{ keycloak_scratch_left.json[0].id }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ keycloak_token }}"
+    status_code: [204]
+  changed_when: true
+  when:
+    - keycloak_token | length > 0
+    - keycloak_scratch_left.json | default([]) | length > 0
