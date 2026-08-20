@@ -44,3 +44,9 @@
 
 - name: Start Keycloak
   ansible.builtin.include_tasks: service.yml
+
+# After service.yml and not before: it needs Keycloak answering, and on the
+# first start the account it goes looking for does not exist until then.
+- name: Replace the administrator Keycloak bootstrapped
+  ansible.builtin.include_tasks: admin.yml
+  when: keycloak_admin_permanent | bool
