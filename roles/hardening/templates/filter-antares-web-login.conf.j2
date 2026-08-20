@@ -5,10 +5,11 @@
 #
 #   203.0.113.7 - - [14/Aug/2026:09:12:33 +0000] "POST {{ hardening_fail2ban_web_login_path }} HTTP/1.1" 401 42 "-" "curl/8.5.0"
 #
-# The address is the real one: rootful podman DNATs the published port and
-# leaves the source address alone, unlike rootless podman, where every client
-# would look like the same gateway address and one bad password would ban the
-# whole world.
+# The address is the real one: this log comes from the front door, which runs
+# in the host network namespace and is therefore reached directly, with nothing
+# in front to rewrite the source. Read from the Antares-Web nginx instead, every
+# client would look like the front door and one bad password would ban
+# everybody.
 #
 # No datepattern: the systemd backend takes the time from the journal entry.
 

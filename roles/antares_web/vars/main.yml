@@ -67,41 +67,17 @@ antarest_worker_volumes: >-
      + ([antarest_ssh_key ~ ':/id_rsa:ro'] if slurm_enabled | bool else [])
        | map('regex_replace', '$', _antarest_volume_opts) | list }}
 
-# Certificate actually served, resolved from the provider. `manual` is the only
-# one where the operator chooses the paths; the other two are managed here.
-antarest_tls_cert: >-
-  {{ ('/etc/letsencrypt/live/' ~ antarest_tls_domain ~ '/fullchain.pem')
-     if antarest_tls_provider == 'letsencrypt' else antarest_tls_certificate }}
-antarest_tls_key: >-
-  {{ ('/etc/letsencrypt/live/' ~ antarest_tls_domain ~ '/privkey.pem')
-     if antarest_tls_provider == 'letsencrypt' else antarest_tls_certificate_key }}
-
-# What nginx needs mounted to serve TLS. /etc/letsencrypt whole, because
-# live/<domain>/*.pem are symlinks into archive/<domain>/ and a mount of live/
-# alone would leave them dangling inside the container. The webroot is where
-# certbot drops the challenge files, so it is only useful to that provider.
-# Mounted read-only: nothing in the container writes there.
-antarest_tls_volumes: >-
-  {{ ((['/etc/letsencrypt:/etc/letsencrypt:ro',
-        antarest_tls_webroot ~ ':' ~ antarest_tls_webroot_container ~ ':ro']
-       if antarest_tls_provider == 'letsencrypt'
-       else ([antarest_tls_cert | dirname, antarest_tls_key | dirname]
-             | unique | map('regex_replace', '^(.*)$', '\1:\1:ro') | list))
-      | map('regex_replace', '$', _antarest_volume_opts) | list)
-     if antarest_tls_enabled | bool else [] }}
-
-# With TLS off the project file is mounted unchanged, exactly as before; with
-# TLS on it is the rendered one, which is that file plus the port 443 server.
-antarest_nginx_conf_source: >-
-  {{ (antarest_deploy_dir ~ '/nginx.conf') if antarest_tls_enabled | bool
-     else (antarest_dir ~ '/resources/deploy/nginx.conf') }}
+# The configuration mounted in the nginx container. Always the rendered one:
+# the file the project ships does not pass the X-Forwarded-Proto the front door
+# sets, so the backend would think it serves plain http behind an https front
+# end. tasks/nginx.yml compares the two and reports a change upstream.
+antarest_nginx_conf_source: "{{ antarest_deploy_dir }}/nginx.conf"
 
 antarest_nginx_volumes: >-
-  {{ ([antarest_nginx_conf_source ~ ':/etc/nginx/conf.d/default.conf:ro',
-       antarest_dir ~ '/webapp/dist:/www:ro',
-       antarest_dir ~ '/resources/deploy/web.config.json:/www/config.json:ro']
-      | map('regex_replace', '$', _antarest_volume_opts) | list)
-     + antarest_tls_volumes }}
+  {{ [antarest_nginx_conf_source ~ ':/etc/nginx/conf.d/default.conf:ro',
+      antarest_dir ~ '/webapp/dist:/www:ro',
+      antarest_dir ~ '/resources/deploy/web.config.json:/www/config.json:ro']
+     | map('regex_replace', '$', _antarest_volume_opts) | list }}
 
 # The quadlet units, rendered into /etc/containers/systemd. Order is irrelevant,
 # systemd resolves the dependencies declared inside each unit.

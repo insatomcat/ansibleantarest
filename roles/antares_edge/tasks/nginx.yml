@@ -1,0 +1,37 @@
+---
+# The configuration and the unit, in a file of their own because they are
+# rendered twice on the run that obtains a certificate: once before the front
+# door starts (plain http, so that certbot has something to answer the
+# challenge with) and once after (TLS on, the redirect in place).
+
+- name: Create the front door configuration directory
+  ansible.builtin.file:
+    path: "{{ antares_edge_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy the front door configuration
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ antares_edge_dir }}/nginx.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart the front door
+
+- name: Deploy the front door quadlet unit
+  ansible.builtin.template:
+    src: quadlet/antares-edge.container.j2
+    dest: "/etc/containers/systemd/{{ antares_edge_container }}.container"
+    owner: root
+    group: root
+    mode: "0644"
+  register: antares_edge_unit
+  notify: Restart the front door
+
+- name: Reload systemd so the quadlet generator picks the unit up
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: antares_edge_unit.changed

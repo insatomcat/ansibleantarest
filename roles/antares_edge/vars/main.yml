@@ -1,0 +1,48 @@
+---
+# ===========================================================================
+#  What the front door serves, and what it needs mounted
+# ===========================================================================
+
+# Same spelling as everywhere else in this repository: the access mode is
+# written out so that container_volume_opts (the SELinux `,z`) has something to
+# be appended to. See roles/antares_web/vars/main.yml.
+_antares_edge_volume_opts: "{{ container_volume_opts | trim }}"
+
+# Certificate actually served, resolved from the provider. `manual` is the only
+# one where the operator chooses the paths; the other two are managed here.
+antarest_tls_cert: >-
+  {{ ('/etc/letsencrypt/live/' ~ antarest_tls_domain ~ '/fullchain.pem')
+     if antarest_tls_provider == 'letsencrypt' else antarest_tls_certificate }}
+antarest_tls_key: >-
+  {{ ('/etc/letsencrypt/live/' ~ antarest_tls_domain ~ '/privkey.pem')
+     if antarest_tls_provider == 'letsencrypt' else antarest_tls_certificate_key }}
+
+# What the container needs to serve TLS. /etc/letsencrypt whole, because
+# live/<domain>/*.pem are symlinks into archive/<domain>/ and a mount of live/
+# alone would leave them dangling inside the container. The webroot is where
+# certbot drops the challenge files, so it is only useful to that provider.
+# Mounted read-only: nothing in the container writes there.
+antares_edge_tls_volumes: >-
+  {{ ((['/etc/letsencrypt:/etc/letsencrypt:ro',
+        antarest_tls_webroot ~ ':' ~ antarest_tls_webroot_container ~ ':ro']
+       if antarest_tls_provider == 'letsencrypt'
+       else ([antarest_tls_cert | dirname, antarest_tls_key | dirname]
+             | unique | map('regex_replace', '^(.*)$', '\1:\1:ro') | list))
+      | map('regex_replace', '$', _antares_edge_volume_opts) | list)
+     if antarest_tls_enabled | bool else [] }}
+
+antares_edge_volumes: >-
+  {{ ([antares_edge_dir ~ '/nginx.conf:/etc/nginx/conf.d/default.conf:ro']
+      | map('regex_replace', '$', _antares_edge_volume_opts) | list)
+     + antares_edge_tls_volumes }}
+
+# The locations of the generated configuration. `path` is an nginx location
+# prefix, `upstream` an address and a port on the loopback, `name` a comment.
+#
+# Antares-Web is always there and is the catch-all; anything else claims a
+# prefix of its own, and nginx picks the longest match whatever the order.
+antares_edge_routes: >-
+  {{ [{'path': '/',
+       'upstream': '127.0.0.1:' ~ antarest_nginx_port,
+       'name': 'Antares-Web'}]
+     + antares_edge_extra_routes }}

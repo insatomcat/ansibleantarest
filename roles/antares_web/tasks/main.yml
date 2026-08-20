@@ -39,19 +39,8 @@
   ansible.builtin.include_tasks: ssh_key.yml
   when: slurm_enabled | bool
 
-- name: Prepare the TLS material
-  ansible.builtin.include_tasks: tls.yml
-  when: antarest_tls_enabled | bool
-
 - name: Render the Antares-Web configuration
   ansible.builtin.include_tasks: config.yml
 
 - name: Start Antares-Web
   ansible.builtin.include_tasks: service.yml
-
-# After the stack is up, since the challenge is answered by its own nginx.
-- name: Obtain the TLS certificate
-  ansible.builtin.include_tasks: certbot.yml
-  when:
-    - antarest_tls_enabled | bool
-    - antarest_tls_provider == 'letsencrypt'

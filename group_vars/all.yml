@@ -290,23 +290,42 @@ antarest_default_launcher: "{{ 'slurm' if slurm_enabled | bool else 'local' }}"
 # Expose adminer (DB web UI) next to Antares-Web, bound on 127.0.0.1:8080.
 antarest_enable_adminer: false
 
-# Ports the interface is published on. Here rather than in the role defaults
-# because the hardening role opens them in the firewall, and a role default is
-# only in scope for the play that runs that role.
+# Ports the machine answers on. They are held by the front door of the
+# antares_edge role, the one container that is not on the podman network: it
+# runs in the host network namespace, so these are the ports its nginx listens
+# on. Here rather than in the role defaults because the hardening role opens
+# them in the firewall, and a role default is only in scope for the play that
+# runs that role.
 antarest_http_port: 80
 antarest_https_port: 443
+
+# Where the Antares-Web nginx is published for the front door to reach it.
+# 127.0.0.1 on purpose: everything but the front door is reachable from the
+# machine alone, so a port opened by mistake in a security group exposes
+# nothing. Anything else the front door serves later follows the same rule,
+# with a loopback port of its own.
+antarest_nginx_bind: 127.0.0.1
+antarest_nginx_port: 8081
+
+# Image of the front door. The same nginx as the one serving the web
+# application, deliberately a knob of its own: the front door is the only
+# thing between the internet and the machine, and being able to move it to a
+# newer nginx without rebuilding the Antares-Web artefacts is worth a second
+# variable.
+antares_edge_image: "{{ container_registry }}/nginx:1.30"
 
 # ---------------------------------------------------------------------------
 #  TLS
 #
-#  There is already an nginx in the stack, and it is the one that terminates
-#  TLS: no second reverse proxy to install, no port to move. Switching this on
-#  makes the antares-nginx container listen on antarest_https_port as well and,
-#  by default, redirect http to it.
+#  Terminated by the front door (the antares_edge role), which is also the only
+#  thing that binds a port of the machine. Switching this on makes it listen on
+#  antarest_https_port as well and, by default, redirect http to it. Everything
+#  it proxies to - the web application, Keycloak - is served over https without
+#  having to know about it.
 #
 #  antarest_tls_provider:
 #    letsencrypt : certbot obtains the certificate over http-01. The challenge
-#                  is answered by the stack's own nginx (webroot method), so
+#                  is answered by the front door itself (webroot method), so
 #                  renewal needs no downtime and the certbot.timer shipped by
 #                  the package handles it. Requires antares_tls_domain to
 #                  resolve to this machine and port 80 to be reachable from the
@@ -317,12 +336,12 @@ antarest_https_port: 443
 #    manual      : a certificate you copied on the machine yourself, for
 #                  instance one issued by a company CA. Set
 #                  antarest_tls_certificate / antarest_tls_certificate_key
-#                  (see roles/antares_web/defaults/main.yml) to the full chain
+#                  (see roles/antares_edge/defaults/main.yml) to the full chain
 #                  and the private key.
 #
-#  First run with letsencrypt: the stack comes up on plain http, certbot gets
-#  the certificate through it, and the playbook then reloads nginx with TLS on.
-#  Nothing to do twice.
+#  First run with letsencrypt: the front door comes up on plain http, certbot
+#  gets the certificate through it, and the playbook then reloads it with TLS
+#  on. Nothing to do twice.
 # ---------------------------------------------------------------------------
 antarest_tls_enabled: false
 antarest_tls_domain: ""                # e.g. antares.example.org
