@@ -77,6 +77,22 @@ all:
       # exercise the preforked path Redis is needed for.
       antarest_gunicorn_workers: 2
 
+      # ---------------------------------------------------------------
+      #  Keycloak, and the connector that puts it to use. On the host and
+      #  not in the anchor above, unlike the other secrets: both roles run
+      #  in the antares_web play alone, and keycloak_enabled is also what
+      #  adds the three secrets below to the list the hardening role checks
+      #  - a compute node has no business being asked about them. The
+      #  artefacts carry both images because inventory/ci-build.yml builds
+      #  with the same two settings.
+      # ---------------------------------------------------------------
+      keycloak_enabled: true
+      antares_auth_provider: keycloak
+
+      keycloak_admin_password: "ci-keycloak-not-a-secret"
+      keycloak_db_password: "ci-keycloak-db-not-a-secret"
+      keycloak_client_secret: "ci-keycloak-client-not-a-secret"
+
     slurm-front:
       <<: *ci_cluster_common
       ansible_host: 192.168.77.12

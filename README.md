@@ -692,6 +692,8 @@ Without TLS the Keycloak console is reachable only from a private address: its r
 
 Turning `keycloak_enabled` back off stops and removes the container. It leaves the database alone: turning it on again finds its realms, its users and its groups where they were.
 
+The CI deploys it on every pull request, in the three shapes and on every distribution it deploys at all: `inventory/ci-*.yml` all carry `keycloak_enabled: true` and `antares_auth_provider: keycloak`, the builder included, since that is what puts the Keycloak image and the connector image in the artefacts. What that covers is the deployment - the database created before the first start, the realm import, the temporary administrator replaced, the two containers up, the route through the front door and the discovery document answering under it - rather than a login, which needs a user somebody created.
+
 ## Hardening
 
 A blank VM, a few minutes, and an Antares-Web reachable on the internet with 22 and 80 open is exactly what this playbook makes easy, so the `hardening` role runs right after the base configuration and before anything is deployed. Five independent blocks, each switched on its own:
