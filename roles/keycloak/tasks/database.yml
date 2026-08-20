@@ -1,0 +1,111 @@
+---
+# Keycloak lays its tables in a database of its own, in the PostgreSQL the
+# stack already runs. It cannot create that database itself, so this does, once,
+# before the container is ever started. Nothing here ever drops anything: a
+# deployment that turns Keycloak off keeps its users.
+#
+# postgresql publishes no port on the host, so everything goes through
+# `podman exec`, exactly like the schema migration of Antares-Web. The queries
+# carrying the password use argv rather than a command line, so that a password
+# holding a space is one argument and not two.
+
+- name: Start the database before creating the Keycloak one
+  ansible.builtin.systemd:
+    name: postgresql.service
+    state: started
+
+- name: Wait for PostgreSQL to accept connections
+  ansible.builtin.command: "{{ container_cmd }} exec postgresql pg_isready -U postgres"
+  register: keycloak_pg_ready
+  until: keycloak_pg_ready.rc == 0
+  retries: 30
+  delay: 5
+  changed_when: false
+
+- name: Look for the Keycloak database role
+  ansible.builtin.command:
+    cmd: >-
+      {{ container_cmd }} exec postgresql
+      psql -U postgres -tAc
+      "SELECT 1 FROM pg_roles WHERE rolname = '{{ keycloak_db_user }}'"
+  register: keycloak_role_present
+  changed_when: false
+
+# :'pw' is psql quoting the value of the variable as a string literal, which is
+# what keeps a password holding a quote from being a syntax error, or worse.
+- name: Create the Keycloak database role
+  ansible.builtin.command:
+    argv:
+      - "{{ container_cmd }}"
+      - exec
+      - postgresql
+      - psql
+      - -U
+      - postgres
+      - -v
+      - "pw={{ keycloak_db_password }}"
+      - -c
+      - "CREATE ROLE {{ keycloak_db_user }} LOGIN PASSWORD :'pw'"
+  when: keycloak_role_present.stdout | trim != '1'
+  changed_when: true
+
+- name: Look for the Keycloak database
+  ansible.builtin.command:
+    cmd: >-
+      {{ container_cmd }} exec postgresql
+      psql -U postgres -tAc
+      "SELECT 1 FROM pg_database WHERE datname = '{{ keycloak_db_name }}'"
+  register: keycloak_db_present
+  changed_when: false
+
+- name: Create the Keycloak database
+  ansible.builtin.command:
+    cmd: >-
+      {{ container_cmd }} exec postgresql
+      psql -U postgres -c
+      "CREATE DATABASE {{ keycloak_db_name }} OWNER {{ keycloak_db_user }}"
+  when: keycloak_db_present.stdout | trim != '1'
+  changed_when: true
+
+# The role is created with the password of the first run, and
+# keycloak_db_password can be changed afterwards - by an operator replacing the
+# one this repository ships, typically. The question is asked the only way it
+# can be answered: by connecting. Over TCP on purpose, since the unix socket
+# inside the container is `trust` and would say yes to anything.
+- name: Check the Keycloak role still logs in with the configured password
+  ansible.builtin.command:
+    argv:
+      - "{{ container_cmd }}"
+      - exec
+      - -e
+      - "PGPASSWORD={{ keycloak_db_password }}"
+      - postgresql
+      - psql
+      - -h
+      - 127.0.0.1
+      - -U
+      - "{{ keycloak_db_user }}"
+      - -d
+      - postgres
+      - -tAc
+      - SELECT 1
+  register: keycloak_db_login
+  changed_when: false
+  failed_when: false
+
+- name: Set the password it is configured with
+  ansible.builtin.command:
+    argv:
+      - "{{ container_cmd }}"
+      - exec
+      - postgresql
+      - psql
+      - -U
+      - postgres
+      - -v
+      - "pw={{ keycloak_db_password }}"
+      - -c
+      - "ALTER ROLE {{ keycloak_db_user }} PASSWORD :'pw'"
+  when: keycloak_db_login.rc != 0
+  changed_when: true
+  notify: Restart Keycloak
