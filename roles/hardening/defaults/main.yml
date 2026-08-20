@@ -213,8 +213,15 @@ hardening_dnf_automatic_upgrade_type: security
 # ---------------------------------------------------------------------------
 # The values shipped in group_vars/all.yml. A deployment still carrying them is
 # reported; set hardening_fail_on_default_secrets to make that a failure.
-hardening_default_secrets:
-  antarest_jwt_key: secretkeytochange
-  antarest_admin_password: admin
-  antarest_db_password: somepass
-  slurmdbd_db_password: changeme-slurm-acct
+# The Keycloak entries are only added when it is deployed: reporting the
+# password of a container that does not exist would be noise, and the check
+# reads whatever is in scope.
+hardening_default_secrets: >-
+  {{ {'antarest_jwt_key': 'secretkeytochange',
+      'antarest_admin_password': 'admin',
+      'antarest_db_password': 'somepass',
+      'slurmdbd_db_password': 'changeme-slurm-acct'}
+     | combine({'keycloak_admin_password': 'admin',
+                'keycloak_db_password': 'changeme-keycloak-db',
+                'keycloak_client_secret': 'changeme-keycloak-client'}
+               if keycloak_enabled | default(false) | bool else {}) }}

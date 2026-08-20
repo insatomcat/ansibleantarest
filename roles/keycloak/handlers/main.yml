@@ -1,0 +1,8 @@
+---
+# Keycloak alone, not the whole target: a new realm file or a database password
+# has no reason to restart the backend and the studies with it.
+- name: Restart Keycloak
+  ansible.builtin.systemd:
+    name: "{{ keycloak_container }}.service"
+    state: restarted
+    daemon_reload: true
