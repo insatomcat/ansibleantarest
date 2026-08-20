@@ -1,7 +1,7 @@
 ---
-# Everything that has to be true *before* nginx starts. Obtaining a Let's
-# Encrypt certificate is the other half and lives in certbot.yml, because the
-# http-01 challenge needs the very nginx this configures to be up.
+# Everything that has to be true *before* the front door starts. Obtaining a
+# Let's Encrypt certificate is the other half and lives in certbot.yml, because
+# the http-01 challenge needs the very container this configures to be up.
 
 - name: Check the TLS settings are complete
   ansible.builtin.assert:
@@ -31,46 +31,23 @@
     fail_msg: >-
       antarest_http_port is {{ antarest_http_port }} and
       antarest_tls_provider is letsencrypt: the http-01 challenge is always
-      fetched on port 80, so no certificate can be issued. Publish the stack on
-      80 (a reverse proxy in front can still forward from anywhere), or use
-      antarest_tls_provider `manual` with a certificate obtained elsewhere.
+      fetched on port 80, so no certificate can be issued. Publish the front
+      door on 80 (a reverse proxy in front can still forward from anywhere), or
+      use antarest_tls_provider `manual` with a certificate obtained elsewhere.
     quiet: true
   when: antarest_tls_provider == 'letsencrypt'
 
-# The rendered configuration is derived from the project file, so a change on
-# their side would otherwise be silently dropped: the mount points at ours.
-# A warning rather than a failure, since a reformatting is not a reason to stop
-# a deployment.
-- name: Read the nginx configuration shipped by the project
-  ansible.builtin.stat:
-    path: "{{ antarest_dir }}/resources/deploy/nginx.conf"
-    checksum_algorithm: sha1
-  register: antarest_nginx_upstream
-
-- name: Warn when the project changed its nginx configuration
-  ansible.builtin.debug:
-    msg: >-
-      {{ antarest_dir }}/resources/deploy/nginx.conf has checksum
-      {{ antarest_nginx_upstream.stat.checksum }}, not the
-      {{ antarest_nginx_upstream_sha1 }} the TLS template was derived from.
-      With TLS on, that file is not mounted any more: compare it to
-      roles/antares_web/templates/nginx.conf.j2, carry over what changed, and
-      update antarest_nginx_upstream_sha1.
-  when:
-    - antarest_nginx_upstream.stat.exists | default(false)
-    - antarest_nginx_upstream.stat.checksum != antarest_nginx_upstream_sha1
-
-# Both Let's Encrypt directories have to exist before nginx starts, and neither
-# one does on the run that turns TLS on: /etc/letsencrypt is created by the
-# certbot package, which is only installed once the stack is up (certbot.yml),
-# and the webroot belongs to this deployment alone. The nginx container mounts
-# both, and podman refuses a bind mount whose source is missing rather than
-# creating it:
+# Both Let's Encrypt directories have to exist before the container starts, and
+# neither one does on the run that turns TLS on: /etc/letsencrypt is created by
+# the certbot package, which is only installed once the front door is up
+# (certbot.yml), and the webroot belongs to this deployment alone. The
+# container mounts both, and podman refuses a bind mount whose source is
+# missing rather than creating it:
 #
 #   Error: statfs /etc/letsencrypt: no such file or directory
 #
 # The unit then fails with status=125, the container is never up to answer the
-# challenge, and the run dies waiting for the interface without ever reaching
+# challenge, and the run dies waiting for the port without ever reaching
 # certbot. 0755 is the mode the certbot package ships; what it puts underneath
 # (live/, archive/, 0700) is its own business and is left alone.
 - name: Create the TLS directories
@@ -88,7 +65,7 @@
 # ---------------------------------------------------------------------------
 #  SELinux and the Let's Encrypt tree
 #
-#  The nginx container mounts /etc/letsencrypt, and the `z` flag on that mount
+#  The front door mounts /etc/letsencrypt, and the `z` flag on that mount
 #  relabels it container_file_t when the container starts. That is enough for
 #  the files that are there at the time, and not enough afterwards: every
 #  renewal writes new files under archive/, the policy gives them cert_t, and
@@ -106,7 +83,7 @@
   check_mode: false
   when: antarest_tls_selinux | bool
 
-- name: Record the SELinux context the nginx container needs on the certificates
+- name: Record the SELinux context the front door needs on the certificates
   ansible.builtin.command: >-
     semanage fcontext -a -t container_file_t '/etc/letsencrypt(/.*)?'
   register: antarest_tls_fcontext_added
@@ -179,10 +156,10 @@
 
 # The knob the templates read. Distinct from antarest_tls_enabled on purpose:
 # on the very first run with letsencrypt there is no certificate yet, nginx
-# would refuse to start with `cannot load certificate`, so the stack comes up
-# on plain http, certbot answers its challenge through it, and certbot.yml
-# turns this on and reloads the configuration.
-- name: Record whether nginx can serve TLS now
+# would refuse to start with `cannot load certificate`, so the front door comes
+# up on plain http, certbot answers its challenge through it, and certbot.yml
+# turns this on and re-renders the configuration.
+- name: Record whether the front door can serve TLS now
   ansible.builtin.set_fact:
     antarest_tls_active: >-
       {{ antarest_tls_cert_stat.stat.exists and antarest_tls_key_stat.stat.exists }}

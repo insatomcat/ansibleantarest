@@ -1,0 +1,71 @@
+---
+# Same reasoning as roles/antares_web/tasks/service.yml, for the one unit this
+# role owns: the generator is what systemd runs on reload, so a malformed unit
+# is caught here rather than as a service that silently does not exist.
+- name: Validate the quadlet units
+  ansible.builtin.command: /usr/lib/systemd/system-generators/podman-system-generator -dryrun
+  register: antares_edge_quadlet_check
+  changed_when: false
+
+- name: Check the front door service was generated
+  ansible.builtin.assert:
+    that:
+      - "'---' ~ antares_edge_container ~ '.service---' in antares_edge_quadlet_check.stdout"
+    fail_msg: >-
+      The quadlet generator did not produce {{ antares_edge_container }}.service.
+      Units present in /etc/containers/systemd:
+      {{ antares_edge_quadlet_check.stdout | regex_findall('---(.+?)---') | join(', ') }}
+    quiet: true
+
+# A container that exhausted its start budget stays `failed` and systemd
+# refuses to start it again until StartLimitIntervalSec has run, so the run
+# that fixes the cause would fail on the previous run's verdict. `is-failed` is
+# asked first because reset-failed on a unit systemd never loaded exits 1,
+# which is the normal state of a first deployment.
+- name: Look for a failure a previous run left
+  ansible.builtin.command: "systemctl is-failed {{ antares_edge_container }}.service"
+  register: antares_edge_failed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Clear it
+  ansible.builtin.command: "systemctl reset-failed {{ antares_edge_container }}.service"
+  when: antares_edge_failed.stdout == 'failed'
+  changed_when: true
+
+# Started, not enabled: this is a unit the quadlet generator produces, and
+# `systemctl enable` refuses a generated unit. What makes it come back after a
+# reboot is the WantedBy= inside the .container file, which quadlet turns into
+# the wants of antares-web.target - and that target is a real unit file, which
+# antares_web does enable.
+- name: Start the front door
+  ansible.builtin.systemd:
+    name: "{{ antares_edge_container }}.service"
+    state: started
+    daemon_reload: true
+
+- name: Apply the pending restarts now
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the front door to answer
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ antarest_https_port if antarest_tls_active | bool else antarest_http_port }}"
+    timeout: 120
+
+# Through the front door rather than on the loopback port antares_web already
+# checked: what is under test here is the routing. Without certificate
+# validation on purpose, the request goes to 127.0.0.1 and the certificate is
+# issued for antarest_tls_domain, so the name could not match.
+- name: Check Antares-Web answers through the front door
+  ansible.builtin.uri:
+    url: >-
+      {{ 'https://127.0.0.1:' ~ antarest_https_port if antarest_tls_active | bool
+         else 'http://127.0.0.1:' ~ antarest_http_port }}/api/health
+    validate_certs: false
+    status_code: [200]
+  register: antares_edge_health
+  retries: 12
+  delay: 5
+  until: antares_edge_health.status is defined and antares_edge_health.status == 200

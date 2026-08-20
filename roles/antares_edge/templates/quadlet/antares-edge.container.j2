@@ -1,0 +1,44 @@
+{{ ansible_managed | comment }}
+#
+# The front door. It holds the ports of the machine
+# ({{ antarest_http_port }}{{ ' and ' ~ antarest_https_port if antarest_tls_active | bool else '' }}) and proxies to what the deployment publishes on the
+# loopback.
+#
+# Network=host, which is unusual here and deliberate. The nginx inside listens
+# on the ports of the machine itself, so nothing is DNATed and $remote_addr is
+# the real client address - which is what the fail2ban jail on the login form
+# reads. And since it proxies to 127.0.0.1, it needs no name resolution at all:
+# no `Requires=` on anything it serves, and no start refused because something
+# behind is down.
+
+[Unit]
+Description=Antares front door
+PartOf={{ antarest_service_name }}.target
+# Start budget for the Restart= below: five attempts, then the unit gives up.
+# Unlike antares-nginx, which has none, this one cannot fail because something
+# it proxies to is missing: a failure here is a configuration nginx refuses, or
+# a port already taken, and neither gets better by retrying forever.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Container]
+ContainerName={{ antares_edge_container }}
+Image={{ antares_edge_image }}
+Network=host
+{% for volume in antares_edge_volumes %}
+Volume={{ volume }}
+{% endfor %}
+# The access log is what the fail2ban jail watching the login endpoint reads,
+# through journalctl CONTAINER_NAME={{ antares_edge_container }}. journald is
+# already podman's default here, but the jail stops seeing anything at all if
+# that default ever moves, so it is pinned rather than assumed.
+LogDriver=journald
+
+[Service]
+# on-failure, not always: a container that keeps dying exhausts the budget in
+# [Unit] and stays `failed` instead of looping out of sight. See the README.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy={{ antarest_service_name }}.target

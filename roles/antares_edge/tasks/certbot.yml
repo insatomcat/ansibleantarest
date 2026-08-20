@@ -1,8 +1,8 @@
 ---
-# Runs after the stack is up, because the http-01 challenge is answered by the
-# very nginx the stack runs: certbot drops a file under the webroot, the ACME
-# server fetches http://{{ antarest_tls_domain }}/.well-known/acme-challenge/...
-# and only then is there a certificate for nginx to serve.
+# Runs after the front door is up, because the http-01 challenge is answered by
+# it: certbot drops a file under the webroot, the ACME server fetches
+# http://{{ antarest_tls_domain }}/.well-known/acme-challenge/... and only then
+# is there a certificate to serve.
 #
 # This is also why the webroot method is used rather than --standalone: renewal
 # needs no free port 80 and therefore no downtime, and the timer shipped by the
@@ -32,13 +32,21 @@
 
 # A renewed certificate is a new file on disk and nothing more: nginx keeps
 # serving the one it read at startup until it is told otherwise.
-- name: Deploy the hook reloading nginx after a renewal
+- name: Deploy the hook reloading the front door after a renewal
   ansible.builtin.template:
-    src: certbot-reload-nginx.sh.j2
-    dest: /etc/letsencrypt/renewal-hooks/deploy/10-reload-antares-nginx.sh
+    src: certbot-reload-edge.sh.j2
+    dest: /etc/letsencrypt/renewal-hooks/deploy/10-reload-antares-edge.sh
     owner: root
     group: root
     mode: "0755"
+
+# Left behind on machines deployed while the Antares-Web nginx was the one
+# terminating TLS. It reloads a container that no longer holds a certificate,
+# so a renewal would run it, see it succeed and never reload the front door.
+- name: Remove the hook of the nginx that used to terminate TLS
+  ansible.builtin.file:
+    path: /etc/letsencrypt/renewal-hooks/deploy/10-reload-antares-nginx.sh
+    state: absent
 
 - name: Check the ACME challenge is served
   ansible.builtin.uri:
@@ -69,9 +77,9 @@
     antarest_tls_active: true
   when: antarest_certbot is changed
 
-# Re-renders the configuration (the port 443 server block appears) and the
-# quadlet unit (port 443 gets published), then the handler restarts the stack.
-- name: Enable TLS in nginx
+# Re-renders the configuration (the port 443 server block appears, and port 80
+# turns into a redirect) and the unit, then the handler restarts the front door.
+- name: Enable TLS in the front door
   ansible.builtin.include_tasks: nginx.yml
   when: antarest_certbot is changed
 

@@ -127,7 +127,10 @@
 #
 #  The antares_web role clones the repository, then pulls in the
 #  antares_solver role for the local launcher binaries, builds the front-end
-#  and the backend image, renders the configuration and starts the stack.
+#  and the backend image, renders the configuration and starts the stack. It
+#  publishes on the loopback; antares_edge is what holds the ports of the
+#  machine, and comes last because the ACME challenge that gets its certificate
+#  is answered through it, once there is something to serve.
 # ---------------------------------------------------------------------------
 
 - name: Antares-Web server
@@ -137,6 +140,8 @@
   roles:
     - podman
     - antares_web
+    - role: antares_edge
+      tags: edge
 
 - name: Authorise Antares-Web to submit jobs on the Slurm front-end
   hosts: slurm_frontend

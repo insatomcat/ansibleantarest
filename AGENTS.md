@@ -18,6 +18,7 @@ Everything is written in English, README included. Keep it that way.
 | What a RHEL target gets on top (CRB, EPEL, OpenHPC, SELinux) | What a RHEL-compatible target needs on top |
 | Every tunable and its default | Main variables |
 | Where files land on the web server | Antares-Web server directory layout |
+| The one container holding the ports of the machine | The front door |
 | Putting the studies and the database on a block device | Putting the state on its own volume |
 | Quadlet units, podman version floor | Containers: podman and quadlet |
 | celery-beat, celery-worker, the collectors | Background maintenance tasks |
@@ -55,7 +56,8 @@ Everything is written in English, README included. Keep it that way.
 | `common` | Distribution check, repositories, base packages, the `antares` account (UID/GID guard), `/etc/hosts`, time sync |
 | `hardening` | nftables, fail2ban, sshd, unattended updates, persistent journal, firewalld handling |
 | `podman` | podman install plus the version floor quadlet needs |
-| `antares_web` | The whole web stack: checkout, frontend build, derived image, config, quadlet units, nginx, TLS |
+| `antares_web` | The whole web stack: checkout, frontend build, derived image, config, quadlet units, nginx |
+| `antares_edge` | The front door: the one container holding the ports of the machine, TLS, certbot, and the routing to everything published on the loopback |
 | `antares_build` | Runs only on the builder: turns what `antares_web` built into archives |
 | `antares_solver` | Installs solver tarballs. Called twice, with `antares_solver_dest` set by the caller |
 | `antares_xpansion` | Package in the shared `/home`, MPI runtime on every node |
@@ -68,9 +70,10 @@ Everything is written in English, README included. Keep it that way.
 | `slurm_launch_script` | `launchAntares.sh` in the shared `/home` |
 
 `roles/antares_web/tasks/` is split by concern (`data_volume`, `checkout`,
-`build_frontend`, `build_image`, `config`, `service`, `nginx`, `tls`,
-`certbot`, `migrate`, `ssh_key`, `load_artifacts`, `patch_frontend`). Go
-straight to the file whose name matches the question.
+`build_frontend`, `build_image`, `config`, `service`, `nginx`, `migrate`,
+`ssh_key`, `load_artifacts`, `patch_frontend`). Go straight to the file whose
+name matches the question. TLS and certbot are not there any more: they moved
+to `roles/antares_edge/` with the front door.
 
 ## Conventions
 
