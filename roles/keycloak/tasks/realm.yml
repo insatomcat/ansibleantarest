@@ -14,7 +14,7 @@
 # No notify: a realm is imported at the first start and skipped ever after, so
 # restarting Keycloak because this file changed would claim something happened
 # when nothing did. Replaying a realm change is a `kc.sh import --override`,
-# see the README.
+# see docs/authentication.md.
 - name: Render the realm
   ansible.builtin.template:
     src: realm.json.j2

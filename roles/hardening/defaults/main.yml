@@ -167,8 +167,9 @@ hardening_ssh_disable_password_auth: true
 hardening_ssh_max_auth_tries: 4
 hardening_ssh_login_grace_time: 30
 hardening_ssh_x11_forwarding: false
-# Left on: the README documents reaching adminer through `ssh -L`, and closing
-# this buys nothing against someone who already has an account and a shell.
+# Left on: the documentation reaches adminer and the Keycloak console through
+# `ssh -L`, and closing this buys nothing against someone who already has an
+# account and a shell.
 hardening_ssh_allow_tcp_forwarding: true
 
 # Ports sshd listens on. Read from `sshd -T` at run time, which is the only

@@ -12,8 +12,8 @@
 #
 #  Why that shape exists at all: Antares-Web's local launcher ignores the
 #  Xpansion mode, so a deployment with `slurm_enabled: false` cannot run an
-#  investment optimisation - see "Known limitations" in the README. A single
-#  machine that is also its own cluster gets the Slurm launcher, and with it
+#  investment optimisation - see docs/limitations.md. A single machine that
+#  is also its own cluster gets the Slurm launcher, and with it
 #  Xpansion, on the computing capacity that machine happens to have.
 #
 #  Nothing in the roles is specific to it. `slurm_frontend` already tolerates

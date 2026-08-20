@@ -399,7 +399,8 @@ keycloak_client_id: antares-auth
 # The account Keycloak bootstraps from it is a temporary one, which its console
 # says on every page until it is replaced. The playbook replaces it, right
 # after the first start, with a permanent account of the same name and the same
-# password - keycloak_admin_permanent in the role defaults, and the README.
+# password - keycloak_admin_permanent in the role defaults, and
+# docs/authentication.md.
 keycloak_admin_user: admin
 keycloak_admin_password: "admin"
 keycloak_db_password: "changeme-keycloak-db"
