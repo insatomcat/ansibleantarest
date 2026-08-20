@@ -25,7 +25,7 @@
 #
 # The old docker named volume is deliberately NOT removed: it holds the
 # accounting history. Migrating a live database means dumping it and restoring
-# it into the podman volume, see the README.
+# it into the podman volume, see docs/limitations.md.
 - name: Stop the pre-quadlet compose unit if it is still there
   ansible.builtin.systemd:
     name: slurmdb

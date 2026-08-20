@@ -2,34 +2,39 @@
 
 Ansible repository that deploys Antares-Web, with an optional Slurm cluster
 next to it. There is no application code here: playbooks, roles, Jinja
-templates, one CI workflow and a long README.
+templates, one CI workflow and the documentation in `docs/`.
 
-Everything is written in English, README included. Keep it that way.
+Everything is written in English, documentation included. Keep it that way.
 
 ## Where to look, instead of grepping
 
-`README.md` is the reference and is kept in sync with the code. It is long
-(~680 lines), so open the section you need rather than the whole file, with
-`grep -n '^##' README.md` then `sed -n 'A,Bp'`:
+`README.md` is the entry point (~135 lines: what this deploys, quick start,
+example inventories, secrets, tags) and `docs/` holds the reference, one page
+per area. Both are kept in sync with the code. Open the page you need rather
+than grepping the tree:
 
-| Question | Section |
+| Question | Page |
 |---|---|
-| Which distributions are claimed, and why not the others | Supported distributions |
-| What a RHEL target gets on top (CRB, EPEL, OpenHPC, SELinux) | What a RHEL-compatible target needs on top |
-| Every tunable and its default | Main variables |
-| Where files land on the web server | Antares-Web server directory layout |
-| The one container holding the ports of the machine | The front door |
-| Keycloak, external accounts, what `external_auth` is | Authentication |
-| Putting the studies and the database on a block device | Putting the state on its own volume |
-| Quadlet units, podman version floor | Containers: podman and quadlet |
-| celery-beat, celery-worker, the collectors | Background maintenance tasks |
-| nftables, fail2ban, sshd, unattended updates, journal | Hardening |
-| build once, deploy with `archive` | Build once, deploy everywhere |
-| How to re-run only one part | Useful tags |
-| What `verify.yml` proves | Checking a deployment |
-| One machine that is also its own cluster | The cluster on the web machine itself |
-| Where this diverges from the reference PDF | Differences from the PDF |
-| Postgres major upgrades | Major database versions |
+| Which distributions are claimed and why not the others, what a RHEL target gets on top (CRB, EPEL, OpenHPC, SELinux), the `antares` UID/GID | `docs/requirements.md` |
+| Which solver build lands where, Antares-Xpansion and what it costs | `docs/solvers.md` |
+| Application settings, where files land on the web server, study workspaces, putting the state on a block device | `docs/antares-web.md` |
+| The one container holding the ports of the machine, TLS, certbot, extra routes | `docs/edge-and-tls.md` |
+| Keycloak, external accounts, what `external_auth` is | `docs/authentication.md` |
+| Quadlet units, restart policy, podman version floor | `docs/containers.md` |
+| celery-beat, celery-worker, the collectors | `docs/background-tasks.md` |
+| Cluster variables, one machine that is also its own cluster, the launch script | `docs/slurm.md` |
+| nftables, fail2ban, sshd, unattended updates, journal | `docs/hardening.md` |
+| Build once, deploy with `archive` | `docs/build-and-deploy.md` |
+| What `verify.yml` proves, changing the admin password, Postgres major upgrades | `docs/operations.md` |
+| Known limitations, where this diverges from the reference PDF | `docs/limitations.md` |
+| How to re-run only one part | `README.md`, "Useful tags" |
+
+A variable is documented on the `docs/` page of its area. What a *role* does,
+what it assumes and what it leaves on the machine is in `roles/<role>/README.md`
+for the eight roles that have one: `common`, `hardening`, `podman`,
+`antares_web`, `antares_edge`, `antares_auth`, `keycloak`, `slurm_frontend`.
+The others are small enough to read, and their `defaults/main.yml` is
+commented.
 
 ## Entry points
 
@@ -88,8 +93,10 @@ to `roles/antares_edge/` with the front door.
   the reason its diffs are readable. Match the density of the file you touch.
 - Defaults go in `roles/*/defaults/main.yml`, computed values in
   `roles/*/vars/main.yml`, fleet-wide knobs in `group_vars/all.yml`.
-- **Any new variable is documented in the README's "Main variables" section in
-  the same change.** The README is the contract with the operator.
+- **Any new variable is documented on the `docs/` page of its area in the same
+  change**, next to the prose that explains it. That documentation is the
+  contract with the operator. Do not restate a default in two places: a role
+  README says what the role does, not what its knobs are worth.
 - Preconditions are `assert` tasks with a `fail_msg` that names the variable to
   set. Fail early and by name, rather than later on a missing file.
 - Commit subjects: imperative, sentence case, under ~72 chars, no scope prefix.
