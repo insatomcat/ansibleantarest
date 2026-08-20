@@ -6,6 +6,9 @@
 # name, and a generic `nginx` container name collides with anything else the
 # machine may already run. It keeps the default root user, since it binds port
 # 80 inside the container.
+#
+# Published on the loopback alone: what the outside reaches is the front door
+# of the antares_edge role, which terminates TLS and proxies here.
 
 [Unit]
 Description=Antares-Web nginx
@@ -34,17 +37,15 @@ StartLimitIntervalSec=0
 ContainerName={{ antarest_nginx_container }}
 Image={{ antarest_nginx_image }}
 Network={{ antarest_service_name }}.network
-PublishPort={{ antarest_http_port }}:80
-{% if antarest_tls_active | bool %}
-PublishPort={{ antarest_https_port }}:443
-{% endif %}
+PublishPort={{ antarest_nginx_bind }}:{{ antarest_nginx_port }}:80
 {% for volume in antarest_nginx_volumes %}
 Volume={{ volume }}
 {% endfor %}
-# The access log is what the fail2ban jail watching the login endpoint reads,
-# through journalctl CONTAINER_NAME={{ antarest_nginx_container }}. journald is
-# already podman's default here, but the jail stops seeing anything at all if
-# that default ever moves, so it is pinned rather than assumed.
+# journald is already podman's default here; pinned rather than assumed so that
+# `journalctl CONTAINER_NAME={{ antarest_nginx_container }}` keeps answering
+# whatever that default becomes. The failed logins the fail2ban jail counts are
+# read from the front door, which is the only one that sees the real client
+# address.
 LogDriver=journald
 
 [Service]

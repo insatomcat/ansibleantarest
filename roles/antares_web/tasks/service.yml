@@ -79,23 +79,18 @@
 - name: Apply the pending restarts now
   ansible.builtin.meta: flush_handlers
 
+# On the loopback port this stack publishes, not on the port of the machine:
+# what is under test here is the stack itself. The front door and the routing
+# to it are checked by the antares_edge role, which runs next.
 - name: Wait for the web interface to answer
   ansible.builtin.wait_for:
     host: 127.0.0.1
-    port: "{{ antarest_https_port if antarest_tls_active | bool else antarest_http_port }}"
+    port: "{{ antarest_nginx_port }}"
     timeout: 300
 
-# Over https once there is a certificate, since port 80 then only answers a
-# redirect. Without certificate validation on purpose: the request goes to
-# 127.0.0.1 and the certificate is issued for antarest_tls_domain, so the name
-# could not match; what is being checked here is that the stack answers, not
-# the certificate.
 - name: Check the API is up
   ansible.builtin.uri:
-    url: >-
-      {{ 'https://127.0.0.1:' ~ antarest_https_port if antarest_tls_active | bool
-         else 'http://127.0.0.1:' ~ antarest_http_port }}/api/health
-    validate_certs: false
+    url: "http://127.0.0.1:{{ antarest_nginx_port }}/api/health"
     status_code: [200]
   register: antarest_health
   retries: 30

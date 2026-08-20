@@ -123,9 +123,9 @@
   register: antarest_quadlet
   notify: Restart Antares-Web
 
-# nginx has a file of its own because the run that obtains a certificate
-# renders it twice, see tasks/nginx.yml. Here it only adds the rendered
-# configuration; the unit above is written again identically.
+# nginx has a file of its own: its configuration is derived from the one the
+# project ships, and that file is compared to the checksum ours came from
+# first. The unit above is written again identically.
 - name: Deploy the nginx configuration and its unit
   ansible.builtin.include_tasks: nginx.yml
 

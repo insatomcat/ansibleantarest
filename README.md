@@ -127,7 +127,7 @@ Everything below is done by the playbook. It is listed because it changes the ma
 | **Slurm** | No EL repository ships Slurm, neither the base repositories nor EPEL. It comes from **OpenHPC** instead (`slurm_repo: openhpc`, release rpm in `slurm_openhpc_release`). Package names carry an `-ohpc` suffix; `/etc/slurm`, the systemd units and the `slurm` account are where they are everywhere else. Set `slurm_repo: distro` if you install Slurm yourself. **One OpenHPC series per major**, because upstream publishes no tree twice: **OpenHPC 3 for EL 9** (Slurm 25.11), **OpenHPC 4 for EL 10** (Slurm 25.05, so the newer major gets the older Slurm). The major of the machine picks the release rpm, and a major OpenHPC publishes nothing for is refused by name rather than left to fail on a missing package. |
 | **The `epel-release` dependency** | The OpenHPC release rpm requires the `epel-release` capability. `oracle-epel-release-el9` provides it, `oracle-epel-release-el10` does not, and Oracle's EPEL 10 mirror does not carry Fedora's `epel-release` either, so on **Oracle Linux 10** `dnf` refuses the release rpm with `nothing provides epel-release` although EPEL is installed and enabled. The playbook asks whether anything on the machine or in its repositories provides that capability, and installs the release rpm with `rpm -Uvh --nodeps` when nothing does. The dependency is nominal there: on EL 10 the whole Slurm set resolves from OpenHPC plus `baseos` and `appstream`, `munge` and `freeipmi` included, and nothing comes from EPEL. The day Oracle puts the `Provides` back, the run goes back to `dnf` on its own. |
 | **Solver binaries** | The Ubuntu 22.04 build of Antares Simulator is linked against glibc 2.35 and does not start on EL 9, which has 2.34. `antares_solver_os` therefore follows the family and picks the project's **Oracle Linux 8** build there, which runs on EL 9 and EL 10 alike. |
-| **SELinux** | Left enforcing. Container bind mounts carry the `z` relabelling flag (`container_volume_opts`), the booleans `nfs_export_all_rw` and `use_nfs_home_dirs` are set on the NFS server and the clients, and the Let's Encrypt tree gets a `semanage fcontext` entry so that a renewal does not silently produce a certificate the nginx container cannot read. |
+| **SELinux** | Left enforcing. Container bind mounts carry the `z` relabelling flag (`container_volume_opts`), the booleans `nfs_export_all_rw` and `use_nfs_home_dirs` are set on the NFS server and the clients, and the Let's Encrypt tree gets a `semanage fcontext` entry so that a renewal does not silently produce a certificate the front door cannot read. |
 | **firewalld** | Enabled out of the box on the RHEL rebuilds, SSH only. The default is no host firewall (the cloud security group is enough), so the role masks it. Turn `hardening_firewall_enabled` on for the nftables table instead. Set `hardening_manage_firewalld: false` to leave firewalld alone; the podman role then puts the `podman*` bridges in `trusted`, without which aardvark-dns and `PublishPort` are dropped. That covers what the containers publish and nothing else: the host services the machines use between themselves (NFS 2049, Slurm 6817-6819) are then yours to open in firewalld. |
 | **Unattended updates** | `dnf-automatic` with `upgrade_type = security` instead of `unattended-upgrades`, with the same policy: security updates only, no automatic reboot. |
 
@@ -342,9 +342,38 @@ Two workspaces may not share a directory, and `dir` has to be a plain directory 
 
 A directory holding a file named `AW_NO_SCAN` is skipped by the scan, and a study only reaches the interface once the watcher has run for real, see the maintenance tasks below.
 
+### The front door
+
+One nginx holds the ports of the machine and proxies to everything the deployment publishes on the loopback. It is the `antares_edge` role, and it is a separate container from the one that serves Antares-Web on purpose.
+
+```yaml
+antarest_http_port: 80        # what the front door listens on
+antarest_https_port: 443
+antarest_nginx_bind: 127.0.0.1  # where Antares-Web is published for it
+antarest_nginx_port: 8081
+antares_edge_image: "docker.io/library/nginx:1.30"
+```
+
+The Antares-Web nginx cannot be that front door. It declares `Requires=antarest.service` and resolves `antarest` on the podman network when its configuration is parsed, so it is down for exactly as long as the backend is, by design (see "Containers: podman and quadlet"). Anything else served from it would be down with it, which for an identity provider is the wrong failure. The front door only ever proxies to addresses, never to names, so nothing it forwards to has to exist for it to start: what is down answers 502 and the rest keeps serving.
+
+That is also why it runs in the host network namespace rather than on the podman network. On the network it would proxy to container names, nginx would resolve them at parse time, and the dependency it exists to break would be back. Two consequences worth knowing: `antarest_http_port` is the port its nginx literally listens on, and `$remote_addr` is the real client address, with no DNAT in between, which is what the fail2ban jail on the login form reads.
+
+Everything else on the machine is published on `127.0.0.1` alone, so a port opened by mistake in a security group exposes nothing. `verify.yml` checks that from the outside.
+
+To put something else behind the same certificate:
+
+```yaml
+antares_edge_extra_routes:
+  - path: /grafana/
+    upstream: 127.0.0.1:8083
+    name: Grafana
+```
+
+Longest prefix wins, whatever the order. `antares_edge_client_max_body_size` (1G, the value the Antares-Web nginx uses for study imports) and `antares_edge_proxy_read_timeout` (1200 s) apply to every route; the rest of the plumbing is in `roles/antares_edge/defaults/main.yml`.
+
 ### TLS
 
-There is already an nginx in the stack, so that is the one that terminates TLS: no second reverse proxy to install and no port to move. Switching it on makes the `antares-nginx` container listen on 443 as well and, by default, redirect http to it.
+TLS is terminated by the front door, the one container that holds a port of the machine (see "The front door" below). Switching it on makes it listen on `antarest_https_port` as well and, by default, redirect http to it. Everything it proxies to is served over https without having to know about it.
 
 ```yaml
 antarest_tls_enabled: true
@@ -355,13 +384,13 @@ antarest_tls_email: "ops@example.org"
 
 | Provider | What happens |
 |---|---|
-| `letsencrypt` | certbot obtains the certificate over http-01, answered by the stack's own nginx (webroot method). Renewal needs no downtime and the `certbot.timer` shipped with the package handles it. |
+| `letsencrypt` | certbot obtains the certificate over http-01, answered by the front door itself (webroot method). Renewal needs no downtime and the `certbot.timer` shipped with the package handles it. |
 | `selfsigned`  | A certificate generated on the machine, valid ten years. Encrypts the traffic and makes every browser complain. For an internal network, or to test the plumbing without burning ACME rate limits. |
 | `manual`      | A certificate you put on the machine yourself, for instance one issued by a company CA. Point `antarest_tls_certificate` and `antarest_tls_certificate_key` at the full chain and the private key. |
 
-Let's Encrypt needs `antarest_tls_domain` to resolve to this machine and port 80 to be reachable from the internet, since that is where the challenge is fetched (the http-01 challenge has no port to negotiate, hence the playbook refusing to try if `antarest_http_port` is not 80). The first run brings the stack up on plain http, obtains the certificate through it and reloads nginx with TLS on; nothing has to be run twice. Use `antarest_tls_staging: true` while debugging, then remove the certificate (or `certbot renew --force-renewal`) to get a real one, because the playbook only asks for a certificate when there is none.
+Let's Encrypt needs `antarest_tls_domain` to resolve to this machine and port 80 to be reachable from the internet, since that is where the challenge is fetched (the http-01 challenge has no port to negotiate, hence the playbook refusing to try if `antarest_http_port` is not 80). The first run brings the front door up on plain http, obtains the certificate through it and reloads it with TLS on; nothing has to be run twice. Use `antarest_tls_staging: true` while debugging, then remove the certificate (or `certbot renew --force-renewal`) to get a real one, because the playbook only asks for a certificate when there is none.
 
-With TLS off, the `resources/deploy/nginx.conf` of the project is mounted unchanged, exactly as before. With TLS on, a rendered configuration is mounted instead: the same file plus the port 443 server, the redirect and an HSTS header (`antarest_tls_hsts_max_age`, 0 to remove it). The deployment compares the project file to the checksum ours was derived from and says so if upstream changed it.
+The TLS settings keep the `antarest_` prefix they were deployed under when the Antares-Web nginx still terminated TLS. They describe the TLS of the deployment rather than of one container, and renaming them would have turned TLS off, silently, on every inventory that sets them. They live in `roles/antares_edge/defaults/main.yml`.
 
 ### Login label for the username field
 
@@ -461,9 +490,10 @@ Everything after the run still happens before that exit: the post-processing, th
 /etc/containers/systemd/     quadlet container units
 /etc/systemd/system/antares-web.target
 
+/etc/antares-web/edge/       front door configuration
 /etc/antares-web/tls/        self-signed or hand-copied certificate
 /etc/letsencrypt/            certbot state, when that provider is used
-/var/www/certbot/            ACME challenge webroot, served by nginx
+/var/www/certbot/            ACME challenge webroot, served by the front door
 ```
 
 Configuration and data live outside the git checkout: changing `antarest_version` and re-running the playbook updates the application without touching the data. `data/` is the one directory worth putting on a volume of its own, see "Putting the state on its own volume" above.
@@ -480,6 +510,8 @@ That covers nginx failing. It does not cover nginx being *stopped*, which is wha
 
 The price is that `systemctl stop antares-nginx` does not hold while the backend runs, the front end is back within seconds. Stop the target, or the backend, to take it down. `Upholds=` is deliberately not on the target and names nginx alone: every other container of the stack keeps its budget and its right to stay `failed` in plain sight.
 
+`antares-edge` is the one container to which none of this applies, and that is what it is for: it proxies to addresses on the loopback rather than to names on the podman network, so it has nothing to resolve at startup and nothing to require. It keeps the ordinary budget: a failure there is a configuration nginx refuses or a port already taken, and neither gets better by retrying.
+
 The retries are there for the transient case, and the boot is one. `Requires=`/`After=postgresql.service` is honoured by systemd, but readiness for a container unit comes from conmon: the unit is "started" when the container process is up, not when postgres accepts connections on 5432. `antarest` can therefore start too early after a host reboot, fail, and be restarted into a working stack ten seconds later. (Making `After=` mean what it looks like would take a `HealthCmd=` on postgresql plus `Notify=healthy`, which is podman 5.0 and later: EL 9 has it, Ubuntu 24.04 ships 4.9. Family-dependent units are what the rest of this playbook avoids, hence the retry.)
 
 Podman runs rootful: this matters because rootless podman remaps container UIDs via `/etc/subuid`. A container running as `antares_uid` would not produce host files owned by `antares_uid` when rootless, breaking UID coherence with the NFS `/home`.
@@ -495,7 +527,7 @@ podman ps
 journalctl -u antarest.service -f
 ```
 
-On the web server the generated services are `antarest`, `antarest-celery-beat`, `antarest-celery-worker`, `postgresql`, `redis`, `antares-nginx` and `antares-web-network`. On the Slurm frontend, the accounting DB follows the same pattern under `slurmdb.target` (`slurmdb-mariadb`, and `slurmdb-adminer` if enabled).
+On the web server the generated services are `antarest`, `antarest-celery-beat`, `antarest-celery-worker`, `postgresql`, `redis`, `antares-nginx`, `antares-edge` and `antares-web-network`. On the Slurm frontend, the accounting DB follows the same pattern under `slurmdb.target` (`slurmdb-mariadb`, and `slurmdb-adminer` if enabled).
 
 Three container names are significant (they become DNS names on the podman network). Renaming them silently breaks the stack:
 
@@ -677,6 +709,7 @@ Without a registry, each new version means `N × size` copies with no layer dedu
 
 ```bash
 ansible-playbook site.yml --tags antares_web     # redeploy application
+ansible-playbook site.yml --tags edge            # front door only: TLS, routes
 ansible-playbook site.yml --tags slurm           # cluster only
 ansible-playbook site.yml --tags solver          # (re)install solvers
 ansible-playbook site.yml --tags xpansion        # (re)install Antares-Xpansion (needs antares_xpansion_enabled)
@@ -697,7 +730,7 @@ ansible-playbook verify.yml --tags firewall      # only the rulesets
 
 It changes nothing beyond one marker file in the shared `/home`, which the last play removes, so it is safe against a production deployment. Each part skips itself where it does not apply (`slurm_enabled`, `hardening_firewall_enabled`, `hardening_journal_persistent`):
 
-- **Antares-Web.** Every unit of the stack is `active`, the backend answers `/api/health`, nginx serves the built front-end and routes `/api/` to the backend, all of it asked from the controller so the answer crosses the firewall and the published port rather than a loopback. When `antarest_data_device` is set, the data directory is checked to really be that volume's mount point and to have its entry in `/etc/fstab`: a stack that answers proves nothing about *where* it is writing, and a volume that did not come back leaves the units on the empty mount point of the boot disk, with an empty database behind a working interface. With the variable empty the state belongs on the boot disk and the check does not apply.
+- **Antares-Web.** Every unit of the stack is `active`, the backend answers `/api/health`, nginx serves the built front-end and routes `/api/` to the backend, all of it asked from the controller through the front door, so the answer crosses the firewall and the whole proxy chain rather than a loopback. The other way round, the ports everything behind the front door is published on are checked to be reachable from the machine alone. When `antarest_data_device` is set, the data directory is checked to really be that volume's mount point and to have its entry in `/etc/fstab`: a stack that answers proves nothing about *where* it is writing, and a volume that did not come back leaves the units on the empty mount point of the boot disk, with an empty database behind a working interface. With the variable empty the state belongs on the boot disk and the check does not apply.
 - **The cluster.** `slurmctld` is alive and sees every compute node of the inventory in a healthy state, the cluster is registered in the accounting database, the compute nodes really mount the front-end's `/home` (a marker written on one side and read on the other) and can execute the solvers installed in it, and a job submitted exactly the way the backend submits one - over SSH, with the key generated on the web machine, to the `antares` account of the front-end - runs on a compute node.
 - **The journal.** `journalctl --header` is asked which files journald is actually writing to, and they have to be under `/var/log/journal` with nothing left under `/run/log/journal/<this machine's id>`. The id is half the question, and an EL 9 is what says so: its cloud images ship a committed `/etc/machine-id` which cloud-init resets on the first boot, so journald writes for five seconds under the image's id, is restarted under the new one and flushes that one alone. The runtime file of the first id stays in `/run` until the next reboot, OFFLINE, holding those five seconds. Nothing writes to it, no flush can move it - journald only ever flushes its own id - and it is not a journal the machine is losing. That is the location itself rather than the drop-in that asked for it, which is the point: a machine whose journal is in the `/run` tmpfs loses, at the next reboot, the log of everything that led to it, and every other check in this file is read out of that journal.
 

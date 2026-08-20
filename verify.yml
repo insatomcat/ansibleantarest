@@ -105,7 +105,8 @@
         verify_web_units: >-
           {{ ['antares-web.target', 'postgresql.service', 'redis.service',
               'antarest.service', 'antarest-celery-beat.service',
-              'antarest-celery-worker.service', 'antares-nginx.service']
+              'antarest-celery-worker.service', 'antares-nginx.service',
+              'antares-edge.service']
              + (['antarest-adminer.service'] if antarest_enable_adminer | default(false) | bool else []) }}
 
     - name: Fail when a unit of the stack is not running
@@ -703,14 +704,17 @@
     # the one entry in this list that is never vacuous. The interface ports
     # are in the list of every machine that is not the web server: nothing
     # serves them there, and a ruleset that opened them anyway is a bug worth
-    # catching. So is a database published on 0.0.0.0 - the firewall does not
+    # catching. On the web server the list holds instead what the front door
+    # proxies to, which is published on the loopback and must stay there. So is
+    # a database published on 0.0.0.0 - the firewall does not
     # cover that, since a published container port is DNATed and never
     # traverses the input hook, so the PublishPort of the unit is the only
     # thing standing between MariaDB and the network.
     verify_private_ports: >-
       {{ [5355]
          + ([antarest_http_port | int, antarest_https_port | int]
-            if inventory_hostname not in (groups['antares_web'] | default([])) else [5432, 6379])
+            if inventory_hostname not in (groups['antares_web'] | default([]))
+            else [5432, 6379, antarest_nginx_port | int])
          + ([111, 2049, 6817, 3306] + ([6819] if slurmdbd_enabled | bool else [])
             if slurm_enabled | bool and inventory_hostname in (groups['slurm_frontend'] | default([])) else [])
          + ([111, 2049, 6818]
