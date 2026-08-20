@@ -37,3 +37,13 @@ antares_build_solver_os:
 antares_build_fetch_xpansions: "{{ antares_xpansion_enabled }}"
 antares_build_xpansion_os:
   - "{{ antares_xpansion_os | trim }}"
+
+# The Slurm front-end's images travel in the same artefact set. It is a second
+# machine with no Internet access either, and slurm_frontend loads them from
+# there, so an offline cluster starts its accounting database without ever
+# reaching Docker Hub. Empty when the deployment has no cluster, or no
+# accounting database - and, like the switches above, slurm_enabled and
+# slurmdbd_enabled have to be right where the builder sees them.
+antares_build_slurm_images: >-
+  {{ slurmdbd_thirdparty_images
+     if (slurm_enabled | bool and slurmdbd_enabled | bool) else [] }}

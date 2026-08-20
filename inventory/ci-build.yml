@@ -57,9 +57,11 @@ all:
         - "Ubuntu-22.04"
         - "OracleServer-8.10"
 
-      # Nothing in build.yml touches Slurm, but group_vars/all.yml defaults
-      # it to true and the builder is not a cluster node.
-      slurm_enabled: false
+      # Left at the default of group_vars/all.yml, which is true. The builder
+      # is not a cluster node, but this is also what decides whether the
+      # accounting database's images are archived, and the `slurm` and
+      # `standalone-slurm` jobs deploy from these very artefacts: turning it
+      # off here would leave them with no MariaDB to load.
 
       # ---------------------------------------------------------------
       #  Disk. A GitHub runner has around 20 GB free on / once the

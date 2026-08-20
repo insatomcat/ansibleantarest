@@ -12,6 +12,13 @@
     group: root
     mode: "0750"
 
+# Before the units are written, let alone started: a unit whose image is not
+# loaded pulls from the registry, which is the whole point of not doing this on
+# an offline front-end.
+- name: Load the accounting database images from the archives
+  ansible.builtin.include_tasks: load_artifacts.yml
+  when: antarest_image_source == 'archive'
+
 # The stack used to be a compose file driven by a wrapper systemd unit. Leaving
 # that unit behind would keep a second, competing copy of MariaDB fighting for
 # port 3306.
@@ -97,11 +104,16 @@
     tasks_from: firewalld.yml
   when: ansible_facts['os_family'] == 'RedHat'
 
+# The load above counts as a change: an archive reloaded under a tag the unit
+# already names leaves the running container on the old image otherwise.
 - name: Restart the accounting database after a change
   ansible.builtin.systemd:
     name: slurmdb.target
     state: restarted
-  when: slurmdbd_quadlet.changed or slurmdbd_target.changed
+  when: >-
+    slurmdbd_quadlet.changed
+    or slurmdbd_target.changed
+    or slurmdbd_images_loaded.changed | default(false)
 
 - name: Wait for MariaDB to accept connections
   ansible.builtin.wait_for:
