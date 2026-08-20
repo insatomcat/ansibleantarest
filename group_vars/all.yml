@@ -500,6 +500,10 @@ manage_hostname: false
 #    updates    : security updates that install themselves, without the
 #                 automatic reboot. unattended-upgrades on the Debian family,
 #                 dnf-automatic on the RedHat one.
+#    journal    : Storage=persistent, so that the bans, the crash loops and
+#                 the container logs are still there after the reboot those
+#                 updates eventually call for. Capped, see
+#                 hardening_journal_max_use.
 #
 #  Turning the firewall on is the one that can cut you off, so read what it
 #  opens above. It never closes the port you are connected on, and the play
@@ -527,6 +531,12 @@ hardening_firewall_enabled: false
 hardening_fail2ban_enabled: true
 hardening_ssh_enabled: true
 hardening_unattended_upgrades: true
+hardening_journal_persistent: true
+
+# What the journal may take on the root filesystem. journald would otherwise
+# take 10% of it, capped at 4G; this is the whole log history of the machine,
+# so raise it rather than lower it on anything that keeps studies.
+hardening_journal_max_use: "500M"
 
 # Report the secrets above still holding the value this repository ships.
 hardening_check_secrets: true
