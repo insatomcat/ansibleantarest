@@ -1,0 +1,46 @@
+---
+- name: Check the Keycloak image is present
+  ansible.builtin.command: "{{ container_cmd }} image inspect {{ keycloak_image }}"
+  register: keycloak_image_present
+  changed_when: false
+  failed_when: false
+
+# Only in `archive` mode: there the images are loaded from what build.yml
+# produced and nothing pulls, so a missing image means the archive set predates
+# keycloak_enabled. In `build` mode the unit pulls it on first start, which is
+# what every other third-party image does there too.
+- name: Fail when the Keycloak image was not shipped
+  ansible.builtin.assert:
+    that: keycloak_image_present.rc == 0
+    fail_msg: >-
+      {{ keycloak_image }} is not on {{ inventory_hostname }} and
+      antarest_image_source is `archive`, so nothing will pull it. Re-run
+      `ansible-playbook build.yml` with keycloak_enabled on to add it to the
+      artefacts.
+    quiet: true
+  when: antarest_image_source == 'archive'
+
+- name: Create the Keycloak database
+  ansible.builtin.include_tasks: database.yml
+
+- name: Render the realm imported at the first start
+  ansible.builtin.include_tasks: realm.yml
+  when: keycloak_realm_import | bool
+
+- name: Deploy the Keycloak quadlet unit
+  ansible.builtin.template:
+    src: quadlet/keycloak.container.j2
+    dest: "/etc/containers/systemd/{{ keycloak_container }}.container"
+    owner: root
+    group: root
+    mode: "0644"
+  register: keycloak_unit
+  notify: Restart Keycloak
+
+- name: Reload systemd so the quadlet generator picks the unit up
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: keycloak_unit.changed
+
+- name: Start Keycloak
+  ansible.builtin.include_tasks: service.yml

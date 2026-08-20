@@ -19,6 +19,7 @@ Everything is written in English, README included. Keep it that way.
 | Every tunable and its default | Main variables |
 | Where files land on the web server | Antares-Web server directory layout |
 | The one container holding the ports of the machine | The front door |
+| Keycloak, external accounts, what `external_auth` is | Authentication |
 | Putting the studies and the database on a block device | Putting the state on its own volume |
 | Quadlet units, podman version floor | Containers: podman and quadlet |
 | celery-beat, celery-worker, the collectors | Background maintenance tasks |
@@ -57,6 +58,7 @@ Everything is written in English, README included. Keep it that way.
 | `hardening` | nftables, fail2ban, sshd, unattended updates, persistent journal, firewalld handling |
 | `podman` | podman install plus the version floor quadlet needs |
 | `antares_web` | The whole web stack: checkout, frontend build, derived image, config, quadlet units, nginx |
+| `keycloak` | Keycloak next to Antares-Web: its database in the stack's PostgreSQL, its realm, its unit. Removes itself when `keycloak_enabled` is off |
 | `antares_edge` | The front door: the one container holding the ports of the machine, TLS, certbot, and the routing to everything published on the loopback |
 | `antares_build` | Runs only on the builder: turns what `antares_web` built into archives |
 | `antares_solver` | Installs solver tarballs. Called twice, with `antares_solver_dest` set by the caller |

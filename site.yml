@@ -140,6 +140,12 @@
   roles:
     - podman
     - antares_web
+    # After antares_web, which is what starts PostgreSQL: Keycloak needs a
+    # database of its own created in it before its container is ever started.
+    # Not guarded by keycloak_enabled here, the role handles both answers, so
+    # that turning it back off takes the container down.
+    - role: keycloak
+      tags: keycloak
     - role: antares_edge
       tags: edge
 

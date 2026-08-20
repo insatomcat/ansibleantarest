@@ -1,0 +1,27 @@
+---
+- name: Create the realm import directory
+  ansible.builtin.file:
+    path: "{{ keycloak_dir }}/import"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# root:root 0640: the file carries the client secret, so it is not readable by
+# the accounts of the machine, and the Keycloak process reads it through its
+# group - the image runs as uid 1000 with gid 0. See keycloak_image_gid.
+#
+# No notify: a realm is imported at the first start and skipped ever after, so
+# restarting Keycloak because this file changed would claim something happened
+# when nothing did. Replaying a realm change is a `kc.sh import --override`,
+# see the README.
+- name: Render the realm
+  ansible.builtin.template:
+    src: realm.json.j2
+    dest: "{{ keycloak_dir }}/import/{{ keycloak_realm }}-realm.json"
+    owner: root
+    group: "{{ keycloak_image_gid }}"
+    mode: "0640"
+    # A realm Keycloak cannot parse is a container that refuses to boot, with
+    # the reason in its journal and nowhere else.
+    validate: 'python3 -c "import json, sys; json.load(open(sys.argv[1]))" %s'

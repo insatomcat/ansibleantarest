@@ -1,0 +1,58 @@
+{# {{ ansible_managed }}
+   Rendered into the import directory Keycloak reads at startup.
+
+   Deliberately without comment keys: Keycloak deserialises this into its own
+   representation classes, and an unknown field is a parse error rather than
+   something ignored. What each block is for is written here, in the template,
+   where it does not reach the file.
+
+   Imported at the first start and only then: Keycloak skips a realm that
+   already exists, which is what keeps the users and the groups created from
+   the console since. The client secret is therefore fixed when the realm is
+   created; changing keycloak_client_secret afterwards means changing it in the
+   console too, or replaying the import by hand (see the README).
+
+   The client is used by the kc-rest connector alone: it checks a password with
+   a direct access grant and reads the groups of that user with the token of
+   its own service account, which is why it needs no browser flow and no
+   redirect URI. The service account is declared as a user only to carry
+   view-users, the realm-management role that lets it read the groups of
+   somebody else - and that is the whole reason nothing here needs a credential
+   of the master realm.
+
+   sslRequired follows antarest_tls_enabled: `external`, the Keycloak default,
+   refuses the account and console pages to any client that is not on a private
+   address unless the request came over https, which on a deployment served on
+   plain http means nobody can log in. #}
+{
+  "realm": {{ keycloak_realm | to_json }},
+  "enabled": true,
+  "displayName": "Antares",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "sslRequired": {{ ('external' if antarest_tls_enabled | bool else 'none') | to_json }},
+  "clients": [
+    {
+      "clientId": {{ keycloak_client_id | to_json }},
+      "name": "Antares-Web authentication connector",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": {{ keycloak_client_secret | to_json }},
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": {{ ('service-account-' ~ keycloak_client_id) | to_json }},
+      "enabled": true,
+      "serviceAccountClientId": {{ keycloak_client_id | to_json }},
+      "clientRoles": {
+        "realm-management": ["view-users"]
+      }
+    }
+  ]
+}

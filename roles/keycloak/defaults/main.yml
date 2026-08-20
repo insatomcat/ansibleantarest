@@ -1,0 +1,54 @@
+---
+# ===========================================================================
+#  Keycloak, next to Antares-Web
+#
+#  One more container on the podman network of the stack, published on the
+#  loopback for the front door to proxy to, and sharing the PostgreSQL the
+#  backend already runs - in a database of its own, see tasks/database.yml.
+#
+#  Antares-Web does not speak OIDC. What it has is `security.external_auth`, a
+#  URL it POSTs a username and a password to, so the bridge between the two is
+#  the kc-rest connector of the antares_auth role. Keycloak alone authenticates
+#  nobody here.
+#
+#  The switch (keycloak_enabled), the ports, the images and the secrets live in
+#  group_vars/all.yml: the front door has to route to it and the builder has to
+#  archive its image, and neither can read a role default.
+# ===========================================================================
+
+# Load-bearing: it is the name kc-rest resolves on the podman network.
+keycloak_container: keycloak
+
+# Rendered configuration: the realm to import. Under the same /etc/antares-web
+# as the rest.
+keycloak_dir: /etc/antares-web/keycloak
+
+# Database and role created in the PostgreSQL of the stack. A database of its
+# own rather than a schema in the one Antares-Web uses: Keycloak lays about
+# ninety tables, and a migration on either side has no business meeting the
+# other one's.
+keycloak_db_name: keycloak
+keycloak_db_user: keycloak
+
+# Port Keycloak listens on inside the container. Published on
+# 127.0.0.1:keycloak_port, see group_vars/all.yml.
+keycloak_http_port: 8080
+
+# Import the realm rendered from templates/realm.json.j2 at the first start.
+#
+# At the first start and no other: Keycloak skips a realm that already exists,
+# which is what keeps the users and groups created from the console since. A
+# change to the template is therefore not applied by re-running the playbook,
+# and replaying one is a decision, not a side effect - see the README.
+keycloak_realm_import: true
+
+# UID the Keycloak image runs as. The import file is written root:root 0640, so
+# what makes it readable inside the container is the *group*: like every Red
+# Hat base image, this one runs as uid 1000 with gid 0, and files given to the
+# root group are readable by it. Written here because the alternative - a
+# world-readable file - would put the client secret within reach of every
+# account on the machine.
+keycloak_image_gid: 0
+
+# Java options appended to whatever the image sets.
+keycloak_java_opts: ""

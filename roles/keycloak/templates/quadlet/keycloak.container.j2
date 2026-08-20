@@ -1,0 +1,81 @@
+{{ ansible_managed | comment }}
+#
+# ContainerName is load-bearing: it is the name the kc-rest connector resolves
+# on the podman network.
+#
+# Published on the loopback alone. What the outside reaches is the front door,
+# which proxies {{ keycloak_relative_path }}/ here; KC_HTTP_RELATIVE_PATH is what makes Keycloak
+# serve itself under that prefix rather than at the root, so the same name can
+# carry Antares-Web and its identity provider.
+
+[Unit]
+Description=Keycloak
+Requires=postgresql.service
+After=postgresql.service
+PartOf={{ antarest_service_name }}.target
+# Start budget for the Restart= below: five attempts, then the unit gives up.
+# Like the backend, this one needs it: After=postgresql.service only means the
+# postgres *container* started, not that it accepts connections yet.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+{% if antarest_data_device %}
+# The database is on a volume mounted with nofail. Without this the unit would
+# start on the empty mount point of the boot disk instead of failing visibly.
+RequiresMountsFor={{ antarest_data_dir }}
+{% endif %}
+
+[Container]
+ContainerName={{ keycloak_container }}
+Image={{ keycloak_image }}
+Network={{ antarest_service_name }}.network
+PublishPort=127.0.0.1:{{ keycloak_port }}:{{ keycloak_http_port }}
+{% for volume in keycloak_volumes %}
+Volume={{ volume }}
+{% endfor %}
+
+# The database of its own in the cluster the stack already runs, created by the
+# role before this unit is started for the first time.
+Environment=KC_DB=postgres
+Environment=KC_DB_URL=jdbc:postgresql://postgresql:5432/{{ keycloak_db_name }}
+Environment=KC_DB_USERNAME={{ keycloak_db_user }}
+Environment=KC_DB_PASSWORD={{ keycloak_db_password }}
+
+# TLS is terminated by the front door, so Keycloak serves plain http and is
+# told to believe the X-Forwarded-* headers it gets. Without KC_PROXY_HEADERS
+# it would ignore them, decide it is serving http, and hand out redirect URLs
+# and an issuer on http even though the user is on https.
+Environment=KC_HTTP_ENABLED=true
+Environment=KC_HTTP_RELATIVE_PATH={{ keycloak_relative_path }}
+Environment=KC_PROXY_HEADERS=xforwarded
+{% if keycloak_public_url | trim | length > 0 %}
+Environment=KC_HOSTNAME={{ keycloak_public_url | trim }}
+{% else %}
+# No domain configured: worked out from the request headers instead. See
+# keycloak_public_url in vars/main.yml.
+Environment=KC_HOSTNAME_STRICT=false
+{% endif %}
+
+# Seeds the first administrator of the master realm, and only that: like the
+# admin password of Antares-Web, it is read when the database is empty and
+# ignored ever after. Changing it later is done from the console.
+Environment=KC_BOOTSTRAP_ADMIN_USERNAME={{ keycloak_admin_user }}
+Environment=KC_BOOTSTRAP_ADMIN_PASSWORD={{ keycloak_admin_password }}
+{% if keycloak_java_opts | trim | length > 0 %}
+Environment=JAVA_OPTS_APPEND={{ keycloak_java_opts | trim }}
+{% endif %}
+
+# `start` rather than `start --optimized`: the image is used as it is shipped,
+# so Keycloak re-augments itself at every start, which costs a few seconds and
+# saves building a derived image for two options.
+Exec=start{{ ' --import-realm' if keycloak_realm_import | bool else '' }}
+
+[Service]
+# The first start creates about ninety tables and imports the realm.
+TimeoutStartSec=300
+# on-failure, not always: a container that keeps dying exhausts the budget in
+# [Unit] and stays `failed` instead of looping out of sight. See the README.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy={{ antarest_service_name }}.target

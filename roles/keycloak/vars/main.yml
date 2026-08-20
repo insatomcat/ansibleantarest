@@ -1,0 +1,31 @@
+---
+# ===========================================================================
+#  What Keycloak has to be told about the front door
+# ===========================================================================
+
+_keycloak_scheme: "{{ 'https' if antarest_tls_enabled | bool else 'http' }}"
+_keycloak_public_port: "{{ antarest_https_port if antarest_tls_enabled | bool else antarest_http_port }}"
+_keycloak_default_port: "{{ 443 if antarest_tls_enabled | bool else 80 }}"
+
+# The URL users reach Keycloak on. It is what Keycloak puts in the issuer of
+# its tokens and in the links of its own pages, so it has to be the public name
+# and not the loopback address the front door proxies to.
+#
+# Empty when no domain is configured, which is the case of a deployment reached
+# by address: the unit then sets KC_HOSTNAME_STRICT=false and Keycloak works
+# the value out of the Host and X-Forwarded-* headers the front door sets. That
+# is a fallback rather than the normal case, since anything cached from a
+# request with the wrong Host is then wrong.
+keycloak_public_url: >-
+  {{ '' if (antarest_tls_domain | default('', true) | trim | length == 0) else
+     (_keycloak_scheme ~ '://' ~ antarest_tls_domain
+      ~ ((':' ~ _keycloak_public_port)
+         if _keycloak_public_port | int != _keycloak_default_port | int else '')
+      ~ keycloak_relative_path) }}
+
+# Same spelling as everywhere else: the access mode is written out so that
+# container_volume_opts (the SELinux `,z`) has something to be appended to.
+keycloak_volumes: >-
+  {{ ([keycloak_dir ~ '/import:/opt/keycloak/data/import:ro']
+      if keycloak_realm_import | bool else [])
+     | map('regex_replace', '$', container_volume_opts | trim) | list }}
