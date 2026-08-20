@@ -2,12 +2,20 @@
 # A fresh VM with 22 and 80 open on the internet is the case this role is
 # written for: a firewall so that only what is meant to be public is, fail2ban
 # so that the two doors left open are not brute-forced at leisure, an sshd that
-# does not take passwords, and security updates that install themselves.
+# does not take passwords, security updates that install themselves, and a
+# journal that survives the reboot they eventually call for.
 #
 # Every block can be switched off on its own, see group_vars/all.yml.
 
 - name: Collect what the firewall and the jails have to let through
   ansible.builtin.include_tasks: facts.yml
+
+# First, because it restarts journald: after this block the jails read the
+# journal and the deployment writes to it, and neither wants it restarted
+# underneath. It is also what makes the rest of this run readable tomorrow.
+- name: Keep the journal across reboots
+  ansible.builtin.include_tasks: journal.yml
+  when: hardening_journal_persistent | bool
 
 - name: Configure the firewall
   ansible.builtin.include_tasks: firewall.yml

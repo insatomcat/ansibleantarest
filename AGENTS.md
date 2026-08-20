@@ -21,7 +21,7 @@ Everything is written in English, README included. Keep it that way.
 | Putting the studies and the database on a block device | Putting the state on its own volume |
 | Quadlet units, podman version floor | Containers: podman and quadlet |
 | celery-beat, celery-worker, the collectors | Background maintenance tasks |
-| nftables, fail2ban, sshd, unattended updates | Hardening |
+| nftables, fail2ban, sshd, unattended updates, journal | Hardening |
 | build once, deploy with `archive` | Build once, deploy everywhere |
 | How to re-run only one part | Useful tags |
 | What `verify.yml` proves | Checking a deployment |
@@ -43,7 +43,7 @@ Everything is written in English, README included. Keep it that way.
   is not in the inventory.
 - `inventory/hosts.yml` - the example inventory, and the documentation of the
   three host groups. `inventory/ci-*.yml` are what the CI runs.
-- `group_vars/all.yml` - the fleet-wide knobs (577 lines, heavily commented).
+- `group_vars/all.yml` - the fleet-wide knobs (587 lines, heavily commented).
   `group_vars/slurm.yml` for the cluster only.
 
 ## Roles
@@ -51,7 +51,7 @@ Everything is written in English, README included. Keep it that way.
 | Role | Job |
 |---|---|
 | `common` | Distribution check, repositories, base packages, the `antares` account (UID/GID guard), `/etc/hosts`, time sync |
-| `hardening` | nftables, fail2ban, sshd, unattended updates, firewalld handling |
+| `hardening` | nftables, fail2ban, sshd, unattended updates, persistent journal, firewalld handling |
 | `podman` | podman install plus the version floor quadlet needs |
 | `antares_web` | The whole web stack: checkout, frontend build, derived image, config, quadlet units, nginx, TLS |
 | `antares_build` | Runs only on the builder: turns what `antares_web` built into archives |

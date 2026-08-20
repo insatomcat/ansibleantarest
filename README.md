@@ -539,7 +539,7 @@ Intervals are not exposed as Ansible variables. Every `*_sleeping_time` and `*_c
 
 ## Hardening
 
-A blank VM, a few minutes, and an Antares-Web reachable on the internet with 22 and 80 open is exactly what this playbook makes easy, so the `hardening` role runs right after the base configuration and before anything is deployed. Four independent blocks, each switched on its own:
+A blank VM, a few minutes, and an Antares-Web reachable on the internet with 22 and 80 open is exactly what this playbook makes easy, so the `hardening` role runs right after the base configuration and before anything is deployed. Five independent blocks, each switched on its own:
 
 ```yaml
 hardening_enabled: true               # group_vars/all.yml
@@ -547,6 +547,7 @@ hardening_firewall_enabled: false     # off: a cloud VM already has a security g
 hardening_fail2ban_enabled: true
 hardening_ssh_enabled: true
 hardening_unattended_upgrades: true
+hardening_journal_persistent: true
 ```
 
 Everything is on except the firewall, which duplicates what a cloud provider's security group already does, and two filters that have to agree is one more place for a rule to go missing. Turn it on for a machine with nothing in front of it, and in particular for a Slurm front-end on a network you do not control: its NFS export uses `no_root_squash`.
@@ -577,6 +578,13 @@ Bans are dropped in the `prerouting` hook at priority `raw`, not in `input` like
 **SSH.** A drop-in in `/etc/ssh/sshd_config.d/`: no password authentication, no root password login, `MaxAuthTries 4`, a 30 second grace time, no X11 forwarding. TCP forwarding stays on, since the README reaches adminer through `ssh -L`. Before closing the password, the role checks that the account Ansible connects with has a non-empty `authorized_keys` and stops if it does not, rather than leaving an unreachable machine; set `hardening_ssh_disable_password_auth: false` if the machine authenticates through something else, an SSH certificate authority for instance. The resulting configuration is checked with `sshd -t`, and the drop-in is removed again if sshd refuses it.
 
 **Unattended upgrades.** On the Debian family, `unattended-upgrades` enabled on the origins the distribution already restricts to the security pocket. On the RedHat family, `dnf-automatic` with `upgrade_type = security` and its timer enabled, which is the same policy with different machinery. Neither reboots on its own: a study can run for hours and a machine that reboots in the middle of one loses it. `/var/run/reboot-required` and `dnf needs-restarting -r` say when one is due.
+
+**Journal.** `Storage=persistent` and `SystemMaxUse=500M` (`hardening_journal_max_use`) in `/etc/systemd/journald.conf.d/10-antares.conf`, so that the journal is in `/var/log/journal` instead of the `/run` tmpfs it is wiped from at every reboot. This is not a detail of taste: the bans, the backend's crash loops, the container logs (`LogDriver=journald` in every quadlet) and the report of the unattended updates all live there and nowhere else on the Debian family, which ships no rsyslog, so a machine that reboots after a kernel update loses the log of whatever led to it. The default is `auto` on both families, which means "persistent if `/var/log/journal` exists" and therefore leaves the answer to whoever built the image: Ubuntu ships the directory, the Debian and EL cloud images do not. A drop-in rather than `journald.conf` itself, which the cloud images write their own settings into. The block runs before the others, since applying it restarts `systemd-journald` and the jails read the journal.
+
+```bash
+journalctl --disk-usage
+journalctl --list-boots        # more than one line: it is persistent
+```
 
 **firewalld (RedHat family).** The RHEL rebuilds boot with firewalld enabled and a default zone that accepts SSH and nothing else. Debian and Ubuntu ship no host filter, so `hardening_firewall_enabled: false` (the default: the cloud security group is enough) only meant the same thing on one family. firewalld is therefore stopped, disabled and **masked** whether our nftables table is on or not. `systemctl unmask firewalld` puts it back. Set `hardening_manage_firewalld: false` to be left alone with it.
 
@@ -650,10 +658,12 @@ ansible-playbook verify.yml
 ansible-playbook verify.yml --tags firewall      # only the rulesets
 ```
 
-It changes nothing beyond one marker file in the shared `/home`, which the last play removes, so it is safe against a production deployment. The cluster and firewall halves skip themselves where they do not apply (`slurm_enabled`, `hardening_firewall_enabled`):
+It changes nothing beyond one marker file in the shared `/home`, which the last play removes, so it is safe against a production deployment. Each part skips itself where it does not apply (`slurm_enabled`, `hardening_firewall_enabled`, `hardening_journal_persistent`):
 
 - **Antares-Web.** Every unit of the stack is `active`, the backend answers `/api/health`, nginx serves the built front-end and routes `/api/` to the backend, all of it asked from the controller so the answer crosses the firewall and the published port rather than a loopback. When `antarest_data_device` is set, the data directory is checked to really be that volume's mount point and to have its entry in `/etc/fstab`: a stack that answers proves nothing about *where* it is writing, and a volume that did not come back leaves the units on the empty mount point of the boot disk, with an empty database behind a working interface. With the variable empty the state belongs on the boot disk and the check does not apply.
 - **The cluster.** `slurmctld` is alive and sees every compute node of the inventory in a healthy state, the cluster is registered in the accounting database, the compute nodes really mount the front-end's `/home` (a marker written on one side and read on the other) and can execute the solvers installed in it, and a job submitted exactly the way the backend submits one - over SSH, with the key generated on the web machine, to the `antares` account of the front-end - runs on a compute node.
+- **The journal.** `journalctl --header` is asked which files journald is actually writing to, and they have to be under `/var/log/journal` with nothing left under `/run/log/journal/<this machine's id>`. The id is half the question, and an EL 9 is what says so: its cloud images ship a committed `/etc/machine-id` which cloud-init resets on the first boot, so journald writes for five seconds under the image's id, is restarted under the new one and flushes that one alone. The runtime file of the first id stays in `/run` until the next reboot, OFFLINE, holding those five seconds. Nothing writes to it, no flush can move it - journald only ever flushes its own id - and it is not a journal the machine is losing. That is the location itself rather than the drop-in that asked for it, which is the point: a machine whose journal is in the `/run` tmpfs loses, at the next reboot, the log of everything that led to it, and every other check in this file is read out of that journal.
+
 - **The firewall.** The three rulesets a deployment produces, checked from both sides. Each port that matters is looked at twice: a daemon is really listening on it, and the controller still cannot reach it while the machines that need it can. **Run this from a machine that is not in the inventory**, which the controller normally is not: a machine of the deployment is in every ruleset's trusted set, and from there every "the world cannot reach this" check is a tautology.
 
 The same playbook runs in CI, on five virtual machines booted on one GitHub runner: see the `slurm` job of `.github/workflows/ci.yml` and `inventory/ci-cluster.yml`.

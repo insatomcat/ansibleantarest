@@ -1,0 +1,15 @@
+{{ ansible_managed | comment }}
+
+[Journal]
+# `auto`, the default of both families, means "persistent if /var/log/journal
+# exists", which makes the answer an image decision: Ubuntu ships the
+# directory, the Debian and EL cloud images do not and their journal dies with
+# the /run tmpfs. Said here rather than inherited.
+Storage=persistent
+
+# Uncapped, journald takes 10% of the filesystem holding /var/log, up to 4G,
+# and that is the root volume rather than the one the studies and the database
+# get. A few hundred megabytes are weeks of a machine that is not in trouble,
+# and the day it is in trouble, the most recent entries are the ones that
+# matter.
+SystemMaxUse={{ hardening_journal_max_use }}
