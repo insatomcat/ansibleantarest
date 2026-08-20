@@ -39,10 +39,11 @@
 
 # Pulled and saved here so that a target with no Internet access still gets
 # them. gzip -1 because these are already-compressed layers: the extra CPU of a
-# higher level buys almost nothing.
+# higher level buys almost nothing. `unique` because the two halves of the
+# fleet default to the same adminer.
 - name: Pull the third-party images
   ansible.builtin.command: "{{ container_cmd }} pull {{ item }}"
-  loop: "{{ antares_build_thirdparty_images }}"
+  loop: "{{ (antares_build_thirdparty_images + antares_build_slurm_images) | unique }}"
   changed_when: true
 
 - name: Save the third-party images
@@ -53,6 +54,23 @@
       | gzip -1 > {{ antares_build_artifacts }}/thirdparty-{{ item | regex_replace('[^a-zA-Z0-9]', '-') }}.tar.gz
     executable: /bin/bash
   loop: "{{ antares_build_thirdparty_images }}"
+  changed_when: true
+
+# A prefix of their own, and not a matter of taste: the two targets do not want
+# the same archives, and load_artifacts ships a whole directory rather than a
+# list of files. `slurm-thirdparty-*` is one --exclude on the web side and one
+# --include on the front-end side, where a shared name would have meant
+# hundreds of megabytes of MariaDB on every web machine that has no cluster.
+# The price is adminer saved twice when both halves publish one, which is the
+# smaller of the two images and keeps each target's set self-contained.
+- name: Save the Slurm front-end images
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      {{ container_cmd }} save --format docker-archive {{ item }}
+      | gzip -1 > {{ antares_build_artifacts }}/slurm-thirdparty-{{ item | regex_replace('[^a-zA-Z0-9]', '-') }}.tar.gz
+    executable: /bin/bash
+  loop: "{{ antares_build_slurm_images }}"
   changed_when: true
 
 - name: Archive the built web application

@@ -54,6 +54,11 @@
     group: false
     perms: false
     rsync_opts:
+      # First match wins, hence before the include: the Slurm front-end's
+      # images are in the same artefact directory and have no business on a
+      # web machine, MariaDB alone being a few hundred megabytes. The
+      # front-end pulls them itself, from the same directory, by that prefix.
+      - "--exclude=slurm-thirdparty-*.tar.gz"
       - "--include=*.tar.gz"
       - "--include=manifest.yml"
       - "--exclude=*"

@@ -1,0 +1,101 @@
+---
+# Used when antarest_image_source is `archive`, and the counterpart of
+# roles/antares_web/tasks/load_artifacts.yml for the accounting database.
+#
+# That file only ever runs on the web machine, so until this one existed the
+# `archive` promise stopped halfway: the web half started without a registry
+# while the Slurm front-end still reached Docker Hub on its first boot, quadlet
+# units carrying podman's default pull policy (`missing`). On a cluster that is
+# genuinely offline, or behind a proxy that does not let docker.io through, the
+# run would die in the "Wait for MariaDB" loop, with an error that never
+# mentions an image.
+#
+# Only the accounting database's own archives travel here: the web half's are
+# in the same directory on the controller and have no business on a front-end.
+
+- name: Check the accounting database archives exist on the controller
+  ansible.builtin.stat:
+    path: "{{ antares_artifacts_dir }}/{{ item }}"
+  loop: "{{ slurmdbd_image_archives }}"
+  register: slurmdbd_artifacts
+  delegate_to: localhost
+  become: false
+
+- name: Fail when the accounting database archives are missing
+  ansible.builtin.assert:
+    that: slurmdbd_artifacts.results | rejectattr('stat.exists') | list | length == 0
+    fail_msg: >-
+      antarest_image_source is `archive` but
+      {{ slurmdbd_artifacts.results | rejectattr('stat.exists') | map(attribute='item') | join(', ') }}
+      {{ 'is' if (slurmdbd_artifacts.results | rejectattr('stat.exists') | list | length) == 1 else 'are' }}
+      missing from {{ antares_artifacts_dir }}. build.yml only archives them
+      when slurm_enabled and slurmdbd_enabled are true *on the builder*, which
+      the inventory entry of this host has no say in. Produce them with
+      `ansible-playbook build.yml`, or deploy with
+      `-e antarest_image_source=build` to let the units pull instead.
+    quiet: true
+
+- name: Create the artefact staging directory
+  ansible.builtin.file:
+    path: "{{ slurmdbd_artifacts_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Same reasoning as on the web side: rsync rather than the copy module, and
+# ownership left alone so the controller's umask does not fight the task above
+# on every run.
+- name: Ship the archives to the front-end
+  ansible.posix.synchronize:
+    src: "{{ antares_artifacts_dir }}/"
+    dest: "{{ slurmdbd_artifacts_dir }}/"
+    owner: false
+    group: false
+    perms: false
+    rsync_opts:
+      - "--include=slurm-thirdparty-*.tar.gz"
+      - "--exclude=*"
+
+# Loading is not free and the archives do not change between two runs of the
+# same build, so only what podman does not already hold is loaded.
+- name: Look for the images already present
+  ansible.builtin.command: "{{ container_cmd }} image inspect {{ item }}"
+  loop: "{{ slurmdbd_thirdparty_images }}"
+  register: slurmdbd_images_present
+  changed_when: false
+  failed_when: false
+
+# The two lists are built from slurmdbd_thirdparty_images in the same order, so
+# an image and its archive travel together through the zip.
+- name: Load the images that are missing
+  ansible.builtin.command: "{{ container_cmd }} load -i {{ slurmdbd_artifacts_dir }}/{{ item.1 }}"
+  loop: "{{ slurmdbd_images_present.results | zip(slurmdbd_image_archives) | list }}"
+  loop_control:
+    label: "{{ item.1 }}"
+  when: item.0.rc != 0
+  register: slurmdbd_images_loaded
+  changed_when: true
+
+# An archive set produced before a tag was repinned loads without error and
+# leaves the image the units name simply absent, which podman would then try to
+# pull - the one thing this mode exists to avoid. Say so here rather than three
+# minutes later in the MariaDB wait loop.
+- name: Check the images are now present
+  ansible.builtin.command: "{{ container_cmd }} image inspect {{ item }}"
+  loop: "{{ slurmdbd_thirdparty_images }}"
+  register: slurmdbd_images_after_load
+  changed_when: false
+  failed_when: false
+
+- name: Fail when an image did not load
+  ansible.builtin.assert:
+    that: slurmdbd_images_after_load.results | selectattr('rc', 'ne', 0) | list | length == 0
+    fail_msg: >-
+      {{ slurmdbd_images_after_load.results | selectattr('rc', 'ne', 0)
+         | map(attribute='item') | join(', ') }}
+      still absent after loading the archives from {{ antares_artifacts_dir }}.
+      They were built under other names, most likely by a build.yml older than
+      the current image pins; check manifest.yml and re-run
+      `ansible-playbook build.yml`.
+    quiet: true
