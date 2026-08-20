@@ -1,4 +1,18 @@
 ---
+# These tasks run twice: once on their own, from the play that authorises the
+# key on the front-end before anything starts submitting jobs to it, and once
+# in the middle of the role, where the checkout has long created the directory
+# below. Hence this task, which makes the file usable on its own rather than
+# only after checkout.yml. Same ownership as there, for the same reason: the
+# containers read what lands in it.
+- name: Create the directory the deployment key lives in
+  ansible.builtin.file:
+    path: "{{ antarest_deploy_dir }}"
+    state: directory
+    owner: "{{ antarest_checkout_owner }}"
+    group: "{{ antarest_checkout_group }}"
+    mode: "0755"
+
 # antares-web reads this key with paramiko's RSAKey loader, so it has to be an
 # RSA key: ed25519 works for the job submission path but breaks the code that
 # displays the cluster load.
