@@ -143,8 +143,12 @@ antarest_workspaces:
 
 # Authentication delegated to an external service, the LDAP gateway upstream
 # calls the auth service. Left empty, the application only knows its local
-# accounts, the admin included.
-antarest_external_auth_url: ""
+# accounts, the admin included - which is what antares_auth_provider `none`
+# gives. Otherwise it points at the connector of the antares_auth role, on the
+# podman network; override it to reach a service this deployment does not run.
+antarest_external_auth_url: >-
+  {{ ('http://' ~ antares_auth_container ~ ':' ~ antares_auth_port)
+     if antares_auth_provider != 'none' else '' }}
 # Role the users arriving that way are given in their groups, as the RoleType
 # enum of antarest/core/roles.py: 10 reader, 20 runner, 30 writer, 40 admin.
 # 10 is the upstream default and the lowest of the four.

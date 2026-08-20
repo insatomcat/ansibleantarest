@@ -1,0 +1,27 @@
+{{ ansible_managed | comment }}
+#
+# Build context: roles/antares_auth/files/{{ antares_auth_source }}, copied here
+# by the role. The base image is written fully qualified for the same reason as
+# everywhere else in this deployment - podman will not guess a registry, and
+# the RHEL rebuilds would guess a different one.
+
+FROM {{ antares_auth_python_image }}
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app.py .
+
+EXPOSE {{ antares_auth_port }}
+
+# gunicorn rather than the Flask development server: this sits in front of
+# every login of the deployment, and the development server is single-threaded,
+# unsupervised and says so on every start. Access logs to stdout, which the
+# journald log driver of the unit collects.
+CMD ["gunicorn", \
+     "--bind", "0.0.0.0:{{ antares_auth_port }}", \
+     "--workers", "{{ antares_auth_workers }}", \
+     "--access-logfile", "-", \
+     "app:app"]
