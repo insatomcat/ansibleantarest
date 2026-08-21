@@ -49,8 +49,13 @@
 # Same reason as the first play of site.yml: the cached facts may predate a
 # rebuild of the machine behind this name, and the addresses below are read
 # from them.
+#
+# And `all:!builder` for the same reason as there too: site.yml does not
+# configure a builder, so there is nothing on it to verify. Checking it would
+# fail on a persistent journal and a firewall nobody ever asked for.
+# The Prometheus targets check further down already took that difference.
 - name: Gather facts from every machine
-  hosts: all
+  hosts: all:!builder
   gather_facts: false
   tags: always
   roles:
@@ -786,7 +791,7 @@
 # ---------------------------------------------------------------------------
 
 - name: The journal is on disk and survives a reboot
-  hosts: all
+  hosts: all:!builder
   become: true
   gather_facts: false
   tags: [verify, hardening]
@@ -869,7 +874,7 @@
 # ---------------------------------------------------------------------------
 
 - name: The daemons the firewall has to cover are really listening
-  hosts: all
+  hosts: all:!builder
   become: true
   gather_facts: false
   tags: [verify, firewall]
@@ -975,7 +980,7 @@
       when: verify_expected_listeners | length > 0
 
 - name: The world reaches nothing but SSH, and the interface on the web machine
-  hosts: all
+  hosts: all:!builder
   gather_facts: false
   become: false
   tags: [verify, firewall]
