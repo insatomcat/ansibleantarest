@@ -1,0 +1,57 @@
+---
+# ===========================================================================
+#  The machine has to answer to the name the configuration gives it
+#
+#  Every Slurm daemon compares its own gethostname() with what the
+#  configuration names, and refuses to run when the two disagree:
+#
+#    slurmdbd   fatal: This host not configured to run SlurmDBD
+#               ((web-1 or web-1) != antares-solo | (backup) (null))
+#    slurmctld  the same verdict, on SlurmctldHost
+#    slurmd     registers nothing, and the node stays down in sinfo
+#
+#  Every name this deployment writes - DbdHost, SlurmctldHost,
+#  AccountingStorageHost, NodeName - comes from slurm_node_name, which
+#  defaults to the inventory name. That is right whenever the inventory names
+#  machines the way they name themselves, which is what the CI does through
+#  cloud-init and what most deployments do. It is wrong on a machine whose
+#  hostname was decided by someone else: a cloud image, an installer, a
+#  corporate naming scheme.
+#
+#  Without this check the run gets that far and then fails two roles later, in
+#  "Wait for slurmdbd to listen", on a two-minute timeout for a port, with
+#  nothing in the message about a name. Measured on an Oracle Linux machine
+#  called antares-web-1 deployed from an inventory calling it antares-solo.
+# ===========================================================================
+
+# Read from the machine rather than from the gathered facts, and not out of
+# habit: with manage_hostname on, the common role has already renamed this
+# machine earlier in the same run, so the fact gathered by the first play is
+# the name it had before. The daemons will see this one.
+- name: Ask the machine what name it answers to
+  ansible.builtin.command: hostname
+  register: slurm_machine_hostname
+  changed_when: false
+  check_mode: false
+
+- name: Check it is the name the configuration will give it
+  ansible.builtin.assert:
+    that:
+      # Either form: Slurm derives both from gethostname() and accepts the
+      # configured name matching one of them.
+      - slurm_node_name | trim in [_slurm_hostname, _slurm_hostname.split('.') | first]
+    fail_msg: >-
+      This deployment will name {{ inventory_hostname }} `{{ slurm_node_name | trim }}`
+      in {{ slurm_conf_dir }}/slurm.conf, but the machine answers to
+      `{{ _slurm_hostname }}`. Every Slurm daemon compares the two and refuses
+      to start on a mismatch, so slurmdbd and slurmctld would fail to start
+      and this node would never register with the controller.
+      Set `slurm_node_name: {{ _slurm_hostname.split('.') | first }}` on this
+      host in the inventory, which changes the names in the generated
+      configuration and nothing on the machine; or `manage_hostname: true` to
+      rename the machine after the inventory instead; or
+      `slurm_hostname_check: false` to deploy anyway.
+    quiet: true
+  vars:
+    _slurm_hostname: "{{ slurm_machine_hostname.stdout | trim }}"
+  when: slurm_hostname_check | bool
