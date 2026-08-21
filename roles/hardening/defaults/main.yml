@@ -211,23 +211,28 @@ hardening_dnf_automatic_upgrade_type: security
 # ---------------------------------------------------------------------------
 # The values this repository ships. A deployment still carrying one of them is
 # stopped by name, unless hardening_fail_on_default_secrets is turned off.
-# The accounting, Keycloak and Grafana entries are only added when they are
-# deployed: reporting the password of a container that does not exist would be
-# noise, and the check reads whatever is in scope. Grafana is qualified by the
-# group as well, since monitoring_enabled is fleet-wide while Grafana itself
-# runs on the web machine alone - a compute node has no business being asked
-# about it.
+#
+# Every entry is qualified by the group that actually runs the thing, and not
+# only by the flag that turns it on: this role is the one thing in site.yml
+# that runs on `all`, and the *_enabled flags are fleet-wide. Without the
+# group, a builder listed in the same inventory - a machine that hosts none of
+# this and holds none of these variables - is asked about all seven and stops
+# the run on secrets it has no reason to carry. A compute node was in the same
+# position for the accounting password, which only the front-end ever writes.
 hardening_default_secrets: >-
-  {{ {'antarest_jwt_key': 'secretkeytochange',
-      'antarest_admin_password': 'admin',
-      'antarest_db_password': 'somepass'}
+  {{ ({'antarest_jwt_key': 'secretkeytochange',
+       'antarest_admin_password': 'admin',
+       'antarest_db_password': 'somepass'}
+      if inventory_hostname in (groups['antares_web'] | default([])) else {})
      | combine({'slurmdbd_db_password': 'changeme-slurm-acct'}
                if (slurm_enabled | default(false) | bool
-                   and slurmdbd_enabled | default(false) | bool) else {})
+                   and slurmdbd_enabled | default(false) | bool
+                   and inventory_hostname in (groups['slurm_frontend'] | default([]))) else {})
      | combine({'keycloak_admin_password': 'admin',
                 'keycloak_db_password': 'changeme-keycloak-db',
                 'keycloak_client_secret': 'changeme-keycloak-client'}
-               if keycloak_enabled | default(false) | bool else {})
+               if (keycloak_enabled | default(false) | bool
+                   and inventory_hostname in (groups['antares_web'] | default([]))) else {})
      | combine({'monitoring_grafana_admin_password': 'admin'}
                if (monitoring_enabled | default(false) | bool
                    and inventory_hostname in (groups['antares_web'] | default([]))) else {}) }}
