@@ -18,13 +18,17 @@ That is also why it runs in the host network namespace rather than on the podman
 
 Everything else on the machine is published on `127.0.0.1` alone, so a port opened by mistake in a security group exposes nothing. `verify.yml` checks that from the outside.
 
-To put something else behind the same certificate:
+What the deployment installs is already routed: the web application at `/`,
+Keycloak under `keycloak_relative_path` when it is enabled, and Grafana under
+`monitoring_grafana_path` when the fleet is monitored (see
+[Monitoring](monitoring.md)). To put something else behind the same
+certificate:
 
 ```yaml
 antares_edge_extra_routes:
-  - path: /grafana/
-    upstream: 127.0.0.1:8083
-    name: Grafana
+  - path: /reports/
+    upstream: 127.0.0.1:8090
+    name: Reports
 ```
 
 Longest prefix wins, whatever the order. `antares_edge_client_max_body_size` (1G, the value the Antares-Web nginx uses for study imports) and `antares_edge_proxy_read_timeout` (1200 s) apply to every route; the rest of the plumbing is in `roles/antares_edge/defaults/main.yml`.

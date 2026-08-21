@@ -29,6 +29,8 @@ journalctl -u antarest.service -f
 
 On the web server the generated services are `antarest`, `antarest-celery-beat`, `antarest-celery-worker`, `postgresql`, `redis`, `antares-nginx`, `antares-edge`, `antares-web-network`, and, when they are enabled, `keycloak` and the authentication connector. On the Slurm frontend, the accounting DB follows the same pattern under `slurmdb.target` (`slurmdb-mariadb`, and `slurmdb-adminer` if enabled).
 
+The monitoring containers are the exception to the grouping, deliberately: `node-exporter` on every machine, `slurm-exporter` on the front-end, `prometheus` and `grafana` on the web server are in no target, depend on no other unit and carry `WantedBy=multi-user.target` of their own. A monitoring stack that stopped with the thing it monitors would be silent exactly when it is needed, see [Monitoring](monitoring.md).
+
 Some container names are significant (they become DNS names on the podman network). Renaming them silently breaks the stack:
 
 | Container | Who depends on it |

@@ -24,6 +24,7 @@ than grepping the tree:
 | celery-beat, celery-worker, the collectors | `docs/background-tasks.md` |
 | Cluster variables, one machine that is also its own cluster, the launch script | `docs/slurm.md` |
 | nftables, fail2ban, sshd, unattended updates, journal | `docs/hardening.md` |
+| Node exporters everywhere, the Slurm exporter, Prometheus, Grafana behind the front door | `docs/monitoring.md` |
 | Build once, deploy with `archive` | `docs/build-and-deploy.md` |
 | What `verify.yml` proves, changing the admin password, Postgres major upgrades | `docs/operations.md` |
 | Known limitations, where this diverges from the reference PDF | `docs/limitations.md` |
@@ -31,16 +32,19 @@ than grepping the tree:
 
 A variable is documented on the `docs/` page of its area. What a *role* does,
 what it assumes and what it leaves on the machine is in `roles/<role>/README.md`
-for the eight roles that have one: `common`, `hardening`, `podman`,
-`antares_web`, `antares_edge`, `antares_auth`, `keycloak`, `slurm_frontend`.
+for the eleven roles that have one: `common`, `hardening`, `podman`,
+`antares_web`, `antares_edge`, `antares_auth`, `keycloak`, `slurm_frontend`,
+`monitoring_node`, `monitoring_slurm`, `monitoring_server`.
 The others are small enough to read, and their `defaults/main.yml` is
 commented.
 
 ## Entry points
 
 - `site.yml` - the deployment. Reads the plays in order: facts, common,
-  hardening, then the Slurm half, then Antares-Web. Every role is guarded by a
-  `when:` on an `*_enabled` flag.
+  hardening, the node exporter of every machine, then the Slurm half, then
+  Antares-Web. Every role is guarded by a `when:` on an `*_enabled` flag,
+  except the ones that also know how to remove themselves (`keycloak`,
+  `antares_auth`, the three `monitoring_*`), which run either way.
 - `build.yml` - builds the artefacts once on a `builder` host and pulls them
   into `artifacts/` on the controller. Reuses the very task files of
   `antares_web`, so artefacts cannot be built by a different recipe than the
@@ -76,6 +80,9 @@ commented.
 | `slurm_frontend` | slurmctld, slurmdbd, `sacctmgr` registration |
 | `slurm_compute` | slurmd |
 | `slurm_launch_script` | `launchAntares.sh` in the shared `/home` |
+| `monitoring_node` | The node exporter, on every machine of the inventory. Also owns the shared `load_artifacts.yml` the other two monitoring roles include |
+| `monitoring_slurm` | The Slurm exporter, on the front-end, next to the controller it reads. Refuses to deploy one whose Slurm client is ahead of that controller |
+| `monitoring_server` | Prometheus and Grafana, on the web machine, in the host network namespace and behind the front door |
 
 `roles/antares_web/tasks/` is split by concern (`data_volume`, `checkout`,
 `build_frontend`, `build_image`, `config`, `service`, `nginx`, `migrate`,
@@ -121,6 +128,20 @@ to `roles/antares_edge/` with the front door.
   rebuildable. Never commit them.
 - Third-party images are pinned to majors on purpose. Changing a tag
   invalidates the whole artefact set and needs a fresh `build.yml`.
+- **The Slurm exporter is version-coupled to the cluster.** Its image ships
+  its own `slurm-client`, and slurmctld serves commands of its own release and
+  of the two before it, never a newer one. `roles/monitoring_slurm/tasks/
+  preflight.yml` reads both versions (from `scontrol --version` and from
+  `sinfo --version` inside the image) and deploys nothing when the image is
+  ahead, so the shipped image works on EL 9 and Ubuntu 26.04 and is skipped on
+  Debian 13, Ubuntu 24.04 and EL 10. Do not turn that into a table of
+  distributions: both halves move.
+- **The monitoring containers are in the host network namespace**, on no
+  podman network, in no target and with no `Requires=` on anything. That is
+  not an oversight to tidy up: a monitoring stack that goes down with the
+  stack it watches is silent exactly when it is needed. Their mounts of `/`,
+  `/etc/slurm` and the munge socket carry no `,z` for the same kind of reason,
+  see `docs/monitoring.md`.
 
 ## CI
 
