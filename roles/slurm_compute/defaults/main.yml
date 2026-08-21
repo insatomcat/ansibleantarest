@@ -1,5 +1,5 @@
 ---
-# The node daemon. Names follow slurm_repo, see group_vars/all.yml and
+# The node daemon. Names follow slurm_repo, see roles/antares_defaults/ and
 # roles/slurm_common/defaults/main.yml.
 slurmd_packages: "{{ _slurmd_packages_by_repo[slurm_repo] }}"
 _slurmd_packages_by_repo:

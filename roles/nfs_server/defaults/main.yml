@@ -8,3 +8,11 @@ _nfs_server_packages_by_family:
     - nfs-common
   RedHat:
     - nfs-utils
+
+# How the shared /home is exported. The path itself is nfs_export_path, in
+# roles/antares_defaults/, which the clients mount and verify.yml checks.
+# no_root_squash is what lets the front-end write the studies as root; it is
+# also why this export must never be reachable from outside the cluster, see
+# docs/hardening.md.
+nfs_export_options: "rw,sync,no_root_squash,no_subtree_check"
+nfs_export_clients: "*"

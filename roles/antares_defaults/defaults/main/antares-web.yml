@@ -1,0 +1,67 @@
+---
+# ===========================================================================
+#  The Antares-Web application
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+#  Antares-Web (AntaREST)
+#
+#  The version and the paths only. build.yml pins the artefacts it produces to
+#  the first, and verify.yml looks for the deployment under the second, so
+#  neither can be a default of the antares_web role. What that role alone does
+#  with the checkout is in its own defaults.
+# ---------------------------------------------------------------------------
+antarest_version: "v2.34.0"            # git tag, branch or commit
+antarest_base_dir: /var/antares-web
+antarest_dir: "{{ antarest_base_dir }}/AntaREST"
+
+# ---------------------------------------------------------------------------
+#  Where the image and the web application come from
+#
+#  `build`   : the target clones, builds the front-end with node and builds the
+#              image. Self-contained, needs Internet and a few GB of RAM on the
+#              machine that will also run the studies.
+#  `archive` : the target loads a prebuilt image and unpacks a prebuilt
+#              web application from antares_artifacts_dir. Build them once with
+#              `ansible-playbook build.yml`.
+#
+#  `archive` is what makes a destroy-and-replay test loop bearable, and what
+#  guarantees that several servers run the exact same bits: the build uses
+#  `npm install` rather than `npm ci`, so two machines built on different days
+#  do not necessarily produce the same front-end.
+# ---------------------------------------------------------------------------
+antarest_image_source: build
+
+# Controller-side directory holding what build.yml produced. Gitignored.
+antares_artifacts_dir: "{{ playbook_dir }}/artifacts"
+
+# Builder-side paths, used by build.yml only. The build gets a podman store of
+# its own on a chosen volume: a build machine is frequently short of space on /,
+# and this leaves the builder's own podman configuration untouched, the store
+# being passed as a flag rather than written into storage.conf. Set
+# antares_build_root to an empty string to use the machine's normal store.
+antares_build_root: /data/antares-build/store
+antares_build_artifacts: /data/antares-build/artifacts
+
+# Secrets - CHANGE THESE.
+antarest_jwt_key: "secretkeytochange"
+antarest_admin_password: "admin"
+antarest_db_password: "somepass"       # postgres password used by the containers
+
+# Expose adminer (DB web UI) next to Antares-Web, bound on 127.0.0.1:8080.
+antarest_enable_adminer: false
+
+# Ports the machine answers on. They are held by the front door of the
+# antares_edge role, the one container that is not on the podman network: it
+# runs in the host network namespace, so these are the ports its nginx listens
+# on. Here rather than in the role defaults because the hardening role opens
+# them in the firewall, and a role default is only in scope for the play that
+# runs that role.
+antarest_http_port: 80
+antarest_https_port: 443
+
+# The port the Antares-Web nginx is published on. Here rather than in the
+# antares_web role because the front door routes to it and verify.yml probes
+# it, and neither of them runs that role. The address it is published on is
+# antarest_nginx_bind, which only the role itself needs.
+antarest_nginx_port: 8081

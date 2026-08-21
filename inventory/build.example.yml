@@ -25,10 +25,12 @@
 #  -K asks for the sudo password. Drop it if the account has NOPASSWD, or set
 #  ansible_become_password below (better: in an ansible-vault file).
 #
-#  Note on precedence: everything written under a *host* overrides
-#  group_vars/all.yml, while a `vars:` block on a group does not (playbook
-#  group_vars outrank inventory group vars). So per-deployment settings belong
-#  where they are below, on the host.
+#  Note on precedence: there is no group_vars/ next to the playbooks. Every
+#  default lives in a role - roles/<role>/defaults/ for what one role owns,
+#  roles/antares_defaults/ for what several share - and role defaults are the
+#  lowest precedence Ansible has. So anything written in this file wins,
+#  whether on a host or on a group. This is the only file that describes this
+#  deployment.
 # ===========================================================================
 
 all:
@@ -98,6 +100,6 @@ all:
           # never deleted by a build that did not produce them.
           # antares_build_fetch_solvers: true
 
-          # The solver list itself lives in group_vars/all.yml
+          # The solver list itself lives in roles/antares_defaults/
           # (antares_solvers, antares_solver_os) and is shared with the
           # deployment, which is the point: the same list feeds both.

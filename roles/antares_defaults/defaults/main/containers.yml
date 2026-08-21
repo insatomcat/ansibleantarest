@@ -1,0 +1,48 @@
+---
+# ===========================================================================
+#  Podman and the image registry
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+#  Containers
+#
+#  The stack runs on podman, driven by quadlet: each container is a systemd
+#  unit generated from a .container file in /etc/containers/systemd, and
+#  systemd owns the ordering, the restarts and the logs. There is no compose
+#  file and no daemon.
+#
+#  Podman runs rootful, so `User=` inside a container maps straight to the host
+#  UID exactly as it did with Docker. Rootless would remap it through
+#  /etc/subuid and break the UID coherence the shared /home relies on.
+# ---------------------------------------------------------------------------
+container_cmd: /usr/bin/podman
+
+# Images are always written fully qualified: Debian and Ubuntu ship no
+# unqualified-search-registries, so a short name cannot be resolved and podman
+# refuses rather than guessing a registry. The RHEL rebuilds do ship one, and
+# it lists Red Hat's registries before Docker Hub, so a short name there would
+# resolve somewhere else entirely. Fully qualified is the only spelling that
+# means the same thing on both.
+container_registry: docker.io/library
+
+# Mount options appended to every bind mount of every container.
+#
+# On a machine with SELinux enforcing - which is every RHEL rebuild out of the
+# box - a bind mount carries the label of the host directory, and a container
+# is not allowed to read it: the process is container_t and the directory is
+# var_t or home_root_t. `z` relabels the host directory container_file_t, the
+# shared flavour of the two, which is the one that matters here because
+# several containers mount the same directories (the backend and the celery
+# worker share the workspaces, the matrix store and the logs). The private
+# flavour `Z` stamps a per-container category on them instead, so the second
+# container to start would lose access to what the first one relabelled.
+#
+# Empty on a machine without SELinux, where the flag would be a no-op that
+# only makes the units harder to read.
+container_volume_opts: >-
+  {{ ',z' if (ansible_facts.selinux.status | default('disabled')) == 'enabled' else '' }}
+
+# Podman prefixes images built locally with `localhost/`. Both forms resolve
+# for a local lookup, but the explicit one keeps podman from ever reaching out
+# to a registry for our own image.
+container_local_prefix: localhost

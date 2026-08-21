@@ -15,7 +15,8 @@
 #  firewall already trusts, so nothing has to be opened for it.
 #
 #  The switches, the images, the ports and the Grafana password live in
-#  group_vars/all.yml: the front door and the builder both read them.
+#  roles/antares_defaults/: the front door and the builder both read them
+#  without ever running this role.
 # ===========================================================================
 
 monitoring_prometheus_container: prometheus
@@ -73,3 +74,17 @@ monitoring_grafana_root_url: ""
 # the machine this runs on is frequently one that cannot reach the internet at
 # all, where the check is a failed request in the log and nothing else.
 monitoring_grafana_check_updates: false
+
+# How often every target is scraped, and how long the samples are kept. 30s is
+# what the Slurm exporter documentation asks for: each scrape runs sdiag,
+# sinfo and squeue on the controller, and that is not free on a busy cluster.
+# The retention is what decides the size of the database on disk; a fleet of a
+# dozen machines at 30s costs a couple of gigabytes a month.
+monitoring_scrape_interval: 30s
+monitoring_prometheus_retention: 30d
+
+# The name of the Grafana administrator. Only this role uses it; the password
+# that goes with it is monitoring_grafana_admin_password, in
+# roles/antares_defaults/, where the hardening role can see it is still the
+# shipped one.
+monitoring_grafana_admin_user: admin

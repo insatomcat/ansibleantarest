@@ -42,9 +42,10 @@
 #  slurmd matches the machine's own `hostname -s` against the NodeName lines
 #  of slurm.conf, which are generated from it.
 #
-#  Note on precedence, the same one the other inventories carry: settings
-#  written under a *host* override group_vars/all.yml, a `vars:` block on a
-#  group does not. Everything below therefore sits on the host.
+#  Note on precedence, the same one the other inventories carry: every default lives
+#  in a role, which is the lowest precedence Ansible has, so anything written
+#  here wins - on a host or on a group alike. Everything below sits on the
+#  host, which is where it belongs anyway.
 # ===========================================================================
 
 all:
@@ -62,7 +63,7 @@ all:
       ansible_user: ansible
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519_ci
 
-      # slurm_enabled is left alone: group_vars/all.yml already defaults it
+      # slurm_enabled is left alone: antares_defaults already defaults it
       # to true, which is what this inventory is for.
 
       # ---------------------------------------------------------------

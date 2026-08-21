@@ -11,7 +11,7 @@
 Two families are supported: Debian (Debian and Ubuntu, `apt`) and RedHat (Oracle Linux and the other RHEL rebuilds, `dnf`). Every install goes through `ansible.builtin.package`, and everything that actually differs between the two (package names, service names, repositories) is resolved from `ansible_facts['os_family']` in one place per role, so no task exists twice.
 
 ```yaml
-supported_distros:      # group_vars/all.yml
+supported_distros:      # roles/antares_defaults/defaults/main/distributions.yml
   - "Debian 13"
   - "Ubuntu 24"
   - "Ubuntu 26"
@@ -56,7 +56,7 @@ Everything below is done by the playbook. It is listed because it changes the ma
 ## The antares account: choosing UID/GID
 
 ```yaml
-antares_uid: 9000       # group_vars/all.yml
+antares_uid: 9000       # roles/antares_defaults/defaults/main/account.yml
 antares_gid: 9000
 ```
 

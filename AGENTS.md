@@ -32,9 +32,9 @@ than grepping the tree:
 
 A variable is documented on the `docs/` page of its area. What a *role* does,
 what it assumes and what it leaves on the machine is in `roles/<role>/README.md`
-for the eleven roles that have one: `common`, `hardening`, `podman`,
-`antares_web`, `antares_edge`, `antares_auth`, `keycloak`, `slurm_frontend`,
-`monitoring_node`, `monitoring_slurm`, `monitoring_server`.
+for the twelve roles that have one: `antares_defaults`, `common`, `hardening`,
+`podman`, `antares_web`, `antares_edge`, `antares_auth`, `keycloak`,
+`slurm_frontend`, `monitoring_node`, `monitoring_slurm`, `monitoring_server`.
 The others are small enough to read, and their `defaults/main.yml` is
 commented.
 
@@ -56,13 +56,22 @@ commented.
 - `inventory/hosts.yml` - the example inventory, and the documentation of the
   three host groups. `inventory/ci-*.yml` are what the CI runs, including
   `ci-standalone-slurm.yml`, one host listed in the three groups at once.
-- `group_vars/all.yml` - the fleet-wide knobs (587 lines, heavily commented).
-  `group_vars/slurm.yml` for the cluster only.
+- There is no `group_vars/` next to the playbooks. Every default is in the
+  code: `roles/<role>/defaults/main.yml` for what one role owns,
+  `roles/antares_defaults/defaults/main/` for what several roles share, one
+  heavily commented file per area. An inventory overrides any of it, at host
+  or at group level, because role defaults are the lowest precedence there is.
+- `inventory/group_vars/slurm.yml` - the per-node hardware description.
+  Deliberately an *inventory* variable: `slurm.conf` and `/etc/hosts` are
+  rendered from every other node's `hostvars`, and a role default is invisible
+  through `hostvars[other]`. Adjacent to the inventory files, so any
+  `-i inventory/*.yml` picks it up.
 
 ## Roles
 
 | Role | Job |
 |---|---|
+| `antares_defaults` | No tasks, defaults only: everything read by more than one role, or by a playbook outside any role. First entry of every play's `roles:` (or of its `pre_tasks:`) |
 | `common` | Distribution check, repositories, base packages, the `antares` account (UID/GID guard), `/etc/hosts`, time sync |
 | `hardening` | nftables, fail2ban, sshd, unattended updates, persistent journal, firewalld handling |
 | `podman` | podman install plus the version floor quadlet needs |
@@ -99,7 +108,9 @@ to `roles/antares_edge/` with the front door.
 - Comments explain *why*, not what. That is the house style of this repo and
   the reason its diffs are readable. Match the density of the file you touch.
 - Defaults go in `roles/*/defaults/main.yml`, computed values in
-  `roles/*/vars/main.yml`, fleet-wide knobs in `group_vars/all.yml`.
+  `roles/*/vars/main.yml`. A default read by more than one role, or by a
+  playbook outside any role, goes in `roles/antares_defaults/` instead - see
+  the gotcha below.
 - **Any new variable is documented on the `docs/` page of its area in the same
   change**, next to the prose that explains it. That documentation is the
   contract with the operator. Do not restate a default in two places: a role
@@ -111,6 +122,17 @@ to `roles/antares_edge/` with the front door.
 
 ## Gotchas that cost time
 
+- **A shared default has to be a role default, and that role has to be in
+  the play.** Ansible has exactly two tiers below the inventory: role defaults
+  and inventory group vars. A playbook `vars:` block is *above* the inventory,
+  so putting a default there would stop the inventory overriding it - which is
+  why `antares_defaults` is a role and not a `vars_files`. Its defaults reach
+  every role listed after it in the same play, and the play's own `tasks:`,
+  but **nothing crosses a play boundary**: a new play that reads any shared
+  variable must list `antares_defaults` first, like every play of `site.yml`
+  and `verify.yml` already does. The one play with `pre_tasks:` imports it
+  there instead, since pre_tasks run before `roles:` - see `build.yml`. A `when:` on a role entry sees it too, which is what keeps
+  the `*_enabled` guards of `site.yml` working.
 - **Fact cache.** `ansible.cfg` caches facts in `.facts/` for 7200 s. A host
   rebuilt as another distribution keeps its stale facts until a play gathers
   them again. That is why `site.yml` opens with an explicit `setup` play.

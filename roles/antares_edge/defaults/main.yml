@@ -56,7 +56,7 @@ antares_edge_extra_routes: []
 # ---------------------------------------------------------------------------
 #  TLS
 #
-#  Switched on with antarest_tls_enabled in group_vars/all.yml, where the
+#  Switched on with antarest_tls_enabled in roles/antares_defaults/, where the
 #  domain, the provider and the mail address live. What follows is the
 #  plumbing. The variables keep the antarest_ prefix they were deployed under
 #  when the Antares-Web nginx still terminated TLS: they describe the TLS of
@@ -110,3 +110,15 @@ antarest_tls_active: false
 antarest_tls_selinux: >-
   {{ (ansible_facts.selinux.status | default('disabled')) == 'enabled'
      and antarest_tls_provider == 'letsencrypt' }}
+
+# How the certificate is obtained, and who hears about its expiry. The switch
+# and the domain are antarest_tls_enabled and antarest_tls_domain, in
+# roles/antares_defaults/: the hardening role decides which ports to open from
+# the first without ever running this role.
+antarest_tls_provider: letsencrypt
+antarest_tls_email: ""                 # where Let's Encrypt sends expiry notices
+# Issue against the Let's Encrypt staging CA: untrusted certificates, but rate
+# limits that a debugging session cannot exhaust. Switching back to production
+# needs a `certbot renew --force-renewal` (or removing the certificate), since
+# the playbook only obtains one when there is none.
+antarest_tls_staging: false

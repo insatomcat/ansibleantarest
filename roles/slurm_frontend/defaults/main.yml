@@ -1,6 +1,6 @@
 ---
 # The controller and the accounting daemon. Names follow slurm_repo, see
-# group_vars/all.yml and roles/slurm_common/defaults/main.yml.
+# roles/antares_defaults/ and roles/slurm_common/defaults/main.yml.
 slurm_controller_packages: "{{ _slurm_controller_packages_by_repo[slurm_repo] }}"
 _slurm_controller_packages_by_repo:
   distro: >-
@@ -14,3 +14,9 @@ _slurmdbd_packages_by_repo:
     {{ ['slurmdbd'] if ansible_facts['os_family'] == 'Debian' else ['slurm-slurmdbd'] }}
   openhpc:
     - slurm-slurmdbd-ohpc
+
+# The reference procedure uses 12G, which does not fit a small front-end VM.
+slurmdbd_innodb_buffer_pool_size: "1G"
+
+# Where the accounting database keeps its state on the front-end.
+slurmdbd_dir: /var/slurmdb

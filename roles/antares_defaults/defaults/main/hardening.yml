@@ -1,0 +1,60 @@
+---
+# ===========================================================================
+#  Host hardening switches
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+#  Hardening
+#
+#  Written for the case this playbook makes easy: a blank VM, a few minutes,
+#  and an Antares-Web reachable on the internet with 22 and 80 open. Four
+#  blocks, each independent:
+#
+#    firewall   : an nftables input chain with a drop policy. Open to the
+#                 world: the SSH ports sshd actually listens on (read from
+#                 `sshd -T`, not assumed to be 22) and, on an antares_web
+#                 machine, the interface. Open to the other machines of the
+#                 inventory: everything, which is what keeps NFS, Slurm and
+#                 the job submission path working without exposing 2049 or
+#                 6817. This filters the *host*: what the containers publish
+#                 is decided by their units, where adminer and the accounting
+#                 MariaDB are bound to 127.0.0.1.
+#    fail2ban   : the sshd jail, plus a jail on the Antares-Web login form,
+#                 which the API answers 401 on and nginx logs. Bans are
+#                 dropped in the prerouting hook, so they also apply to the
+#                 containers, which an ordinary input-hook ban does not.
+#    ssh        : no password authentication (the role checks your key is in
+#                 place first and stops rather than lock you out), no root
+#                 password login, a shorter grace time.
+#    updates    : security updates that install themselves, without the
+#                 automatic reboot. unattended-upgrades on the Debian family,
+#                 dnf-automatic on the RedHat one.
+#    journal    : Storage=persistent, so that the bans, the crash loops and
+#                 the container logs are still there after the reboot those
+#                 updates eventually call for. Capped, see
+#                 hardening_journal_max_use.
+#
+#  Turning the firewall on is the one that can cut you off, so read what it
+#  opens above. It never closes the port you are connected on, and the play
+#  refuses to run if it cannot work out which one that is.
+#
+#  On a RHEL rebuild there is already a firewall running: firewalld, enabled by
+#  the installer, dropping everything but SSH. Debian and Ubuntu ship none.
+#  `hardening_firewall_enabled: false` means no host firewall, so firewalld is
+#  stopped, disabled and masked either way; the nftables table is what the
+#  knob actually turns on. Two filters that have to agree is exactly the
+#  situation the comment above warns about. Set hardening_manage_firewalld
+#  to false to be left alone with firewalld.
+# ---------------------------------------------------------------------------
+hardening_enabled: true
+
+# Off by default: a cloud VM already sits behind a security group, and two
+# filters that have to agree is one more place for a rule to go missing. Turn
+# it on for a machine that has nothing in front of it (bare metal, a hypervisor
+# without a filtering layer, a VM on a flat network), and read what it opens
+# above before doing so. It is also the answer for a Slurm front-end, whose NFS
+# export with no_root_squash is the one thing here that must never be reachable
+# from anywhere else.
+hardening_firewall_enabled: false
+
+hardening_journal_persistent: true

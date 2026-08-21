@@ -76,3 +76,17 @@ _common_epel_release_by_distro:
 common_epel_repo: "{{ _common_epel_repo_by_distro[ansible_facts['distribution']] | default('epel') }}"
 _common_epel_repo_by_distro:
   OracleLinux: "ol{{ ansible_facts['distribution_major_version'] }}(?:_u[0-9]+)?_developer_EPEL"
+
+# The Ubuntu images run apt-daily and unattended-upgrades on boot, which holds
+# the dpkg lock for a few minutes. Rather than passing this to every single
+# install task, the common role writes it into apt.conf.d, where it also covers
+# the apt commands this playbook does not run itself. Debian family only; dnf
+# takes its own lock and waits by itself.
+apt_lock_timeout: 300
+
+# Whether the distribution of the target is checked against supported_distros
+# (roles/antares_defaults/) before anything is installed.
+distro_check_enabled: true
+
+# Write the cluster nodes into /etc/hosts so every node can resolve the others.
+manage_etc_hosts: true
