@@ -8,7 +8,7 @@ antarest_external_auth_default_group_role: 10      # 10 reader ... 40 admin
 antarest_external_auth_add_ext_groups: true
 ```
 
-A user who logs in that way is created in the database on the spot, with the role `antarest_external_auth_default_group_role` in each group the service returned. `antarest_external_auth_add_ext_groups` decides whether groups that do not exist yet are created; with it off, only the groups listed in `antarest_external_auth_group_mapping` are honoured, which is the way to expose two or three of them and ignore the rest.
+A user who logs in that way is created in the database on the spot, with the role `antarest_external_auth_default_group_role` in each group the service returned. `antarest_external_auth_add_ext_groups` decides whether every group it returned is honoured or only those `antarest_external_auth_group_mapping` names, which is the way to expose two or three of them and ignore the rest. The mapping is read in both cases: it turns the id the connector sends into the id of the local group, and a group that is honoured is created when it does not exist yet - a group that already exists keeps its own name, the one the connector sends only names the new ones.
 
 ## The connectors
 
