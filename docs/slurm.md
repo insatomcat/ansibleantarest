@@ -38,6 +38,34 @@ slurm_repo: openhpc          # `distro` on the Debian family
 
 The release rpm is installed with the GPG check disabled, since it is what brings in the key its own repositories are signed with; everything pulled from them afterwards is verified normally. On a machine where nothing provides the `epel-release` capability the release rpm requires, Oracle Linux 10 being the case today, it is installed with `rpm -Uvh --nodeps` instead, see the table in [what a RHEL-compatible target needs on top](requirements.md#what-a-rhel-compatible-target-needs-on-top). Package names then carry an `-ohpc` suffix (`slurm-ohpc`, `slurm-slurmctld-ohpc`, `slurm-slurmd-ohpc`, `slurm-slurmdbd-ohpc`) and nothing else moves: the daemons, `/etc/slurm`, the `slurm` account and the generated `slurm.conf` are the same as on Debian. Set `slurm_repo: distro` to install Slurm yourself and only let the playbook configure it.
 
+## The name a machine answers to
+
+Every name the generated configuration carries - `DbdHost`, `SlurmctldHost`, `AccountingStorageHost`, `NodeName` - comes from `slurm_node_name`, which defaults to the inventory name:
+
+```yaml
+slurm_node_name: "{{ inventory_hostname.split('.')[0] }}"   # group_vars/slurm.yml
+```
+
+That is right whenever the inventory names machines the way they name themselves, and wrong on a machine whose hostname was decided by someone else: a cloud image, an installer, a corporate naming scheme. It matters more than it looks, because **every Slurm daemon compares its own `gethostname()` with what the configuration names it and refuses to run on a mismatch**: `slurmdbd` and `slurmctld` exit with `This host not configured to run SlurmDBD ((web-1 or web-1) != antares-solo)`, and `slurmd` simply never registers, leaving the node down in `sinfo`.
+
+`slurm_common` therefore reads the machine's own name before anything is installed and stops there, naming both names and the three ways out. Without it the run gets much further and dies in "Wait for slurmdbd to listen", on a two-minute timeout for a port, with nothing in the message about a name.
+
+Two ways to make the two agree, and one to say you know better:
+
+```yaml
+# the usual one: keep the inventory name, tell Slurm the machine's own
+slurm_node_name: antares-web-1
+
+# or the other way round: rename the machine after the inventory. Applied
+# immediately, but a reboot is what makes everything already running agree
+manage_hostname: true
+
+# or deploy anyway, for a cluster whose daemons are told their name elsewhere
+slurm_hostname_check: false
+```
+
+`slurm_node_ip` follows the same idea for the address, which is read from the facts of the default route and overridden per host when that points at the wrong interface.
+
 ## The cluster on the web machine itself
 
 One machine can play every part: the web application, the Slurm controller, the accounting database, the NFS export and the single compute node that runs the studies. It is one inventory away, and nothing in the roles is specific to it - each of them decides what it installs from the groups the host is in rather than from the play it sits in, so a host listed three times gets the union of the three behaviours.
