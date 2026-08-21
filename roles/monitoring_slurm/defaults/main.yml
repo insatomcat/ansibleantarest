@@ -1,0 +1,59 @@
+---
+# ===========================================================================
+#  The Slurm exporter, on the front-end
+#
+#  One container next to slurmctld, reading the cluster the way an operator
+#  does: it runs the `sinfo`, `squeue`, `sdiag` and `sshare` of its own image
+#  against the controller of this machine and turns their output into metrics.
+#  The queue, the partitions, the state of every node and the internals of the
+#  scheduler then sit in the same Prometheus as the memory and the disks of
+#  the machines running them.
+#
+#  It is the one container of this deployment whose *version* has to agree
+#  with something outside it. The image carries its own slurm-client, and
+#  slurmctld serves commands of its own release and of the two before it,
+#  never a newer one. tasks/preflight.yml reads both versions - the cluster's
+#  from this machine, the image's from the image - and simply does not deploy
+#  the exporter when the pair cannot work, rather than leaving an empty
+#  dashboard to be puzzled over. Prometheus is not told about it either. See
+#  docs/monitoring.md.
+#
+#  The switch (monitoring_slurm_enabled), the image and the port live in
+#  group_vars/all.yml, next to the rest of the monitoring knobs.
+# ===========================================================================
+
+monitoring_slurm_exporter_container: slurm-exporter
+
+# Address the exporter binds, exactly like the node exporter: empty means
+# every interface, because the machine that scrapes it is the web server and
+# not this one, and what keeps the port private is the firewall.
+monitoring_slurm_exporter_bind: ""
+
+# Collectors turned off, one name per entry, passed as --no-collector.<name>.
+#
+# `sacct_efficiency` is off in the exporter itself and stays off here: it
+# queries slurmdbd over a window on every refresh, which is a real query on a
+# cluster that finishes thousands of jobs an hour. The others are cheap on a
+# cluster of this size - the ones worth naming here first are `fairshare` and
+# `queue`, whose cardinality grows with the number of users.
+monitoring_slurm_exporter_disabled_collectors: []
+
+# How long a Slurm command may take before the exporter gives up on it. The
+# exporter's own default is 5s, which is what a healthy controller answers in
+# well under. Raised on a cluster where sdiag is slow, and worth raising
+# before blaming the scrape interval.
+monitoring_slurm_exporter_command_timeout: 5s
+
+# Anything else to pass the exporter, one flag per entry. This is where
+# --slurm.bin-path goes on a deployment that pins one of the publisher's
+# `-minimal` images, which carry no slurm-client of their own and read the
+# host's binaries instead - those then have to be mounted too, by overriding
+# monitoring_slurm_exporter_volumes. See docs/monitoring.md.
+monitoring_slurm_exporter_extra_flags: []
+
+# Whether that comparison is made at all. Off deploys the exporter whatever
+# the two versions say, which is what an operator who knows better than the
+# check wants - a client patched for their cluster, or a `-minimal` image
+# reading the host's own binaries, where there is nothing in the image to
+# read and the check already stands aside.
+monitoring_slurm_version_check: true

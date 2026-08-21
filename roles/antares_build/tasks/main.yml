@@ -43,7 +43,9 @@
 # fleet default to the same adminer.
 - name: Pull the third-party images
   ansible.builtin.command: "{{ container_cmd }} pull {{ item }}"
-  loop: "{{ (antares_build_thirdparty_images + antares_build_slurm_images) | unique }}"
+  loop: >-
+    {{ (antares_build_thirdparty_images + antares_build_slurm_images
+        + antares_build_monitoring_images) | unique }}
   changed_when: true
 
 - name: Save the third-party images
@@ -71,6 +73,21 @@
       | gzip -1 > {{ antares_build_artifacts }}/slurm-thirdparty-{{ item | regex_replace('[^a-zA-Z0-9]', '-') }}.tar.gz
     executable: /bin/bash
   loop: "{{ antares_build_slurm_images }}"
+  changed_when: true
+
+# One more prefix, for the same reason as the one above and with one more
+# consumer: these are loaded by every machine of the inventory rather than by
+# one of them, each taking the one or two archives it runs by name. Grafana
+# alone is a couple of hundred megabytes, and a compute node runs a node
+# exporter and nothing else.
+- name: Save the monitoring images
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      {{ container_cmd }} save --format docker-archive {{ item }}
+      | gzip -1 > {{ antares_build_artifacts }}/{{ monitoring_image_archives[item] }}
+    executable: /bin/bash
+  loop: "{{ antares_build_monitoring_images }}"
   changed_when: true
 
 - name: Archive the built web application

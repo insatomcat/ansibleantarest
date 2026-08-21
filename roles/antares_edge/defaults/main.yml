@@ -41,9 +41,13 @@ antares_edge_proxy_read_timeout: 1200
 # location, longest prefix wins whatever the order:
 #
 #   antares_edge_extra_routes:
-#     - path: /grafana/
-#       upstream: 127.0.0.1:8083
-#       name: Grafana          # comment written next to the location
+#     - path: /reports/
+#       upstream: 127.0.0.1:8090
+#       name: Reports          # comment written next to the location
+#
+# What the deployment installs itself is already routed and does not belong
+# here: the web application, Keycloak and, with monitoring_enabled, Grafana.
+# See vars/main.yml.
 #
 # `upstream` is deliberately an address and a port rather than a name: see the
 # header of this file.

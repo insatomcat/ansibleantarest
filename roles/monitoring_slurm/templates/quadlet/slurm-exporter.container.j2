@@ -1,0 +1,38 @@
+{{ ansible_managed | comment }}
+#
+# The Slurm exporter of the {{ slurm_cluster_name }} cluster.
+#
+# In the host network namespace like the other exporters, and for one more
+# reason than they have: the Slurm commands inside it read
+# {{ slurm_conf_dir }}/slurm.conf and connect to the controller it names,
+# which on this deployment is this very machine.
+#
+# It is not part of the Slurm daemons and nothing depends on it: a scrape that
+# fails is a gap in a graph, never a job that does not run.
+
+[Unit]
+Description=Prometheus Slurm exporter
+# The controller it reads and the socket it authenticates through. Ordering
+# only - After= does not start them - so that a reboot does not hand the
+# exporter a cluster that is not up yet and spend its start budget on it.
+After=munge.service slurmctld.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Container]
+ContainerName={{ monitoring_slurm_exporter_container }}
+Image={{ monitoring_slurm_exporter_image }}
+Network=host
+{% for volume in monitoring_slurm_exporter_volumes %}
+Volume={{ volume }}
+{% endfor %}
+PodmanArgs={{ monitoring_slurm_exporter_podman_args | trim }}
+
+Exec={{ monitoring_slurm_exporter_flags | trim }}
+
+[Service]
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

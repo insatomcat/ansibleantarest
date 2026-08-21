@@ -1,0 +1,38 @@
+---
+# monitoring_enabled turned back off. The containers go away; the databases
+# they wrote stay, so turning it on again finds the history where it left it.
+# Dropping a month of samples is a decision for an operator with an `rm`, not
+# for a variable.
+#
+# Stop first, while the services still exist: deleting the unit files alone
+# makes systemd forget them at the next daemon-reload and leaves the
+# containers running.
+- name: Look for the monitoring units
+  ansible.builtin.stat:
+    path: "/etc/containers/systemd/{{ item }}.container"
+  loop:
+    - "{{ monitoring_prometheus_container }}"
+    - "{{ monitoring_grafana_container }}"
+  register: monitoring_server_stale_units
+
+- name: Stop Prometheus and Grafana
+  ansible.builtin.systemd:
+    name: "{{ item.item }}.service"
+    state: stopped
+  loop: "{{ monitoring_server_stale_units.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Remove the monitoring units
+  ansible.builtin.file:
+    path: "/etc/containers/systemd/{{ item }}.container"
+    state: absent
+  loop:
+    - "{{ monitoring_prometheus_container }}"
+    - "{{ monitoring_grafana_container }}"
+  register: monitoring_server_units_removed
+
+- name: Reload systemd so the generator forgets them
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: monitoring_server_units_removed.changed

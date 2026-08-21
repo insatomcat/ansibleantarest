@@ -59,6 +59,11 @@
       # web machine, MariaDB alone being a few hundred megabytes. The
       # front-end pulls them itself, from the same directory, by that prefix.
       - "--exclude=slurm-thirdparty-*.tar.gz"
+      # Same, for the monitoring images: each machine of the fleet ships its
+      # own by name (roles/monitoring_node/tasks/load_artifacts.yml), this one
+      # included, so shipping them all here would send Grafana twice and the
+      # Slurm exporter to a machine that does not run it.
+      - "--exclude=monitoring-thirdparty-*.tar.gz"
       - "--include=*.tar.gz"
       - "--include=manifest.yml"
       - "--exclude=*"

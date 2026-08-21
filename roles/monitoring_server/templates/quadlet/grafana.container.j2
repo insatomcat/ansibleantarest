@@ -1,0 +1,66 @@
+{{ ansible_managed | comment }}
+#
+# Grafana, in the host network namespace and bound to 127.0.0.1: the front
+# door proxies {{ monitoring_grafana_path }} here, which is also the prefix
+# Grafana is told to serve itself under, so the same name carries Antares-Web,
+# its identity provider and its dashboards.
+#
+# This file carries the administrator password and is deployed 0600.
+
+[Unit]
+Description=Grafana
+# Ordering only, and on purpose: Grafana starts perfectly well without
+# Prometheus and shows a datasource that does not answer, which is a far
+# better failure than not starting at all.
+After={{ monitoring_prometheus_container }}.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+{% if antarest_data_device %}
+# Its sqlite database is on a volume mounted with nofail. Without this the
+# unit would start on the empty mount point of the boot disk and create an
+# empty database there.
+RequiresMountsFor={{ antarest_data_dir }}
+{% endif %}
+
+[Container]
+ContainerName={{ monitoring_grafana_container }}
+Image={{ monitoring_grafana_image }}
+Network=host
+{% for volume in monitoring_grafana_volumes %}
+Volume={{ volume }}
+{% endfor %}
+
+# Bound to the loopback: everything else on this machine publishes there and
+# lets the front door hold the ports of the machine.
+Environment=GF_SERVER_HTTP_ADDR=127.0.0.1
+Environment=GF_SERVER_HTTP_PORT={{ monitoring_grafana_port }}
+
+# What Grafana builds its own URLs with, and the prefix it serves itself
+# under. The two go together: with SERVE_FROM_SUB_PATH on, Grafana handles
+# {{ monitoring_grafana_path }} itself, so the front door passes the path
+# through untouched rather than stripping it.
+Environment=GF_SERVER_ROOT_URL={{ monitoring_grafana_public_url | trim }}
+Environment=GF_SERVER_SERVE_FROM_SUB_PATH=true
+
+# Seeds the administrator, and only that: like the admin password of
+# Antares-Web and of Keycloak, it is read when the database is empty and
+# ignored ever after. Changing it later is done from the interface, or with
+# `podman exec -it {{ monitoring_grafana_container }} grafana cli admin reset-admin-password`.
+Environment=GF_SECURITY_ADMIN_USER={{ monitoring_grafana_admin_user }}
+Environment=GF_SECURITY_ADMIN_PASSWORD={{ monitoring_grafana_admin_password }}
+
+# Nobody signs themselves up on a deployment whose accounts are created by an
+# operator, and the metrics of a fleet are not something to leave open.
+Environment=GF_USERS_ALLOW_SIGN_UP=false
+Environment=GF_AUTH_ANONYMOUS_ENABLED=false
+Environment=GF_ANALYTICS_REPORTING_ENABLED=false
+Environment=GF_ANALYTICS_CHECK_FOR_UPDATES={{ monitoring_grafana_check_updates | bool | lower }}
+
+[Service]
+Restart=on-failure
+RestartSec=10
+# The first start creates the database and runs every migration of the image.
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

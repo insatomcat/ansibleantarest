@@ -1,0 +1,21 @@
+---
+# Runs after preflight.yml, which loaded the image and said the client inside
+# it can talk to the slurmctld of this machine.
+
+- name: Deploy the Slurm exporter quadlet unit
+  ansible.builtin.template:
+    src: quadlet/slurm-exporter.container.j2
+    dest: "/etc/containers/systemd/{{ monitoring_slurm_exporter_container }}.container"
+    owner: root
+    group: root
+    mode: "0644"
+  register: monitoring_slurm_unit
+  notify: Restart the Slurm exporter
+
+- name: Reload systemd so the quadlet generator picks the unit up
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: monitoring_slurm_unit.changed
+
+- name: Start the Slurm exporter
+  ansible.builtin.include_tasks: service.yml

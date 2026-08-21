@@ -1,0 +1,15 @@
+---
+# One container each, and never the stack: a scrape target that changed has no
+# business restarting Antares-Web, and a Grafana that restarts costs a browser
+# refresh.
+- name: Restart Prometheus
+  ansible.builtin.systemd:
+    name: "{{ monitoring_prometheus_container }}.service"
+    state: restarted
+    daemon_reload: true
+
+- name: Restart Grafana
+  ansible.builtin.systemd:
+    name: "{{ monitoring_grafana_container }}.service"
+    state: restarted
+    daemon_reload: true

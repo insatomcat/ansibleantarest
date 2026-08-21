@@ -1,0 +1,25 @@
+---
+# Either switch turned back off. Stop first, while the service still exists,
+# then remove the file: a daemon-reload after the removal alone would leave
+# systemd with no unit and the container still running.
+- name: Look for the Slurm exporter unit
+  ansible.builtin.stat:
+    path: "/etc/containers/systemd/{{ monitoring_slurm_exporter_container }}.container"
+  register: monitoring_slurm_stale_unit
+
+- name: Stop the Slurm exporter
+  ansible.builtin.systemd:
+    name: "{{ monitoring_slurm_exporter_container }}.service"
+    state: stopped
+  when: monitoring_slurm_stale_unit.stat.exists
+
+- name: Remove the Slurm exporter unit
+  ansible.builtin.file:
+    path: "/etc/containers/systemd/{{ monitoring_slurm_exporter_container }}.container"
+    state: absent
+  register: monitoring_slurm_unit_removed
+
+- name: Reload systemd so the generator forgets it
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: monitoring_slurm_unit_removed.changed

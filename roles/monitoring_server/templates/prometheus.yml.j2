@@ -1,0 +1,85 @@
+{{ ansible_managed | comment }}
+#
+# Mounted read-only as /etc/prometheus/prometheus.yml in the
+# {{ monitoring_prometheus_container }} container, which runs in the host
+# network namespace: every address below is reached from the machine itself,
+# with no podman network in the way.
+#
+# The targets are the machines of the inventory, by the address their facts
+# report, which is the address the firewall of each of them trusts. Nothing
+# has to be opened for this: roles/hardening trusts the machines of the
+# deployment and drops everyone else, so these ports answer Prometheus and
+# nobody else.
+#
+# The `instance` label is set to the inventory name rather than left to
+# default to `address:port`: a graph that names a machine the way the operator
+# does is worth more than one that names it the way the network does, and a
+# machine that is rebuilt with another address keeps its history.
+
+global:
+  scrape_interval: {{ monitoring_scrape_interval }}
+  # What Prometheus stamps on every sample it stores, so that a database
+  # copied elsewhere still says where it came from.
+  external_labels:
+    deployment: {{ inventory_hostname }}
+
+scrape_configs:
+
+{% macro host_role(host) %}
+{%- if host in groups['antares_web'] | default([]) -%}antares_web
+{%- elif host in groups['slurm_frontend'] | default([]) -%}slurm_frontend
+{%- elif host in groups['slurm_compute'] | default([]) -%}slurm_compute
+{%- else -%}other
+{%- endif -%}
+{% endmacro %}
+{% macro host_address(host) %}
+{{- hostvars[host].monitoring_node_address | default('', true)
+    or hostvars[host].ansible_facts.default_ipv4.address -}}
+{% endmacro %}
+  # Every machine of the deployment. A host listed in several groups - the
+  # single-machine shape, where the web server is also its own cluster - is
+  # scraped once and labelled with the first of them, so a target is never
+  # counted twice.
+  - job_name: node
+    static_configs:
+{% for host in monitoring_scrape_hosts %}
+      - targets: ["{{ host_address(host) }}:{{ monitoring_node_exporter_port }}"]
+        labels:
+          instance: "{{ host }}"
+          role: "{{ host_role(host) }}"
+{% endfor %}
+{% if slurm_enabled | bool and monitoring_slurm_enabled | bool %}
+{% set slurm_targets = (groups['slurm_frontend'] | default([])) | intersect(monitoring_scrape_hosts)
+                       | select('in', monitoring_slurm_scraped_hosts) | list %}
+{% if slurm_targets | length > 0 %}
+
+  # The cluster as its controller sees it: the queue, the partitions, the
+  # state of every node. One target, since one cluster has one controller.
+  #
+  # Absent when the front-end did not deploy its exporter, which it decides
+  # from the Slurm version of the image against its own: a target that cannot
+  # answer has no business being declared here, where it would be a red line
+  # in the interface for something that was skipped on purpose.
+  - job_name: slurm
+    static_configs:
+{% for host in slurm_targets %}
+      - targets: ["{{ host_address(host) }}:{{ monitoring_slurm_exporter_port }}"]
+        labels:
+          instance: "{{ host }}"
+          cluster: "{{ slurm_cluster_name }}"
+{% endfor %}
+{% endif %}
+{% endif %}
+
+  # Prometheus itself, on the loopback. It is the one target whose absence
+  # nothing else can report.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:{{ monitoring_prometheus_port }}"]
+        labels:
+          instance: "{{ inventory_hostname }}"
+{% if monitoring_extra_scrape_jobs | length > 0 %}
+
+  # Appended from monitoring_extra_scrape_jobs.
+{{ monitoring_extra_scrape_jobs | to_nice_yaml(indent=2) | indent(2, true) }}
+{% endif %}

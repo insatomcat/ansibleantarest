@@ -10,6 +10,9 @@
 #    - thirdparty-*.tar.gz       postgres, redis, nginx, adminer if enabled
 #    - slurm-thirdparty-*.tar.gz the accounting database images, when there is
 #                                a cluster: they go to the Slurm front-end only
+#    - monitoring-thirdparty-*   the exporters, Prometheus and Grafana, when
+#                                monitoring is on: each machine of the fleet
+#                                loads the one or two it runs
 #    - webapp-dist.tar.gz        the built web application
 #    - antares-*.tar.gz          the solver tarballs
 #    - antaresXpansion-*.tar.gz  the Xpansion releases, when they are enabled
