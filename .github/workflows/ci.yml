@@ -635,7 +635,8 @@ jobs:
           # runs instead of this step.
           for unit in postgresql redis antarest antarest-celery-beat \
                       antarest-celery-worker antares-nginx antares-edge \
-                      keycloak antares-auth-keycloak; do
+                      keycloak antares-auth-keycloak \
+                      node-exporter prometheus grafana; do
             for _ in $(seq 1 12); do
               state=$(vm "systemctl is-active $unit.service" || true)
               case "$state" in
@@ -688,6 +689,33 @@ jobs:
                http://127.0.0.1:8080/auth/realms/antares/.well-known/openid-configuration
           grep -q '"token_endpoint"' /tmp/oidc.json
 
+          # Grafana, through the same front door and from the same outside.
+          # /api/health rather than the login page: it answers a document
+          # with the state of Grafana's own database in it, so a 200 here
+          # says the container is up, that the front door routes
+          # monitoring_grafana_path to it, and that Grafana serves itself
+          # under that prefix rather than at the root - which is the half
+          # GF_SERVER_SERVE_FROM_SUB_PATH gets wrong when it disagrees with
+          # the location. The cluster jobs get this check from verify.yml.
+          curl -fsS -o /tmp/grafana.json \
+               -w 'GET /grafana/api/health -> %{http_code}\n' \
+               http://127.0.0.1:8080/grafana/api/health
+          jq -e '.database == "ok"' /tmp/grafana.json > /dev/null
+
+          # And that Prometheus is really scraping this machine. Asked from
+          # inside it, because that is where Prometheus is bound: the point
+          # of the loopback bind is that this cannot be asked from anywhere
+          # else. A target that is `unknown` here is one that has not been
+          # scraped yet, which after a full deployment it has.
+          vm "curl -fsS 'http://127.0.0.1:8084/api/v1/targets?state=active'" \
+             > /tmp/prom-targets.json
+          jq -r '.data.activeTargets[] | "\(.labels.job) \(.scrapeUrl) \(.health) \(.lastError)"' \
+             /tmp/prom-targets.json
+          if [ "$(jq '[.data.activeTargets[] | select(.health != "up")] | length' /tmp/prom-targets.json)" != 0 ]; then
+            echo "::error::a Prometheus target is not up on ${{ matrix.target.label }}"
+            exit 1
+          fi
+
           # And the connector the backend POSTs its logins to. It publishes
           # no port on purpose, so this is asked from inside the machine, on
           # the podman network, exactly the way antarest reaches it.
@@ -735,7 +763,8 @@ jobs:
           vm 'sudo podman images'
           for unit in postgresql redis antarest antarest-celery-beat \
                       antarest-celery-worker antares-nginx antares-edge \
-                      keycloak antares-auth-keycloak; do
+                      keycloak antares-auth-keycloak \
+                      node-exporter prometheus grafana; do
             echo "===== $unit.service"
             vm "sudo journalctl -u $unit.service --no-pager -n 100"
           done
@@ -1241,11 +1270,17 @@ jobs:
           vm slurm-front 'sudo journalctl -t sshd -t sshd-session --no-pager -n 200;
                           sudo fail2ban-client status sshd;
                           sudo nft list table inet antares_f2b'
+          # On the front-end and nowhere else: it is the one exporter that
+          # talks to something outside its own machine, and a Slurm version
+          # it cannot speak to is what its journal says.
+          echo "===== the front-end slurm exporter"
+          vm slurm-front 'sudo journalctl -u slurm-exporter.service --no-pager -n 100'
           echo "===== the web machine"
           vm antares-web 'sudo podman ps -a'
           for unit in postgresql redis antarest antarest-celery-beat \
                       antarest-celery-worker antares-nginx antares-edge \
-                      keycloak antares-auth-keycloak; do
+                      keycloak antares-auth-keycloak \
+                      node-exporter prometheus grafana; do
             echo "===== $unit.service"
             vm antares-web "sudo journalctl -u $unit.service --no-pager -n 100"
           done
@@ -1594,7 +1629,8 @@ jobs:
               sudo nft list table inet antares_f2b'
           for unit in postgresql redis antarest antarest-celery-beat \
                       antarest-celery-worker antares-nginx antares-edge \
-                      keycloak antares-auth-keycloak; do
+                      keycloak antares-auth-keycloak \
+                      node-exporter slurm-exporter prometheus grafana; do
             echo "===== $unit.service"
             vm "sudo journalctl -u $unit.service --no-pager -n 100"
           done
