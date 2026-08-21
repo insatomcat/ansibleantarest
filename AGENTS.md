@@ -42,9 +42,13 @@ commented.
 
 - `site.yml` - the deployment. Reads the plays in order: facts, common,
   hardening, the node exporter of every machine, then the Slurm half, then
-  Antares-Web. Every role is guarded by a `when:` on an `*_enabled` flag,
-  except the ones that also know how to remove themselves (`keycloak`,
-  `antares_auth`, the three `monitoring_*`), which run either way.
+  Antares-Web. Every play that is not aimed at a group targets `all:!builder`:
+  a builder is not a machine of the deployment, `build.yml` sets it up itself,
+  and the same difference is taken in the firewall's peer set, in the
+  Prometheus targets and in `verify.yml`. Every role is guarded by a `when:`
+  on an `*_enabled` flag, except the ones that also know how to remove
+  themselves (`keycloak`, `antares_auth`, the three `monitoring_*`), which run
+  either way.
 - `build.yml` - builds the artefacts once on a `builder` host and pulls them
   into `artifacts/` on the controller. Reuses the very task files of
   `antares_web`, so artefacts cannot be built by a different recipe than the

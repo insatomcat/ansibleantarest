@@ -56,18 +56,27 @@
 #  A machine whose facts are not in the play (a --limit run, an empty cache)
 #  contributes nothing, hence the caching in ansible.cfg and the fact-gathering
 #  play at the top of site.yml.
+#
+#  A builder is not one of those machines: it holds no service, none of these
+#  ports are ever opened towards it, and site.yml does not configure it. It is
+#  taken out of the set here rather than left to contribute an address the
+#  firewall would trust for NFS and Slurm, and out of the warning below, which
+#  would otherwise name it on every run now that its facts are not gathered.
+#  Same difference as roles/monitoring_server/vars/main.yml.
 # ---------------------------------------------------------------------------
 - name: Resolve the addresses of the other machines of the deployment
   ansible.builtin.set_fact:
     hardening_peers_v4: >-
-      {{ ((groups['all'] | default([]) | map('extract', hostvars)
+      {{ (((groups['all'] | default([])) | difference(groups['builder'] | default([]))
+           | map('extract', hostvars)
            | map(attribute='ansible_facts.all_ipv4_addresses', default=[]) | list | flatten
            if hardening_firewall_trust_inventory | bool else [])
           + (hardening_firewall_extra_sources | reject('search', ':') | list))
          | reject('match', '^127\.')
          | reject('match', hardening_peer_exclude_pattern) | unique | sort }}
     hardening_peers_v6: >-
-      {{ ((groups['all'] | default([]) | map('extract', hostvars)
+      {{ (((groups['all'] | default([])) | difference(groups['builder'] | default([]))
+           | map('extract', hostvars)
            | map(attribute='ansible_facts.all_ipv6_addresses', default=[]) | list | flatten
            if hardening_firewall_trust_inventory | bool else [])
           + (hardening_firewall_extra_sources | select('search', ':') | list))
@@ -87,7 +96,7 @@
       hardening_firewall_extra_sources.
   vars:
     hardening_faceless_hosts: >-
-      {% for host in groups['all'] | default([])
+      {% for host in (groups['all'] | default([])) | difference(groups['builder'] | default([]))
          if hostvars[host].ansible_facts.all_ipv4_addresses is not defined %}
       {{- host }} {% endfor %}
   when:
