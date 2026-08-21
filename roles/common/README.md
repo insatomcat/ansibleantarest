@@ -22,6 +22,6 @@ the cluster resolves without a DNS zone. That makes this role, like
 `slurm_common`, sensitive to `--limit`: a run that gathers a subset writes a
 subset.
 
-Variables live in `defaults/main.yml`, the fleet-wide ones in
-`group_vars/all.yml`. What the two families need on top is documented in
+Variables live in `defaults/main.yml`, the shared ones in
+`roles/antares_defaults/`. What the two families need on top is documented in
 [Requirements](../../docs/requirements.md).

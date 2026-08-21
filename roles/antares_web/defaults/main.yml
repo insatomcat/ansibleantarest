@@ -9,8 +9,8 @@ antarest_data_dir: "{{ antarest_base_dir }}/data"
 
 # A block device to hold that state instead of the boot disk. Empty keeps
 # everything on the boot disk, which is what every deployment did before this
-# existed. A device name is a property of one machine, so this belongs in the
-# inventory rather than in group_vars/all.yml:
+# existed. A device name is a property of one machine, so this belongs on the
+# host in the inventory rather than on a group:
 #
 #   antares_web_1:
 #     antarest_data_device: /dev/oracleoci/oraclevdb
@@ -154,9 +154,12 @@ antarest_external_auth_url: >-
 # enum of antarest/core/roles.py: 10 reader, 20 runner, 30 writer, 40 admin.
 # 10 is the upstream default and the lowest of the four.
 antarest_external_auth_default_group_role: 10
-# Whether the groups returned by that service are created in the application,
-# and how their names are translated to local ones. The mapping is only read
-# when the groups are added.
+# Which of the groups that service returns are honoured, and under which id.
+# `add_ext_groups` on takes them all; off, the mapping is a whitelist and only
+# the groups it names get through, which is how two or three of them are
+# exposed and the rest ignored. The mapping is read either way: it turns the
+# id the connector sends into the id of the local group, and a group that is
+# honoured is created when it does not exist yet.
 antarest_external_auth_add_ext_groups: false
 antarest_external_auth_group_mapping: {}
 
@@ -270,9 +273,9 @@ antarest_tasks_gc_retention_days: 30
 antarest_auto_archive_threshold_days: 60
 
 # The ports the machine answers on (antarest_http_port, antarest_https_port)
-# live in group_vars/all.yml: they belong to the front door of the antares_edge
-# role now, and the hardening role has to open them in the firewall, which it
-# cannot read from a role default.
+# live in roles/antares_defaults/: they belong to the front door of the
+# antares_edge role now, and the hardening role has to open them in the
+# firewall without running either role.
 
 # ---------------------------------------------------------------------------
 #  nginx
@@ -281,7 +284,7 @@ antarest_auto_archive_threshold_days: 60
 #  and that is all it does. TLS, the ACME challenge and the routing of
 #  everything else the machine serves belong to the antares_edge role. It is
 #  published on the loopback alone (antarest_nginx_bind, antarest_nginx_port in
-#  group_vars/all.yml), the front door being what the outside reaches.
+#  roles/antares_defaults/), the front door being what the outside reaches.
 # ---------------------------------------------------------------------------
 
 # Checksum of the resources/deploy/nginx.conf the rendered configuration was
@@ -333,3 +336,67 @@ antarest_login_username_label: '{t("global.username")}'
 
 antares_web_packages:
   - git
+
+# Shallow clone by default: nothing here needs the history, and the checkout is
+# reset on every run anyway. Set to 0 for a full clone.
+antarest_clone_depth: 1
+
+# Node version used to build the web app. `auto` reads webapp/.nvmrc from the
+# checkout, which is the version the project actually tests against.
+antarest_node_version: auto
+
+# Add an antares_uid/antares_gid account inside the backend image. The
+# containers run as that pair so that the files they create in the bind mounts
+# belong to the antares user; without a matching passwd entry some code paths
+# that need a home directory fail.
+#
+# Note that this bakes antares_uid into the image, so a prebuilt image is only
+# reusable across machines that agree on the value. Setting HOME in the compose
+# environment instead would decouple the two, at the cost of losing the passwd
+# entry.
+antarest_add_container_user: true
+
+# `local`, `slurm`, or leave it to follow slurm_enabled.
+antarest_default_launcher: "{{ 'slurm' if slurm_enabled | bool else 'local' }}"
+
+# Number of cores offered in the Antares-Web launch dialog for Slurm jobs.
+# The maximum is capped to the smallest compute node, otherwise jobs asking
+# for more cores than any node owns stay pending forever.
+#
+# A compute node whose facts are not around contributes nothing rather than
+# taking the play down: a --limit run on the web machine with an expired cache
+# leaves hostvars[node].ansible_facts empty. The default of `map(attribute=)`
+# is only substituted when it is truthy, hence 0 and the reject rather than
+# None: with None the undefined reaches `min` and the render fails.
+_slurm_compute_vcpus: >-
+  {{ (groups['slurm_compute'] | default([]))
+     | map('extract', hostvars)
+     | map(attribute='ansible_facts.processor_vcpus', default=0)
+     | select('integer') | reject('eq', 0) | list }}
+slurm_launcher_nb_cores_min: 1
+slurm_launcher_nb_cores_max: "{{ (_slurm_compute_vcpus | min) if (_slurm_compute_vcpus | length) > 0 else 2 }}"
+slurm_launcher_nb_cores_default: "{{ [2, slurm_launcher_nb_cores_max | int] | min }}"
+
+# Slurm launcher timings (seconds), as in the reference procedure.
+slurm_launcher_default_wait_time: 900
+slurm_launcher_default_time_limit: 172800
+
+# Port sshd answers on at the front-end, which is how the Slurm launcher of
+# Antares-Web submits its jobs. Next to the other launcher settings rather than
+# in the role, because the day that port moves it will move in the hardening
+# role, and a role default is only in scope for the play that runs the role.
+slurm_launcher_ssh_port: 22
+
+# Where the sources come from, and what the play may do with the checkout it
+# finds. The version they are moved to is antarest_version, in
+# roles/antares_defaults/, because build.yml pins its artefacts to it.
+antarest_repo: "https://github.com/AntaresSimulatorTeam/AntaREST.git"
+antarest_update: true                  # let the play move the checkout to antarest_version
+antarest_force_rebuild: false          # force front-end + image rebuild even if up to date
+
+# The address the nginx of the stack is published on. 127.0.0.1 on purpose:
+# everything but the front door is reachable from the machine alone, so a port
+# opened by mistake in a security group exposes nothing. Anything else the
+# front door serves later follows the same rule, with a loopback port of its
+# own. The port is antarest_nginx_port, in roles/antares_defaults/.
+antarest_nginx_bind: 127.0.0.1

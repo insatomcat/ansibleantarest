@@ -61,7 +61,7 @@ antarest_data_fstype: xfs                       # or ext4
 antarest_data_mount_opts: "defaults,nofail"
 ```
 
-Set the device per host in the inventory rather than in `group_vars`, since the name is a property of one machine. The play formats it, writes it into `/etc/fstab` by UUID and mounts it on `/var/antares-web/data`, before the directory tree is created.
+Set the device per host rather than on a group, since the name is a property of one machine. The play formats it, writes it into `/etc/fstab` by UUID and mounts it on `/var/antares-web/data`, before the directory tree is created.
 
 It is mounted on that path rather than somewhere else that `antarest_data_dir` would then point at, and that is deliberate: a workspace path is what its studies are recorded with in the database, so it has to read the same whether the state sits on a volume or on the boot disk. Adding or removing the volume then stays a decision about hardware alone.
 

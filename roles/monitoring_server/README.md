@@ -37,5 +37,5 @@ saved under another name. They are plain JSON rather than templates - a Grafana
 dashboard is full of `{{ label }}` legends, which is Jinja's own syntax, and
 this way the file is exactly what the interface exports.
 
-Variables in `defaults/main.yml` and `group_vars/all.yml`, documented in
+Variables in `defaults/main.yml` and `roles/antares_defaults/`, documented in
 [Monitoring](../../docs/monitoring.md).

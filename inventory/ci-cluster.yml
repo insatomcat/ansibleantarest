@@ -24,10 +24,11 @@
 #  slurmd matches the machine's own `hostname -s` against the NodeName
 #  lines of slurm.conf, which are generated from these names.
 #
-#  Note on precedence, the same one the other inventories carry: settings
-#  written under a *host* override group_vars/all.yml, a `vars:` block on a
-#  group does not. Everything shared therefore sits on the hosts, through
-#  the YAML anchor below rather than copied five times.
+#  Note on precedence, the same one the other inventories carry: every
+#  default lives in a role, which is the lowest precedence Ansible has, so
+#  anything written here wins - on a host or on a group alike. Everything
+#  shared sits on the hosts through the YAML anchor below rather than being
+#  copied five times.
 # ===========================================================================
 
 all:
@@ -37,8 +38,8 @@ all:
 
       # ---------------------------------------------------------------
       #  Everything the five machines have in common. A plain YAML merge
-      #  key: the values land as host variables, which is the only level
-      #  that outranks group_vars/all.yml.
+      #  key: the values land as host variables, which outrank every
+      #  default the roles carry.
       # ---------------------------------------------------------------
       <<: &ci_cluster_common
 
@@ -77,7 +78,7 @@ all:
         monitoring_enabled: true
 
 
-      # slurm_enabled is left alone: group_vars/all.yml already defaults it
+      # slurm_enabled is left alone: antares_defaults already defaults it
       # to true, which is what this inventory is for.
 
       ansible_host: 192.168.77.11

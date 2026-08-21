@@ -19,7 +19,7 @@
 # Every bind mount below is written with its access mode spelled out, `:rw` or
 # `:ro`, and gets container_volume_opts appended to it. That variable is the
 # SELinux relabelling flag (`,z`) on a machine where SELinux is enforcing and
-# an empty string everywhere else, see group_vars/all.yml. Spelling the access
+# an empty string everywhere else, see roles/antares_defaults/. Spelling the access
 # mode out is what makes the two composable: podman takes the options as one
 # comma-separated list after the second colon, so there has to be something for
 # the flag to be appended to.

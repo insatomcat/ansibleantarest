@@ -1,0 +1,43 @@
+---
+# ===========================================================================
+#  The front door and TLS
+# ===========================================================================
+
+# Image of the front door. The same nginx as the one serving the web
+# application, deliberately a knob of its own: the front door is the only
+# thing between the internet and the machine, and being able to move it to a
+# newer nginx without rebuilding the Antares-Web artefacts is worth a second
+# variable.
+antares_edge_image: "{{ container_registry }}/nginx:1.30"
+
+# ---------------------------------------------------------------------------
+#  TLS
+#
+#  Terminated by the front door (the antares_edge role), which is also the only
+#  thing that binds a port of the machine. Switching this on makes it listen on
+#  antarest_https_port as well and, by default, redirect http to it. Everything
+#  it proxies to - the web application, Keycloak - is served over https without
+#  having to know about it.
+#
+#  antarest_tls_provider:
+#    letsencrypt : certbot obtains the certificate over http-01. The challenge
+#                  is answered by the front door itself (webroot method), so
+#                  renewal needs no downtime and the certbot.timer shipped by
+#                  the package handles it. Requires antares_tls_domain to
+#                  resolve to this machine and port 80 to be reachable from the
+#                  internet - that is what the ACME server connects to.
+#    selfsigned  : a certificate generated on the machine. Encrypts the traffic,
+#                  and every browser says so loudly. For an internal network,
+#                  or to test the plumbing without burning ACME rate limits.
+#    manual      : a certificate you copied on the machine yourself, for
+#                  instance one issued by a company CA. Set
+#                  antarest_tls_certificate / antarest_tls_certificate_key
+#                  (see roles/antares_edge/defaults/main.yml) to the full chain
+#                  and the private key.
+#
+#  First run with letsencrypt: the front door comes up on plain http, certbot
+#  gets the certificate through it, and the playbook then reloads it with TLS
+#  on. Nothing to do twice.
+# ---------------------------------------------------------------------------
+antarest_tls_enabled: false
+antarest_tls_domain: ""                # e.g. antares.example.org

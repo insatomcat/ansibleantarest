@@ -21,6 +21,9 @@
   # is what the firewall needs for peer addresses.
   gather_facts: false
   tags: always
+  roles:
+    - antares_defaults
+
   tasks:
     - name: Gather facts
       ansible.builtin.setup:
@@ -30,6 +33,7 @@
   become: true
   tags: common
   roles:
+    - antares_defaults
     - common
 
 # Firewall, fail2ban, sshd and unattended upgrades. Early on purpose: a machine
@@ -41,6 +45,7 @@
   become: true
   tags: hardening
   roles:
+    - antares_defaults
     - role: hardening
       when: hardening_enabled | bool
 
@@ -62,6 +67,7 @@
   become: true
   tags: monitoring
   roles:
+    - antares_defaults
     - role: podman
       when: monitoring_enabled | bool
     - monitoring_node
@@ -75,6 +81,7 @@
   become: true
   tags: [slurm, nfs]
   roles:
+    - antares_defaults
     - role: nfs_server
       when: slurm_enabled | bool
 
@@ -83,6 +90,7 @@
   become: true
   tags: [slurm, nfs]
   roles:
+    - antares_defaults
     - role: nfs_client
       when: slurm_enabled | bool
 
@@ -91,6 +99,7 @@
   become: true
   tags: [slurm, munge]
   roles:
+    - antares_defaults
     - role: munge
       when: slurm_enabled | bool
 
@@ -99,6 +108,7 @@
   become: true
   tags: slurm
   roles:
+    - antares_defaults
     - role: slurm_common
       when: slurm_enabled | bool
 
@@ -107,6 +117,7 @@
   become: true
   tags: slurm
   roles:
+    - antares_defaults
     - role: podman
       when: slurm_enabled | bool and slurmdbd_enabled | bool
     - role: slurm_frontend
@@ -124,6 +135,7 @@
   become: true
   tags: slurm
   roles:
+    - antares_defaults
     - role: slurm_compute
       when: slurm_enabled | bool
 
@@ -132,6 +144,7 @@
   become: true
   tags: [slurm, solver]
   roles:
+    - antares_defaults
     - role: antares_solver
       when: slurm_enabled | bool
       vars:
@@ -148,6 +161,7 @@
   become: true
   tags: [slurm, xpansion]
   roles:
+    - antares_defaults
     - role: antares_xpansion
       when: slurm_enabled | bool and antares_xpansion_enabled | bool
 
@@ -174,6 +188,9 @@
   hosts: antares_web
   become: true
   tags: [antares_web, ssh]
+  roles:
+    - antares_defaults
+
   tasks:
     - name: Create the SSH key used to reach the Slurm front-end
       ansible.builtin.include_role:
@@ -186,6 +203,7 @@
   become: true
   tags: [antares_web, ssh]
   roles:
+    - antares_defaults
     - role: antares_ssh_access
       when: slurm_enabled | bool
 
@@ -194,6 +212,7 @@
   become: true
   tags: antares_web
   roles:
+    - antares_defaults
     - podman
     - antares_web
     # After antares_web, which is what starts PostgreSQL: Keycloak needs a

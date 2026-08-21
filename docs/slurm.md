@@ -19,7 +19,7 @@ slurm_launcher_default_wait_time: 900   # seconds
 slurm_launcher_default_time_limit: 172800
 ```
 
-`slurmdbd_thirdparty_images` is the list those two image pins produce, and the accounting database's counterpart of `antarest_thirdparty_images`: `build.yml` archives exactly that list and the front-end checks exactly that list is loaded before starting anything, so the two cannot drift. It lives in `group_vars/all.yml` rather than in the role because the builder reads it and never runs the role.
+`slurmdbd_thirdparty_images` is the list those two image pins produce, and the accounting database's counterpart of `antarest_thirdparty_images`: `build.yml` archives exactly that list and the front-end checks exactly that list is loaded before starting anything, so the two cannot drift. It lives in `roles/antares_defaults/` rather than in `slurm_frontend` because the builder reads it and never runs that role, and so does `slurmdbd_enable_adminer`, which it is built from.
 
 Compute node characteristics (`CPUs`, `SocketsPerBoard`, `CoresPerSocket`, `ThreadsPerCore`, `RealMemory`) are derived from Ansible facts and can be overridden per-host in the inventory using `slurm_node_cpus`, `slurm_node_sockets`, `slurm_node_cores_per_socket`, `slurm_node_threads_per_core` and `slurm_node_real_memory`.
 
@@ -43,7 +43,7 @@ The release rpm is installed with the GPG check disabled, since it is what bring
 Every name the generated configuration carries - `DbdHost`, `SlurmctldHost`, `AccountingStorageHost`, `NodeName` - comes from `slurm_node_name`, which defaults to the inventory name:
 
 ```yaml
-slurm_node_name: "{{ inventory_hostname.split('.')[0] }}"   # group_vars/slurm.yml
+slurm_node_name: "{{ inventory_hostname.split('.')[0] }}"   # inventory/group_vars/slurm.yml
 ```
 
 That is right whenever the inventory names machines the way they name themselves, and wrong on a machine whose hostname was decided by someone else: a cloud image, an installer, a corporate naming scheme. It matters more than it looks, because **every Slurm daemon compares its own `gethostname()` with what the configuration names it and refuses to run on a mismatch**: `slurmdbd` and `slurmctld` exit with `This host not configured to run SlurmDBD ((web-1 or web-1) != antares-solo)`, and `slurmd` simply never registers, leaving the node down in `sinfo`.

@@ -29,11 +29,12 @@
 #  this inventory deliberately does not define; the cluster plays are skipped
 #  and nothing is wrong.
 #
-#  Note on precedence: everything written under a *host* overrides
-#  group_vars/all.yml, while a `vars:` block on a group does not (playbook
-#  group_vars outrank inventory group vars). So per-deployment settings belong
-#  where they are below, on the host. Anything shared by several machines goes
-#  in group_vars/all.yml instead.
+#  Note on precedence: there is no group_vars/ next to the playbooks. Every
+#  default lives in a role - roles/<role>/defaults/ for what one role owns,
+#  roles/antares_defaults/ for what several share - and role defaults are the
+#  lowest precedence Ansible has. So anything written in this file wins,
+#  whether on a host or on a group. This is the only file that describes this
+#  deployment.
 # ===========================================================================
 
 all:
@@ -160,4 +161,4 @@ all:
           # antarest_auto_archive_dry_run: true
 
           # The solver list (antares_solvers, antares_solver_os) lives in
-          # group_vars/all.yml, shared with build.yml.
+          # roles/antares_defaults/, shared with build.yml.

@@ -32,9 +32,10 @@
 #  install fail2ban and enable unattended upgrades exactly as it would on a
 #  real VM. Nothing here weakens the deployment to make it fit CI.
 #
-#  Note on precedence, the same one the example inventories carry: settings
-#  written under a *host* override group_vars/all.yml, a `vars:` block on a
-#  group does not. Everything below therefore sits on the host.
+#  Note on precedence, the same one the example inventories carry: every default lives
+#  in a role, which is the lowest precedence Ansible has, so anything written
+#  here wins - on a host or on a group alike. Everything below sits on the
+#  host, which is where it belongs anyway.
 # ===========================================================================
 
 all:

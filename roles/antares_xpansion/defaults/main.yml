@@ -3,3 +3,15 @@
 antares_xpansion_dest: "{{ slurm_xpansion_dir }}"
 antares_xpansion_owner: "{{ antares_user }}"
 antares_xpansion_group: "{{ antares_group }}"
+
+# Controller-side cache, same idea as antares_solver_cache_dir: a tarball
+# already in ./artifacts is pushed instead of being downloaded again.
+antares_xpansion_cache_dir: "{{ antares_artifacts_dir }}"
+
+# `benders` is linked against libmpi.so.40, i.e. Open MPI 4. This is the
+# package that carries it, installed on every machine that runs the solver.
+# Where it lands afterwards is antares_xpansion_mpi_bin_dir /
+# antares_xpansion_mpi_lib_dir, in roles/slurm_launch_script/, which is what
+# puts them on PATH.
+antares_xpansion_mpi_packages: >-
+  {{ ['openmpi'] if ansible_facts['os_family'] == 'RedHat' else ['openmpi-bin'] }}

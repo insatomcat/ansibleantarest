@@ -1,0 +1,40 @@
+---
+# ===========================================================================
+#  The unprivileged account, identical on every machine
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+#  Unprivileged account, identical on every machine.
+#  The UID/GID must match between the Antares-Web containers, the NFS share
+#  and the Slurm nodes, otherwise the studies pushed over SSH are unreadable.
+#
+#  Deliberately not 1000. login.defs hands out human accounts from UID_MIN
+#  (1000) upwards, sequentially, so 1000 is already taken on most images:
+#  `ubuntu` on the Ubuntu cloud and server images, `debian` or `admin` on the
+#  Debian cloud ones, the account created at install time on a manual install.
+#  9000 sits well clear of that allocation path and well under UID_MAX (60000),
+#  so it needs no useradd flag and stays free without coordination. It is also
+#  baked into the derived backend image, so a single value across the fleet
+#  means a single image (see antarest_add_container_user below).
+#
+#  The play reads the passwd and group databases before creating anything and
+#  stops with the name of the account in the way, so a wrong guess here is
+#  loud rather than subtle. Run with --check to validate the pair across every
+#  machine without installing anything.
+#
+#  Two caveats:
+#    - it has to be free on the Slurm nodes and the NFS server too, since the
+#      point is UID coherence across the shared /home,
+#    - on machines joined to a central directory (LDAP, AD via SSSD), have the
+#      value reserved: nsswitch makes an existing collision visible here, but
+#      not a future directory account handed the same UID.
+#
+#  Changing this on a machine that has already been deployed renumbers the
+#  antares account and orphans everything it owns; the files under
+#  antarest_base_dir and in the shared /home then need a chown -R.
+# ---------------------------------------------------------------------------
+antares_user: antares
+antares_group: antares
+antares_uid: 9000
+antares_gid: 9000
+antares_home: "/home/{{ antares_user }}"
