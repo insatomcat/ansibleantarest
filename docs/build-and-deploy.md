@@ -7,7 +7,7 @@ ansible-playbook build.yml                                  # once
 ansible-playbook site.yml -e antarest_image_source=archive  # many times
 ```
 
-`build.yml` runs on the `builder` inventory group (see `inventory/build.example.yml`) and reuses the deployment build tasks, so artifacts are produced exactly by the same recipe that the deployment uses. A builder needs nothing installed beforehand: the play pulls in the same `podman` role the deployment uses. It never starts the stack, so a builder is not an Antares-Web server. It drops artifacts into `./artifacts` (gitignored):
+`build.yml` runs on the `builder` inventory group (see `inventory/build.example.yml`) and reuses the deployment build tasks, so artifacts are produced exactly by the same recipe that the deployment uses. A builder needs nothing installed beforehand: the play pulls in the same `podman` role the deployment uses. It never starts the stack, so a builder is not an Antares-Web server, and `site.yml` skips the `builder` group entirely: no base packages, no `antares` account, no nftables, no fail2ban and no node exporter on a machine that exists for the length of a build. `build.yml` installs on it exactly what a build needs, gathering its own facts and running the `common` preflight itself, so it stands alone whichever playbook you run first. It drops artifacts into `./artifacts` (gitignored):
 
 | File | Content |
 |---|---|
