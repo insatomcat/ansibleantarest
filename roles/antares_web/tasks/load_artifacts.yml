@@ -54,6 +54,13 @@
     group: false
     perms: false
     rsync_opts:
+      # The solver and Xpansion tarballs sit in the same directory, which is
+      # also the controller-side cache antares_solver_cache_dir and
+      # antares_xpansion_cache_dir point at. Those two roles push what they
+      # need themselves, into the shared /home, so shipping them here is half
+      # a gigabyte on the wire for archives nothing on this machine reads.
+      - "--exclude=antares-[0-9]*.tar.gz"
+      - "--exclude=antaresXpansion-*.tar.gz"
       # First match wins, hence before the include: the Slurm front-end's
       # images are in the same artefact directory and have no business on a
       # web machine, MariaDB alone being a few hundred megabytes. The
@@ -84,12 +91,20 @@
     patterns: "*.tar.gz"
   register: antarest_archives
 
+# Named one by one rather than "everything that is not X": these are the three
+# shapes antares_build writes, and the staging directory also holds whatever an
+# earlier run of an earlier version of this file left there. A denylist has to
+# be extended every time a new family of tarballs joins the artefact set, and
+# the one thing podman load cannot be handed is a tarball that is not an image.
+# Written as a folded block scalar, where a backslash is literal: `\.` is what
+# reaches Jinja, and the `\\.` a double-quoted scalar would need matches a
+# backslash instead, leaves the loop empty and sends the assert below blaming
+# the manifest for images nothing ever tried to load.
 - name: Load the images that are missing
   ansible.builtin.command: "{{ container_cmd }} load -i {{ item }}"
   loop: >-
     {{ antarest_archives.files | map(attribute='path')
-       | reject('search', 'webapp-dist')
-       | reject('search', 'antares-[0-9]')
+       | select('search', '/(antarest-image|antares-auth-image|thirdparty-.*)\.tar\.gz$')
        | list }}
   when: antarest_images_present.results | selectattr('rc', 'ne', 0) | list | length > 0
   changed_when: true
