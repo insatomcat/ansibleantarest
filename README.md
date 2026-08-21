@@ -16,6 +16,8 @@ Slurm is optional: with `slurm_enabled: false` only Antares-Web is deployed and 
 
 A machine may be in several of those groups. Listing the front-end in `slurm_compute` as well gives a cluster where the controller also runs jobs, which is what a two-machine or a small deployment looks like; the shared `/home` is simply local there, and nothing else changes. The number of compute nodes is whatever the inventory says: `slurm.conf` is generated from the group.
 
+Monitoring is optional too and off by default: `monitoring_enabled: true` puts a node exporter on every machine of the inventory, a Slurm exporter next to the controller, and Prometheus and Grafana on the web server, with Grafana served by the front door under `/grafana/`. See [Monitoring](docs/monitoring.md).
+
 ## Quick start
 
 ```bash
@@ -86,6 +88,7 @@ Set secrets in `group_vars/all.yml` (or an ansible-vault encrypted file):
 | `antarest_admin_password` | `admin` | admin user password |
 | `antarest_db_password` | `somepass` | PostgreSQL password |
 | `slurmdbd_db_password` | `changeme-slurm-acct` | MariaDB password for Slurm accounting |
+| `monitoring_grafana_admin_password` | `admin` | Grafana administrator, when `monitoring_enabled` is on |
 
 The PostgreSQL password is read only at the first initialization of the data volume; changing it later requires clearing `/var/antares-web/data/db`.
 
@@ -101,7 +104,7 @@ The `hardening` role reports any of these still holding the shipped value, and r
 | `build.yml` | Builds the artefacts once on a `builder` host and pulls them into `artifacts/` on the controller, with the very task files the deployment uses. See [Build once, deploy everywhere](docs/build-and-deploy.md). |
 | `verify.yml` | Read-only end-to-end checks after a deployment. Run it from a machine that is not in the inventory, see [Operating a deployment](docs/operations.md). |
 
-Every role carries the variables it owns in `roles/<role>/defaults/main.yml`, and the fleet-wide knobs are in `group_vars/all.yml`, which is commented throughout. The roles with a surface worth describing have a `README.md` of their own: `antares_web`, `antares_edge`, `antares_auth`, `keycloak`, `podman`, `hardening`, `common` and `slurm_frontend`.
+Every role carries the variables it owns in `roles/<role>/defaults/main.yml`, and the fleet-wide knobs are in `group_vars/all.yml`, which is commented throughout. The roles with a surface worth describing have a `README.md` of their own: `antares_web`, `antares_edge`, `antares_auth`, `keycloak`, `podman`, `hardening`, `common`, `slurm_frontend`, `monitoring_node`, `monitoring_slurm` and `monitoring_server`.
 
 ## Documentation
 
@@ -117,6 +120,7 @@ Every role carries the variables it owns in `roles/<role>/defaults/main.yml`, an
 | Cluster variables, one machine that is also its own cluster, the launch script | [The Slurm cluster](docs/slurm.md) |
 | nftables, fail2ban, sshd, unattended updates, the journal | [Hardening](docs/hardening.md) |
 | Build once on a builder, deploy with `archive` | [Build once, deploy everywhere](docs/build-and-deploy.md) |
+| Node exporters, Prometheus, Grafana behind the front door | [Monitoring](docs/monitoring.md) |
 | What `verify.yml` proves, changing the admin password, PostgreSQL major upgrades | [Operating a deployment](docs/operations.md) |
 | What this does not cover, and where it diverges from the reference PDF | [Limitations](docs/limitations.md) |
 
@@ -130,6 +134,7 @@ ansible-playbook site.yml --tags auth            # the authentication connector
 ansible-playbook site.yml --tags slurm           # cluster only
 ansible-playbook site.yml --tags solver          # (re)install solvers
 ansible-playbook site.yml --tags xpansion        # (re)install Antares-Xpansion (needs antares_xpansion_enabled)
+ansible-playbook site.yml --tags monitoring      # the exporters, Prometheus and Grafana
 ansible-playbook site.yml --tags hardening       # firewall, fail2ban, sshd, updates
 ansible-playbook site.yml -e antarest_force_rebuild=true   # full rebuild
 ```
