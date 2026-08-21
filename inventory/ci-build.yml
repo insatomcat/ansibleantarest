@@ -58,6 +58,30 @@ all:
         - "OracleServer-8.10"
 
       # ---------------------------------------------------------------
+      #  Antares-Xpansion. On the builder because antares_build_fetch_xpansions
+      #  follows this flag, and the `slurm` and `standalone-slurm` suites
+      #  deploy Xpansion from these very artefacts.
+      #
+      #  Not only a matter of speed, unlike the solver list above: a release
+      #  tarball is not a container image, it lands in the same directory as
+      #  the ones that are, and the archive path has to be exercised with both
+      #  kinds next to each other. Without this the artefact set never held a
+      #  single antaresXpansion-*.tar.gz and
+      #  roles/antares_web/tasks/load_artifacts.yml was free to hand one to
+      #  `podman load`, which is exactly what it did.
+      #
+      #  Both families, like the solvers: the EL targets of the matrix run
+      #  Xpansion too. 1.3.0 is cached under the builder's own name whatever
+      #  is listed here, since roles/antares_defaults spells its asset out per
+      #  family and that expression is resolved on the builder; the EL jobs
+      #  fetch that one from GitHub, which costs time and not a failure.
+      # ---------------------------------------------------------------
+      antares_xpansion_enabled: true
+      antares_build_xpansion_os:
+        - "ubuntu-22.04"
+        - "OracleServer-8.10"
+
+      # ---------------------------------------------------------------
       #  Keycloak and the connector that puts it to use. They belong on the
       #  builder because this is where they decide what ends up in the
       #  artefacts: keycloak_enabled is what adds keycloak_image to
