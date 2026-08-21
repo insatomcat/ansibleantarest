@@ -1,4 +1,9 @@
 ---
+# Before a single package is installed: what this checks is a mismatch that
+# only shows up much later, as a timeout on a port.
+- name: Check the machine answers to the name it is about to be given
+  ansible.builtin.include_tasks: preflight.yml
+
 - name: Configure the OpenHPC repositories
   ansible.builtin.include_tasks: repo.yml
   when: slurm_repo == 'openhpc'

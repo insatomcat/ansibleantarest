@@ -114,6 +114,14 @@ to `roles/antares_edge/` with the front door.
 - **Fact cache.** `ansible.cfg` caches facts in `.facts/` for 7200 s. A host
   rebuilt as another distribution keeps its stale facts until a play gathers
   them again. That is why `site.yml` opens with an explicit `setup` play.
+- **A Slurm node must answer to the name the configuration gives it.** Every
+  daemon compares its own `gethostname()` with `DbdHost`, `SlurmctldHost` or
+  its `NodeName` and refuses to run otherwise, and all of those come from
+  `slurm_node_name`, which defaults to the *inventory* name.
+  `roles/slurm_common/tasks/preflight.yml` reads the machine's name live -
+  not from the facts, which `manage_hostname` may have made stale earlier in
+  the same run - and stops before installing anything. It is what turns a
+  two-minute timeout on port 6819 into a sentence naming both names.
 - **`--limit` and `slurm.conf`.** It is generated from the facts of every host
   in `slurm_compute`. Limiting to a subset silently shrinks the cluster unless
   `slurm_node_cpus` / `slurm_node_real_memory` are pinned in the inventory.
