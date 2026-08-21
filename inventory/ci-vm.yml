@@ -88,6 +88,23 @@ all:
       antares_auth_provider: keycloak
 
       # ---------------------------------------------------------------
+      #  Monitoring, on a machine that is its own whole fleet: one node
+      #  exporter, Prometheus scraping it and Grafana behind the front
+      #  door. Deployed on every shape of the CI, this one included,
+      #  because none of it is exercised by a deployment that leaves it
+      #  off: three more images to load from the artefacts, three more
+      #  quadlet units in the host network namespace, a prometheus.yml
+      #  generated from the inventory and one more route through the front
+      #  door. inventory/ci-build.yml carries the same flag, which is what
+      #  puts the images in the artefact set.
+      #
+      #  No Slurm exporter here: there is no cluster on this shape, and
+      #  monitoring_slurm_enabled follows slurm_enabled.
+      # ---------------------------------------------------------------
+      monitoring_enabled: true
+      monitoring_grafana_admin_password: "ci-grafana-not-a-secret"
+
+      # ---------------------------------------------------------------
       #  On, which the shipped default is not: the nftables table and,
       #  on the RedHat family, the masking of firewalld that comes with
       #  it are half of what a deployment does to a machine, and CI

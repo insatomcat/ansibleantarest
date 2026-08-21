@@ -66,6 +66,16 @@ all:
         antarest_db_password: "ci-db-not-a-secret"
         slurmdbd_db_password: "ci-slurmdb-not-a-secret"
 
+        # Monitoring, and in the anchor rather than on the web host: the
+        # node exporter is deployed on every machine of the inventory, and
+        # this is the only shape of the CI where that means something -
+        # five exporters, scraped across a real network by a Prometheus
+        # that is not on any of them, through five firewalls that have to
+        # let it through. The Slurm exporter comes with it on the
+        # front-end, since monitoring_slurm_enabled follows slurm_enabled.
+        # verify.yml checks all of it.
+        monitoring_enabled: true
+
 
       # slurm_enabled is left alone: group_vars/all.yml already defaults it
       # to true, which is what this inventory is for.
@@ -92,6 +102,11 @@ all:
       keycloak_admin_password: "ci-keycloak-not-a-secret"
       keycloak_db_password: "ci-keycloak-db-not-a-secret"
       keycloak_client_secret: "ci-keycloak-client-not-a-secret"
+
+      # On the host for the same reason as the three above: Grafana runs in
+      # the antares_web play alone, and this is the machine the hardening
+      # role asks about it on.
+      monitoring_grafana_admin_password: "ci-grafana-not-a-secret"
 
     slurm-front:
       <<: *ci_cluster_common
