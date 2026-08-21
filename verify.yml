@@ -16,7 +16,11 @@
 #    - the firewall: three different rulesets on three kinds of machine, each
 #      of which has to let the peers through and keep everyone else out,
 #    - the journal: the one thing every answer above is read from, which is
-#      worth nothing if it is wiped at the next reboot.
+#      worth nothing if it is wiped at the next reboot,
+#    - the monitoring: every machine of the fleet is really being scraped, the
+#      Slurm exporter really reaches the controller, and Grafana really
+#      answers through the front door. The first of those is only visible from
+#      the one machine that does the scraping, and silent everywhere else.
 #
 #  The controller is the outside world here, and that is the point of the
 #  second half: it is not in the inventory, so it is in no ruleset's trusted
@@ -31,8 +35,9 @@
 #  Every play switches itself off where it does not apply: the cluster ones
 #  when slurm_enabled is false, the firewall ones when
 #  hardening_firewall_enabled is false - a deployment filtered by a cloud
-#  security group instead has nothing on the machine to check - and the
-#  journal one when the hardening role was told to leave the journal alone.
+#  security group instead has nothing on the machine to check - the journal
+#  one when the hardening role was told to leave the journal alone, and the
+#  monitoring one when monitoring_enabled is false.
 #
 #  Note on `hostvars[inventory_hostname]` below, where `ansible_host` would
 #  read more naturally: a task with delegate_to takes its connection
@@ -271,6 +276,202 @@
               /etc/fstab has no entry for it, so the next reboot brings the
               machine back with its state on the boot disk.
             quiet: true
+
+# ---------------------------------------------------------------------------
+#  Monitoring
+# ---------------------------------------------------------------------------
+
+- name: Every machine of the deployment is scraped, and Grafana is served
+  hosts: antares_web
+  gather_facts: false
+  tags: [verify, monitoring]
+  vars:
+    # Same shape as the web play above: through the front door, from the
+    # controller, on whichever scheme is configured, and without validating a
+    # certificate that may deliberately be self-signed.
+    verify_grafana_url: >-
+      {{ 'https' if antarest_tls_enabled | default(false) | bool else 'http' }}://{{
+         hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}:{{
+         antarest_https_port if antarest_tls_enabled | default(false) | bool else antarest_http_port
+      }}{{ monitoring_grafana_path }}
+    # The prefix Prometheus answers on, on the machine itself: the root unless
+    # it was published, where --web.external-url moves everything under it.
+    verify_prometheus_prefix: >-
+      {{ monitoring_prometheus_path if monitoring_prometheus_public | default(false) | bool else '' }}
+    # The Slurm exporters Prometheus was told about, read back from Prometheus
+    # itself rather than worked out from the inventory.
+    verify_slurm_scraped: >-
+      {{ (verify_targets.json.data.activeTargets | default([]))
+         | selectattr('labels.job', 'defined')
+         | selectattr('labels.job', 'equalto', 'slurm')
+         | map(attribute='labels.instance') | list }}
+  tasks:
+
+    # From the machine and not from the controller: Prometheus is bound to the
+    # loopback, which is the whole point of it. What is under test here is the
+    # scraping, and the front door is checked by the Grafana task below.
+    #
+    # Patient, and on purpose: a target is `unknown` until it has been scraped
+    # once, so a verify.yml run right after a deployment asks before the first
+    # scrape interval has elapsed. A target that is really down exhausts the
+    # retries and fails with its own error message, which is the one worth
+    # reading - a connection refused, a timeout, or a 404.
+    - name: Ask Prometheus what its targets are doing
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ monitoring_prometheus_port }}{{ verify_prometheus_prefix | trim }}/api/v1/targets?state=active"
+        status_code: [200]
+      register: verify_targets
+      retries: 12
+      delay: 10
+      failed_when: false
+      until: >-
+        verify_targets.json is defined
+        and verify_targets.json.data.activeTargets
+            | rejectattr('health', 'equalto', 'up') | list | length == 0
+      when: monitoring_enabled | default(false) | bool
+
+    - name: Check Prometheus answers at all
+      ansible.builtin.assert:
+        that: verify_targets.json is defined
+        fail_msg: >-
+          Prometheus does not answer on 127.0.0.1:{{ monitoring_prometheus_port }}
+          on {{ inventory_hostname }}
+          ({{ verify_targets.msg | default(verify_targets.status | default('no answer')) }}).
+        quiet: true
+      when: monitoring_enabled | default(false) | bool
+
+    # The list of targets is generated from the inventory, so a machine that
+    # is not in it is a machine nobody is watching. That happens for exactly
+    # one reason - a host whose facts were not in the play that rendered
+    # prometheus.yml - and it is silent everywhere else.
+    - name: Check every machine of the inventory is scraped
+      ansible.builtin.assert:
+        that:
+          - >-
+            (groups['all'] | difference(groups['builder'] | default([])))
+            | difference(verify_targets.json.data.activeTargets
+                         | selectattr('labels.job', 'equalto', 'node')
+                         | map(attribute='labels.instance') | list)
+            | length == 0
+        fail_msg: >-
+          Prometheus scrapes
+          {{ verify_targets.json.data.activeTargets
+             | selectattr('labels.job', 'equalto', 'node')
+             | map(attribute='labels.instance') | join(', ') }},
+          which does not cover every machine of the inventory
+          ({{ groups['all'] | difference(groups['builder'] | default([])) | join(', ') }}).
+          A machine missing here contributed no address when
+          {{ monitoring_server_dir | default('/etc/antares-web/monitoring') }}/prometheus.yml
+          was rendered: re-run site.yml without --limit.
+        quiet: true
+      when: monitoring_enabled | default(false) | bool
+
+    - name: Check every target answers
+      ansible.builtin.assert:
+        that:
+          - verify_targets.json.data.activeTargets
+            | rejectattr('health', 'equalto', 'up') | list | length == 0
+        fail_msg: >-
+          {{ verify_targets.json.data.activeTargets
+             | rejectattr('health', 'equalto', 'up')
+             | map(attribute='scrapeUrl') | join(', ') }}
+          {{ 'is' if (verify_targets.json.data.activeTargets
+                      | rejectattr('health', 'equalto', 'up') | list | length) == 1 else 'are' }}
+          not answering:
+          {{ verify_targets.json.data.activeTargets
+             | rejectattr('health', 'equalto', 'up')
+             | map(attribute='lastError') | reject('equalto', '') | join(' / ') }}.
+          A refused connection is usually the firewall of that machine, which
+          only trusts the addresses of the inventory: check its facts were
+          gathered. An exporter that is down says so in
+          `systemctl status node-exporter.service` on the machine itself.
+        quiet: true
+      when: monitoring_enabled | default(false) | bool
+
+    # The Slurm exporter answers whatever the cluster does, so `up` above says
+    # nothing about whether it reached slurmctld. This does: the metric only
+    # exists once sinfo has answered.
+    #
+    # Asked only where Prometheus was actually given a Slurm target. That is
+    # the contract rather than monitoring_slurm_enabled: a front-end whose
+    # image carries a Slurm client newer than its own controller deploys no
+    # exporter and is declared nowhere, deliberately, and this check has
+    # nothing to look for there. See roles/monitoring_slurm and
+    # docs/monitoring.md.
+    - name: Ask Prometheus whether the cluster is really being read
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ monitoring_prometheus_port }}{{ verify_prometheus_prefix | trim }}/api/v1/query?query=slurm_nodes_total"
+        status_code: [200]
+      register: verify_slurm_metric
+      retries: 12
+      delay: 10
+      until: verify_slurm_metric.json.data.result | default([]) | length > 0
+      failed_when: false
+      when:
+        - monitoring_enabled | default(false) | bool
+        - verify_slurm_scraped | length > 0
+
+    - name: Check the Slurm exporter reports a cluster
+      ansible.builtin.assert:
+        that: verify_slurm_metric.json.data.result | default([]) | length > 0
+        fail_msg: >-
+          Prometheus scrapes {{ verify_slurm_scraped | join(', ') }} but has no
+          slurm_nodes_total, so the Slurm exporter answers without reaching the
+          controller. Munge and the Slurm version of the client inside
+          {{ monitoring_slurm_exporter_image }} are the two causes;
+          `journalctl -u slurm-exporter.service` on the front-end names which.
+          See docs/monitoring.md.
+        quiet: true
+      when:
+        - monitoring_enabled | default(false) | bool
+        - verify_slurm_scraped | length > 0
+
+    # The vacuous pass, said out loud. A cluster whose front-end skipped its
+    # exporter has nothing for the two tasks above to check, and a check that
+    # silently applies to nothing is exactly what a verification file must not
+    # have: this is the line that tells a log reader which of the two it is.
+    - name: Report a cluster that is not being read
+      ansible.builtin.debug:
+        msg: >-
+          Prometheus scrapes no Slurm exporter, so the queue and the node
+          states of this cluster are not collected. The front-end deploys none
+          when the Slurm client of {{ monitoring_slurm_exporter_image }} is
+          ahead of its own controller, which is deliberate and reported by
+          site.yml; monitoring_slurm_enabled turns the whole thing off. See
+          docs/monitoring.md.
+      when:
+        - monitoring_enabled | default(false) | bool
+        - slurm_enabled | bool
+        - monitoring_slurm_enabled | default(slurm_enabled) | bool
+        - verify_slurm_scraped | length == 0
+
+    # And the half that is not on the machine: the front door really routes
+    # monitoring_grafana_path, and Grafana really serves itself under it.
+    # /api/health answers a JSON document with the database state in it, which
+    # is more than a 200 on the login page would say.
+    - name: Ask Grafana for its health, through the front door
+      ansible.builtin.uri:
+        url: "{{ verify_grafana_url | trim }}/api/health"
+        validate_certs: false
+        status_code: [200]
+      register: verify_grafana
+      retries: 12
+      delay: 5
+      until: verify_grafana.status | default(0) == 200
+      delegate_to: localhost
+      become: false
+      when: monitoring_enabled | default(false) | bool
+
+    - name: Check Grafana reports its database is up
+      ansible.builtin.assert:
+        that: verify_grafana.json.database | default('') == 'ok'
+        fail_msg: >-
+          {{ verify_grafana_url | trim }}/api/health answered
+          {{ verify_grafana.json | default(verify_grafana.status | default('nothing')) }}.
+          Grafana is reached through the front door, so a 502 here is the
+          container and anything else is the route.
+        quiet: true
+      when: monitoring_enabled | default(false) | bool
 
 # ---------------------------------------------------------------------------
 #  The Slurm cluster
@@ -663,6 +864,12 @@
     #
     # What a published port is in neither case is a socket the firewall can
     # filter - see the note on the private ports below.
+    #
+    # The exporters are in this list on every machine, which is what makes it
+    # non-empty on a compute node of a deployment with no cluster: they are
+    # the one thing every machine of a monitored fleet offers to another
+    # machine, and an exporter that is not listening is a hole in the graphs
+    # that nothing else reports.
     verify_expected_listeners: >-
       {{ ([antarest_http_port | int]
           + ([antarest_https_port | int] if antarest_tls_enabled | default(false) | bool else [])
@@ -670,7 +877,12 @@
          + (([2049, 6817] + ([6819] if slurmdbd_enabled | bool else []))
             if slurm_enabled | bool and inventory_hostname in (groups['slurm_frontend'] | default([])) else [])
          + ([6818]
-            if slurm_enabled | bool and inventory_hostname in (groups['slurm_compute'] | default([])) else []) }}
+            if slurm_enabled | bool and inventory_hostname in (groups['slurm_compute'] | default([])) else [])
+         + ([monitoring_node_exporter_port | int] if monitoring_enabled | default(false) | bool else [])
+         + ([monitoring_slurm_exporter_port | int]
+            if monitoring_enabled | default(false) | bool and slurm_enabled | bool
+               and monitoring_slurm_enabled | default(slurm_enabled) | bool
+               and inventory_hostname in (groups['slurm_frontend'] | default([])) else []) }}
   tasks:
 
     - name: Read the listening sockets
@@ -753,6 +965,14 @@
     # cover that, since a published container port is DNATed and never
     # traverses the input hook, so the PublishPort of the unit is the only
     # thing standing between MariaDB and the network.
+    #
+    # The two exporter ports are deliberately absent from this list although
+    # they listen on every interface: they are what the other machines of the
+    # deployment scrape, so they are reachable by the inventory and dropped
+    # for everyone else - which is the trusted set the probes below cannot
+    # tell apart from the world, the controller being outside it. What is in
+    # the list instead is Prometheus and Grafana, which are bound to the
+    # loopback and must stay there whatever the front door serves.
     verify_private_ports: >-
       {{ [5355]
          + ([antarest_http_port | int, antarest_https_port | int]
@@ -762,7 +982,10 @@
          + ([111, 2049, 6817, 3306] + ([6819] if slurmdbd_enabled | bool else [])
             if slurm_enabled | bool and inventory_hostname in (groups['slurm_frontend'] | default([])) else [])
          + ([111, 2049, 6818]
-            if slurm_enabled | bool and inventory_hostname in (groups['slurm_compute'] | default([])) else []) }}
+            if slurm_enabled | bool and inventory_hostname in (groups['slurm_compute'] | default([])) else [])
+         + ([monitoring_prometheus_port | int, monitoring_grafana_port | int]
+            if monitoring_enabled | default(false) | bool
+               and inventory_hostname in (groups['antares_web'] | default([])) else []) }}
   tasks:
 
     - name: Probe from the controller the ports the world must reach
