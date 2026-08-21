@@ -110,6 +110,15 @@ all:
           # antarest_enable_adminer: false
 
           # ---------------------------------------------------------------
+          #  Monitoring. Off here. Turning it on puts a node exporter on this
+          #  machine, Prometheus and Grafana next to the stack, and Grafana
+          #  behind the front door at /grafana/ - reached like the interface,
+          #  with the account below. See docs/monitoring.md.
+          # ---------------------------------------------------------------
+          # monitoring_enabled: true
+          # monitoring_grafana_admin_password: "change me too"
+
+          # ---------------------------------------------------------------
           #  TLS. Off here, so the interface answers on plain http.
           #
           #  letsencrypt needs the domain to resolve to this machine and port
