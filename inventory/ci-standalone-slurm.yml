@@ -102,6 +102,18 @@ all:
       keycloak_enabled: true
       antares_auth_provider: keycloak
 
+      # ---------------------------------------------------------------
+      #  Monitoring, on the shape where one machine is the whole fleet:
+      #  the node exporter, the Slurm exporter and the pair that scrapes
+      #  them all end up on the same host, which is the one deployment
+      #  where Prometheus reaches its targets over the loopback of its own
+      #  machine and the Slurm exporter sits next to the controller it
+      #  reads rather than a network away. inventory/ci-build.yml carries
+      #  the same flag, which is what puts the images in the artefacts.
+      # ---------------------------------------------------------------
+      monitoring_enabled: true
+      monitoring_grafana_admin_password: "ci-grafana-not-a-secret"
+
       # Four gunicorn workers of the default formula would each load the
       # whole application, on a machine that is also running the daemons of
       # a cluster. Two is enough to still exercise the preforked path Redis
