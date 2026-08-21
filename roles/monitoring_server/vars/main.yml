@@ -1,0 +1,118 @@
+---
+# ===========================================================================
+#  What Prometheus scrapes
+# ===========================================================================
+
+# The machines of the deployment, as Prometheus targets. The builder is left
+# out: it is in no site.yml inventory, it runs nothing, and it exists for the
+# length of a build.
+#
+# A host contributes only once its facts are in the play, because that is
+# where its address comes from - the same rule, and the same reason, as the
+# trusted set of the firewall in roles/hardening/tasks/facts.yml: ansible_host
+# may be a name that only the controller resolves, a public address in front
+# of a NAT, or missing altogether. Hence the fact-gathering play at the top of
+# site.yml, and the warning in tasks/config.yml for whoever runs with --limit.
+monitoring_scrape_hosts: >-
+  {{ (groups['all'] | default([])) | difference(groups['builder'] | default([]))
+     | map('extract', hostvars)
+     | selectattr('ansible_facts.default_ipv4.address', 'defined')
+     | map(attribute='inventory_hostname') | list | sort }}
+
+# The front-ends that really run a Slurm exporter. The role there refuses to
+# deploy one whose Slurm client is newer than the cluster (see
+# roles/monitoring_slurm/tasks/preflight.yml) and records that in a cached
+# fact, which is read here so that Prometheus is never handed a target that
+# was deliberately skipped. Unknown means yes: on a run limited to this
+# machine the front-end has set nothing, and the answer that keeps an existing
+# configuration unchanged is the one to give.
+monitoring_slurm_scraped_hosts: >-
+  {{ (groups['slurm_frontend'] | default([]))
+     | difference((groups['slurm_frontend'] | default([]))
+                  | map('extract', hostvars)
+                  | selectattr('monitoring_slurm_exporter_supported', 'defined')
+                  | rejectattr('monitoring_slurm_exporter_supported')
+                  | map(attribute='inventory_hostname') | list) }}
+
+# The machines of the inventory that are not in the list above, so that a
+# fleet monitored with a hole in it says so.
+monitoring_faceless_hosts: >-
+  {{ (groups['all'] | default([])) | difference(groups['builder'] | default([]))
+     | difference(monitoring_scrape_hosts) | sort }}
+
+# ===========================================================================
+#  What Grafana has to be told about the front door
+# ===========================================================================
+
+_monitoring_scheme: "{{ 'https' if antarest_tls_enabled | bool else 'http' }}"
+_monitoring_public_port: "{{ antarest_https_port if antarest_tls_enabled | bool else antarest_http_port }}"
+_monitoring_default_port: "{{ 443 if antarest_tls_enabled | bool else 80 }}"
+
+# The name the front door answers on, which is the domain when there is one
+# and the address of the machine otherwise. Unlike Keycloak, Grafana has no
+# "work it out from the headers" mode: root_url is what it builds every
+# redirect and every asset path from, so it always has a value here. An
+# address is a perfectly good one on a deployment reached by address.
+_monitoring_public_host: >-
+  {{ antarest_tls_domain | default('', true) | trim
+     or ansible_facts.default_ipv4.address | default('localhost') }}
+
+# What the operator types to reach Grafana, and what Grafana is told to build
+# its own URLs with. The trailing slash is Grafana's own convention for
+# root_url and it is not optional: without it the sub-path serving computes
+# one level too high and the interface loads without its javascript.
+monitoring_grafana_public_url: >-
+  {{ monitoring_grafana_root_url | trim if monitoring_grafana_root_url | trim | length > 0 else
+     (_monitoring_scheme ~ '://' ~ _monitoring_public_host | trim
+      ~ ((':' ~ _monitoring_public_port)
+         if _monitoring_public_port | int != _monitoring_default_port | int else '')
+      ~ monitoring_grafana_path ~ '/') }}
+
+# Same, for Prometheus when it is published. --web.external-url is what makes
+# it serve its own static files under the prefix instead of at the root.
+monitoring_prometheus_public_url: >-
+  {{ _monitoring_scheme ~ '://' ~ _monitoring_public_host | trim
+     ~ ((':' ~ _monitoring_public_port)
+        if _monitoring_public_port | int != _monitoring_default_port | int else '')
+     ~ monitoring_prometheus_path }}
+
+# ===========================================================================
+#  The containers
+# ===========================================================================
+
+# Same spelling as everywhere else in this repository: the access mode is
+# written out so that container_volume_opts (the SELinux `,z`) has something
+# to be appended to. These are the deployment's own files and directories, so
+# unlike the mounts of the two exporters they are relabelled rather than left
+# alone.
+_monitoring_volume_opts: "{{ container_volume_opts | trim }}"
+
+monitoring_prometheus_volumes: >-
+  {{ [monitoring_server_dir ~ '/prometheus.yml:/etc/prometheus/prometheus.yml:ro',
+      monitoring_server_data_dir ~ '/prometheus:/prometheus:rw']
+     | map('regex_replace', '$', _monitoring_volume_opts) | list }}
+
+# The provisioning files are mounted one by one rather than as a directory:
+# /etc/grafana/provisioning holds subdirectories this deployment says nothing
+# about (alerting, plugins, access control) and mounting over the whole tree
+# would take them away from Grafana, which then logs a failure for each of
+# them on every start.
+monitoring_grafana_volumes: >-
+  {{ [monitoring_server_data_dir ~ '/grafana:/var/lib/grafana:rw',
+      monitoring_server_dir ~ '/grafana/datasources.yml:/etc/grafana/provisioning/datasources/antares.yml:ro',
+      monitoring_server_dir ~ '/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/antares.yml:ro',
+      monitoring_server_dir ~ '/grafana/dashboards:/var/lib/grafana/dashboards:ro']
+     | map('regex_replace', '$', _monitoring_volume_opts) | list }}
+
+# The flags Prometheus is started with. The console paths are the ones the
+# image's own command line carries: setting Exec= replaces it whole, and
+# without them the /consoles endpoints answer 404.
+monitoring_prometheus_flags: >-
+  --config.file=/etc/prometheus/prometheus.yml
+  --storage.tsdb.path=/prometheus
+  --storage.tsdb.retention.time={{ monitoring_prometheus_retention }}
+  --web.listen-address=127.0.0.1:{{ monitoring_prometheus_port }}
+  --web.console.libraries=/usr/share/prometheus/console_libraries
+  --web.console.templates=/usr/share/prometheus/consoles
+  {{ ('--web.external-url=' ~ monitoring_prometheus_public_url | trim)
+     if monitoring_prometheus_public | bool else '' }}

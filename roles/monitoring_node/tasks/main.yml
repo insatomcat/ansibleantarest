@@ -1,0 +1,12 @@
+---
+# The role runs whatever monitoring_enabled says, so that turning it back off
+# takes the container down instead of leaving an orphan unit running next to a
+# deployment that no longer knows about it. Same shape as roles/keycloak.
+
+- name: Install the node exporter
+  ansible.builtin.include_tasks: install.yml
+  when: monitoring_enabled | bool
+
+- name: Remove the node exporter
+  ansible.builtin.include_tasks: remove.yml
+  when: not monitoring_enabled | bool

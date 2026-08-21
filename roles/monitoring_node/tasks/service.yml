@@ -1,0 +1,58 @@
+---
+# Same shape as roles/keycloak/tasks/service.yml: this role owns one unit, and
+# validates and starts it itself.
+- name: Validate the quadlet units
+  ansible.builtin.command: /usr/lib/systemd/system-generators/podman-system-generator -dryrun
+  register: monitoring_node_quadlet_check
+  changed_when: false
+
+- name: Check the node exporter service was generated
+  ansible.builtin.assert:
+    that:
+      - "'---' ~ monitoring_node_exporter_container ~ '.service---' in monitoring_node_quadlet_check.stdout"
+    fail_msg: >-
+      The quadlet generator did not produce
+      {{ monitoring_node_exporter_container }}.service. Units present in
+      /etc/containers/systemd:
+      {{ monitoring_node_quadlet_check.stdout | regex_findall('---(.+?)---') | join(', ') }}
+    quiet: true
+
+# A container that exhausted its start budget stays `failed` and systemd
+# refuses to start it again until StartLimitIntervalSec has run, so the run
+# that fixes the cause would fail on the previous run's verdict.
+- name: Look for a failure a previous run left
+  ansible.builtin.command: "systemctl is-failed {{ monitoring_node_exporter_container }}.service"
+  register: monitoring_node_failed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Clear it
+  ansible.builtin.command: "systemctl reset-failed {{ monitoring_node_exporter_container }}.service"
+  when: monitoring_node_failed.stdout == 'failed'
+  changed_when: true
+
+# Started, not enabled: `systemctl enable` refuses a unit the quadlet generator
+# produced. What brings it back after a reboot is the WantedBy= inside the
+# .container file, which the generator turns into a want of multi-user.target.
+- name: Start the node exporter
+  ansible.builtin.systemd:
+    name: "{{ monitoring_node_exporter_container }}.service"
+    state: started
+    daemon_reload: true
+
+- name: Apply the pending restarts now
+  ansible.builtin.meta: flush_handlers
+
+# /metrics rather than the port: the port answers as soon as the socket is
+# bound, while a 200 with a payload says the collectors ran against the host
+# mount too, which is the half that a wrong mount or an SELinux denial breaks.
+- name: Wait for the node exporter to answer
+  ansible.builtin.uri:
+    url: "http://{{ monitoring_node_exporter_probe_host | trim }}:{{ monitoring_node_exporter_port }}/metrics"
+    return_content: false
+    status_code: [200]
+  register: monitoring_node_ready
+  retries: 12
+  delay: 5
+  until: monitoring_node_ready.status is defined and monitoring_node_ready.status == 200

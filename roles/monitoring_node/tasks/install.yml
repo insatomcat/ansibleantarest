@@ -1,0 +1,32 @@
+---
+- name: Create the monitoring directory
+  ansible.builtin.file:
+    path: "{{ monitoring_base_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Load the node exporter image from the artefacts
+  ansible.builtin.include_tasks: load_artifacts.yml
+  vars:
+    monitoring_load_images: "{{ [monitoring_node_exporter_image] }}"
+  when: antarest_image_source == 'archive'
+
+- name: Deploy the node exporter quadlet unit
+  ansible.builtin.template:
+    src: quadlet/node-exporter.container.j2
+    dest: "/etc/containers/systemd/{{ monitoring_node_exporter_container }}.container"
+    owner: root
+    group: root
+    mode: "0644"
+  register: monitoring_node_unit
+  notify: Restart the node exporter
+
+- name: Reload systemd so the quadlet generator picks the unit up
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: monitoring_node_unit.changed
+
+- name: Start the node exporter
+  ansible.builtin.include_tasks: service.yml

@@ -1,0 +1,26 @@
+---
+# Runs whatever the switches say, so that turning either back off takes the
+# container down instead of leaving an orphan unit scraping a cluster the
+# deployment no longer monitors.
+#
+# There is a third answer besides on and off: an image whose Slurm client
+# cannot talk to this cluster. preflight.yml is what decides that, and the
+# exporter is then not deployed and not scraped rather than deployed broken.
+
+- name: Check what the Slurm exporter needs
+  ansible.builtin.include_tasks: preflight.yml
+  when:
+    - monitoring_enabled | bool
+    - monitoring_slurm_enabled | bool
+
+- name: Install the Slurm exporter
+  ansible.builtin.include_tasks: install.yml
+  when:
+    - monitoring_enabled | bool
+    - monitoring_slurm_enabled | bool
+    - monitoring_slurm_exporter_supported | default(true) | bool
+
+- name: Remove the Slurm exporter
+  ansible.builtin.include_tasks: remove.yml
+  when: not (monitoring_enabled | bool and monitoring_slurm_enabled | bool
+             and monitoring_slurm_exporter_supported | default(true) | bool)

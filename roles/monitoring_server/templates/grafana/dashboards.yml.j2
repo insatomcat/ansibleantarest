@@ -1,0 +1,24 @@
+{{ ansible_managed | comment }}
+#
+# The dashboard provider, read at every start from
+# /etc/grafana/provisioning/dashboards/antares.yml. It loads every dashboard
+# found in the read-only mount below.
+#
+# allowUiUpdates is off: a provisioned dashboard is the deployment's, it comes
+# back identical on a machine that is rebuilt, and Grafana overwrites it from
+# the file anyway. Changes made in the interface are saved under another name,
+# in another folder, where nothing here touches them.
+
+apiVersion: 1
+
+providers:
+  - name: antares
+    orgId: 1
+    folder: Antares
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

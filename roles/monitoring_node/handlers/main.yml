@@ -1,0 +1,8 @@
+---
+# The exporter alone. It shares nothing with the stack it watches, which is
+# the whole point of this half of the deployment.
+- name: Restart the node exporter
+  ansible.builtin.systemd:
+    name: "{{ monitoring_node_exporter_container }}.service"
+    state: restarted
+    daemon_reload: true

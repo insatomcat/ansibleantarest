@@ -214,9 +214,11 @@ hardening_dnf_automatic_upgrade_type: security
 # ---------------------------------------------------------------------------
 # The values shipped in group_vars/all.yml. A deployment still carrying them is
 # reported; set hardening_fail_on_default_secrets to make that a failure.
-# The Keycloak entries are only added when it is deployed: reporting the
-# password of a container that does not exist would be noise, and the check
-# reads whatever is in scope.
+# The Keycloak and Grafana entries are only added when they are deployed:
+# reporting the password of a container that does not exist would be noise,
+# and the check reads whatever is in scope. Grafana is qualified by the group
+# as well, since monitoring_enabled is fleet-wide while Grafana itself runs on
+# the web machine alone - a compute node has no business being asked about it.
 hardening_default_secrets: >-
   {{ {'antarest_jwt_key': 'secretkeytochange',
       'antarest_admin_password': 'admin',
@@ -225,4 +227,7 @@ hardening_default_secrets: >-
      | combine({'keycloak_admin_password': 'admin',
                 'keycloak_db_password': 'changeme-keycloak-db',
                 'keycloak_client_secret': 'changeme-keycloak-client'}
-               if keycloak_enabled | default(false) | bool else {}) }}
+               if keycloak_enabled | default(false) | bool else {})
+     | combine({'monitoring_grafana_admin_password': 'admin'}
+               if (monitoring_enabled | default(false) | bool
+                   and inventory_hostname in (groups['antares_web'] | default([]))) else {}) }}

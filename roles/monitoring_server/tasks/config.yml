@@ -1,0 +1,75 @@
+---
+# A machine of the inventory that contributed no address is a machine nobody
+# is watching, which is exactly the machine an incident happens on. Same
+# warning, and same cause, as the one the firewall prints: a --limit run on a
+# cold fact cache.
+- name: Warn about the machines that will not be scraped
+  ansible.builtin.debug:
+    msg: >-
+      {{ monitoring_faceless_hosts | join(', ') }}: no gathered facts, so
+      their addresses are unknown and Prometheus will not scrape them. Run the
+      playbook without --limit so that the first play gathers from every
+      machine, or set monitoring_node_address on those hosts.
+  when: monitoring_faceless_hosts | length > 0
+
+- name: Deploy the Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ monitoring_server_dir }}/prometheus.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Prometheus
+
+- name: Deploy the Grafana provisioning
+  ansible.builtin.template:
+    src: "grafana/{{ item }}.j2"
+    dest: "{{ monitoring_server_dir }}/grafana/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - datasources.yml
+    - dashboards.yml
+  notify: Restart Grafana
+
+# Provisioned rather than imported by hand, and read-only in the container:
+# Grafana overwrites a provisioned dashboard from its file on every start, so
+# what an operator changes in the interface has to be saved under another name
+# - which is the point. These two are the deployment's, and they come back
+# identical on a machine that is rebuilt.
+#
+# Plain files rather than templates: a Grafana dashboard is JSON full of
+# `{{label}}` legends, which is Jinja's own syntax, and the only thing this
+# deployment would have to substitute in them is a datasource uid that is
+# fixed on purpose (see grafana/datasources.yml.j2). They are also, this way,
+# exactly what the interface exports, so a dashboard improved from the
+# interface can be pasted straight back here.
+- name: Deploy the fleet dashboard
+  ansible.builtin.copy:
+    src: grafana/dashboards/antares-fleet.json
+    dest: "{{ monitoring_server_dir }}/grafana/dashboards/antares-fleet.json"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Grafana
+
+# Only where there is a cluster being scraped, and actively removed where
+# there is not: a dashboard of empty panels is worse than no dashboard, and
+# this is what takes it away from a deployment whose cluster was switched off.
+- name: Deploy the Slurm dashboard
+  ansible.builtin.copy:
+    src: grafana/dashboards/antares-slurm.json
+    dest: "{{ monitoring_server_dir }}/grafana/dashboards/antares-slurm.json"
+    owner: root
+    group: root
+    mode: "0644"
+  when: slurm_enabled | bool and monitoring_slurm_enabled | bool
+  notify: Restart Grafana
+
+- name: Remove the Slurm dashboard when there is no cluster to show
+  ansible.builtin.file:
+    path: "{{ monitoring_server_dir }}/grafana/dashboards/antares-slurm.json"
+    state: absent
+  when: not (slurm_enabled | bool and monitoring_slurm_enabled | bool)
+  notify: Restart Grafana

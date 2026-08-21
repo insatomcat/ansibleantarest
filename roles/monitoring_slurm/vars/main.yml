@@ -1,0 +1,55 @@
+---
+# ===========================================================================
+#  What the exporter needs from the machine it runs on
+# ===========================================================================
+
+# Where munged keeps its socket. The same path on both families, and the same
+# one the Slurm daemons of this machine use.
+monitoring_slurm_munge_dir: /var/run/munge
+
+# The configuration of the cluster and the socket of munged: the two things
+# that turn `sinfo` into an answer. The image ships the client binaries and no
+# munged of its own, so authentication is the host's munged, reached through
+# its socket, exactly as it is for every other Slurm command on this machine.
+#
+# The munge *key* is deliberately not mounted, although the image's own
+# documentation lists it: a client does not read it. It is munged that signs
+# the credentials, and munged is on the host. Mounting the shared secret of
+# the cluster into a container that has no use for it would be a habit rather
+# than a requirement.
+#
+# Deliberately without container_volume_opts, the `,z` every mount of the
+# Antares-Web stack carries: relabelling /etc/slurm and the munge run
+# directory container_file_t would take them away from slurmctld and munged,
+# which is to say it would take the cluster down. The container is given
+# label=disable instead, see below.
+monitoring_slurm_exporter_volumes:
+  - "{{ slurm_conf_dir }}:/etc/slurm:ro"
+  - "{{ monitoring_slurm_munge_dir }}:/var/run/munge:ro"
+
+# --user=0:0 because of that socket. The image runs as uid 9341 in *its own*
+# munge group, whose gid comes from the Ubuntu base it was built on and has no
+# reason to match the one munge was given on this machine; on the RHEL
+# rebuilds the run directory is 0750, so a gid that does not match is a
+# permission denied at the first scrape. Root in a rootful container is the
+# uid this machine already runs the Slurm daemons as.
+#
+# label=disable for the mounts above: with SELinux enforcing, a container_t
+# process reading files labelled slurm_conf_t and munge_var_run_t is denied,
+# and the alternative - relabelling them - is the one thing that must not
+# happen here.
+monitoring_slurm_exporter_podman_args: >-
+  --user=0:0{{ ' --security-opt=label=disable'
+               if (ansible_facts.selinux.status | default('disabled')) == 'enabled' else '' }}
+
+# The flags the unit passes, built from the defaults above.
+monitoring_slurm_exporter_flags: >-
+  --web.listen-address={{ monitoring_slurm_exporter_bind | trim }}:{{ monitoring_slurm_exporter_port }}
+  --command.timeout={{ monitoring_slurm_exporter_command_timeout }}
+  {% for collector in monitoring_slurm_exporter_disabled_collectors %}--no-collector.{{ collector }} {% endfor %}
+  {{ monitoring_slurm_exporter_extra_flags | join(' ') }}
+
+# Where the playbook asks the exporter whether it is up: the loopback unless
+# the bind address is pinned, same as the node exporter.
+monitoring_slurm_exporter_probe_host: >-
+  {{ monitoring_slurm_exporter_bind | trim | default('127.0.0.1', true) }}
