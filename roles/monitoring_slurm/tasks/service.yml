@@ -1,0 +1,69 @@
+---
+- name: Validate the quadlet units
+  ansible.builtin.command: /usr/lib/systemd/system-generators/podman-system-generator -dryrun
+  register: monitoring_slurm_quadlet_check
+  changed_when: false
+
+- name: Check the Slurm exporter service was generated
+  ansible.builtin.assert:
+    that:
+      - "'---' ~ monitoring_slurm_exporter_container ~ '.service---' in monitoring_slurm_quadlet_check.stdout"
+    fail_msg: >-
+      The quadlet generator did not produce
+      {{ monitoring_slurm_exporter_container }}.service. Units present in
+      /etc/containers/systemd:
+      {{ monitoring_slurm_quadlet_check.stdout | regex_findall('---(.+?)---') | join(', ') }}
+    quiet: true
+
+# A container that exhausted its start budget stays `failed` until
+# StartLimitIntervalSec has run, so the run that fixes the cause would fail on
+# the previous run's verdict.
+- name: Look for a failure a previous run left
+  ansible.builtin.command: "systemctl is-failed {{ monitoring_slurm_exporter_container }}.service"
+  register: monitoring_slurm_failed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Clear it
+  ansible.builtin.command: "systemctl reset-failed {{ monitoring_slurm_exporter_container }}.service"
+  when: monitoring_slurm_failed.stdout == 'failed'
+  changed_when: true
+
+- name: Start the Slurm exporter
+  ansible.builtin.systemd:
+    name: "{{ monitoring_slurm_exporter_container }}.service"
+    state: started
+    daemon_reload: true
+
+- name: Apply the pending restarts now
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the Slurm exporter to answer
+  ansible.builtin.uri:
+    url: "http://{{ monitoring_slurm_exporter_probe_host | trim }}:{{ monitoring_slurm_exporter_port }}/metrics"
+    return_content: true
+    status_code: [200]
+  register: monitoring_slurm_metrics
+  retries: 12
+  delay: 5
+  until: monitoring_slurm_metrics.status is defined and monitoring_slurm_metrics.status == 200
+
+# A warning and not a failure, because the two are genuinely different
+# outcomes: the container is up, it answers, and its Go runtime metrics are
+# all there - what is missing is the cluster behind it. The usual cause is the
+# one thing this container cannot fix by itself, a slurm-client too far from
+# the slurmctld of this machine, and the deployment is otherwise healthy. See
+# docs/monitoring.md, which explains the two ways out.
+- name: Warn when the exporter reaches no cluster
+  ansible.builtin.debug:
+    msg: >-
+      {{ monitoring_slurm_exporter_container }} answers on
+      {{ monitoring_slurm_exporter_port }} but reports no `slurm_` metric, so
+      Prometheus will scrape an empty exporter. The likeliest cause is a Slurm
+      version mismatch between the client in {{ monitoring_slurm_exporter_image }}
+      and the slurmctld of this machine; `journalctl -u
+      {{ monitoring_slurm_exporter_container }}.service` names it. Pin another
+      image with monitoring_slurm_exporter_image, or set
+      monitoring_slurm_enabled to false.
+  when: monitoring_slurm_metrics.content | default('') is not search('(?m)^slurm_')

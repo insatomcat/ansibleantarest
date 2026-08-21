@@ -1,0 +1,85 @@
+---
+# Same shape as the front door and Keycloak: this role owns its units and
+# starts them itself rather than through a target.
+- name: Validate the quadlet units
+  ansible.builtin.command: /usr/lib/systemd/system-generators/podman-system-generator -dryrun
+  register: monitoring_server_quadlet_check
+  changed_when: false
+
+- name: Check the monitoring services were generated
+  ansible.builtin.assert:
+    that:
+      - "'---' ~ item ~ '.service---' in monitoring_server_quadlet_check.stdout"
+    fail_msg: >-
+      The quadlet generator did not produce {{ item }}.service. Units present
+      in /etc/containers/systemd:
+      {{ monitoring_server_quadlet_check.stdout | regex_findall('---(.+?)---') | join(', ') }}
+    quiet: true
+  loop:
+    - "{{ monitoring_prometheus_container }}"
+    - "{{ monitoring_grafana_container }}"
+
+# A container that exhausted its start budget stays `failed` and systemd
+# refuses to start it again until StartLimitIntervalSec has run, so the run
+# that fixes the cause would fail on the previous run's verdict.
+- name: Look for the units a previous run left failed
+  ansible.builtin.command: "systemctl is-failed {{ item }}.service"
+  loop:
+    - "{{ monitoring_prometheus_container }}"
+    - "{{ monitoring_grafana_container }}"
+  register: monitoring_server_failed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Clear those failures
+  ansible.builtin.command: "systemctl reset-failed {{ item }}.service"
+  loop: >-
+    {{ monitoring_server_failed.results | selectattr('stdout', 'equalto', 'failed')
+       | map(attribute='item') | list }}
+  changed_when: true
+
+# Started, not enabled: systemctl refuses to enable a unit the quadlet
+# generator produced, and the WantedBy= inside each .container file is what
+# brings them back after a reboot.
+- name: Start Prometheus and Grafana
+  ansible.builtin.systemd:
+    name: "{{ item }}.service"
+    state: started
+    daemon_reload: true
+  loop:
+    - "{{ monitoring_prometheus_container }}"
+    - "{{ monitoring_grafana_container }}"
+
+- name: Apply the pending restarts now
+  ansible.builtin.meta: flush_handlers
+
+# /-/ready and not the port: Prometheus binds before it has replayed its
+# write-ahead log, which on a database with a month of samples in it is not
+# instant, and it answers 503 on this path until it has.
+- name: Wait for Prometheus to be ready
+  ansible.builtin.uri:
+    url: >-
+      http://127.0.0.1:{{ monitoring_prometheus_port }}{{
+        monitoring_prometheus_path if monitoring_prometheus_public | bool else '' }}/-/ready
+    status_code: [200]
+  register: monitoring_prometheus_ready
+  retries: 30
+  delay: 5
+  until: monitoring_prometheus_ready.status is defined and monitoring_prometheus_ready.status == 200
+
+# Under the sub-path, because that is where Grafana serves itself once it is
+# told it lives there: with GF_SERVER_SERVE_FROM_SUB_PATH on, the prefix is
+# handled by Grafana and not stripped by the front door, so its own port
+# answers the same paths the browser asks for.
+#
+# The first start creates the sqlite database and provisions the datasource
+# and the dashboards, hence the patience.
+- name: Wait for Grafana to answer
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ monitoring_grafana_port }}{{ monitoring_grafana_path }}/api/health"
+    status_code: [200]
+  register: monitoring_grafana_ready
+  retries: 30
+  delay: 5
+  until: monitoring_grafana_ready.status is defined and monitoring_grafana_ready.status == 200

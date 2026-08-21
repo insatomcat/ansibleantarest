@@ -47,3 +47,11 @@ antares_build_xpansion_os:
 antares_build_slurm_images: >-
   {{ slurmdbd_thirdparty_images
      if (slurm_enabled | bool and slurmdbd_enabled | bool) else [] }}
+
+# The monitoring images travel in the same artefact set, under a prefix of
+# their own: every machine of the fleet loads one or two of them by name, and
+# a compute node has no business receiving Grafana. Empty when the deployment
+# is not monitored - and, like the switches above, monitoring_enabled and
+# monitoring_slurm_enabled have to be right where the builder sees them, which
+# is why the list itself lives in group_vars/all.yml.
+antares_build_monitoring_images: "{{ monitoring_images }}"

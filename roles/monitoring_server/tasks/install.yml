@@ -1,0 +1,81 @@
+---
+- name: Create the monitoring configuration directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ monitoring_server_dir }}"
+    - "{{ monitoring_server_dir }}/grafana"
+    - "{{ monitoring_server_dir }}/grafana/dashboards"
+    - "{{ monitoring_server_data_dir }}"
+
+# Owned by the uid of each image, and by nothing else: both databases are
+# written by a process that has no way of becoming root inside its container,
+# so a directory belonging to root is a container that starts and dies on its
+# first write. 0750 rather than 0755 for the same reason the rest of the state
+# of this machine is not world-readable: the samples say when the machine is
+# idle and the Grafana database holds its sessions.
+- name: Create the Prometheus database directory
+  ansible.builtin.file:
+    path: "{{ monitoring_server_data_dir }}/prometheus"
+    state: directory
+    owner: "{{ monitoring_prometheus_uid }}"
+    group: "{{ monitoring_prometheus_uid }}"
+    mode: "0750"
+
+# Group 0 rather than the uid: like every Red Hat style image, the Grafana one
+# runs with gid 0, and its own entrypoint expects the tree to be group
+# readable.
+- name: Create the Grafana database directory
+  ansible.builtin.file:
+    path: "{{ monitoring_server_data_dir }}/grafana"
+    state: directory
+    owner: "{{ monitoring_grafana_uid }}"
+    group: "0"
+    mode: "0750"
+
+- name: Load the Prometheus and Grafana images from the artefacts
+  ansible.builtin.include_role:
+    name: monitoring_node
+    tasks_from: load_artifacts
+  vars:
+    monitoring_load_images: "{{ [monitoring_prometheus_image, monitoring_grafana_image] }}"
+  when: antarest_image_source == 'archive'
+
+- name: Render the configuration
+  ansible.builtin.include_tasks: config.yml
+
+- name: Deploy the Prometheus quadlet unit
+  ansible.builtin.template:
+    src: quadlet/prometheus.container.j2
+    dest: "/etc/containers/systemd/{{ monitoring_prometheus_container }}.container"
+    owner: root
+    group: root
+    mode: "0644"
+  register: monitoring_prometheus_unit
+  notify: Restart Prometheus
+
+# 0600 rather than the 0644 of the others: this one carries the Grafana
+# administrator password, the same reasoning as the units of the accounting
+# database in roles/slurm_frontend. The generator runs as root and reads it
+# all the same.
+- name: Deploy the Grafana quadlet unit
+  ansible.builtin.template:
+    src: quadlet/grafana.container.j2
+    dest: "/etc/containers/systemd/{{ monitoring_grafana_container }}.container"
+    owner: root
+    group: root
+    mode: "0600"
+  register: monitoring_grafana_unit
+  notify: Restart Grafana
+
+- name: Reload systemd so the quadlet generator picks the units up
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: monitoring_prometheus_unit.changed or monitoring_grafana_unit.changed
+
+- name: Start Prometheus and Grafana
+  ansible.builtin.include_tasks: service.yml

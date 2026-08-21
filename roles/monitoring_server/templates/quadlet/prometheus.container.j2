@@ -1,0 +1,48 @@
+{{ ansible_managed | comment }}
+#
+# Prometheus, in the host network namespace and bound to 127.0.0.1.
+#
+# The host namespace is what lets it scrape the other machines of the
+# deployment directly, and what keeps it out of the podman network of
+# Antares-Web: a Prometheus that needed that network to be up could not
+# explain why it is down. The loopback bind is the same rule every other
+# service of this machine follows - what the outside reaches is the front
+# door{{ ', which routes ' ~ monitoring_prometheus_path ~ ' here' if monitoring_prometheus_public | bool else ', and it does not route here unless monitoring_prometheus_public says so' }}.
+
+[Unit]
+Description=Prometheus
+# Start budget for the Restart= below: five attempts, then the unit gives up
+# and stays visible in `systemctl --failed`.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+{% if antarest_data_device %}
+# The database is on a volume mounted with nofail. Without this the unit would
+# start on the empty mount point of the boot disk instead of failing visibly.
+RequiresMountsFor={{ antarest_data_dir }}
+{% endif %}
+
+[Container]
+ContainerName={{ monitoring_prometheus_container }}
+Image={{ monitoring_prometheus_image }}
+Network=host
+{% for volume in monitoring_prometheus_volumes %}
+Volume={{ volume }}
+{% endfor %}
+
+# Replaces the command line of the image whole, hence the two console paths it
+# carries and the ones this deployment adds. Retention is
+# {{ monitoring_prometheus_retention }}; the database it applies to is the
+# bind mount above, so a machine that is rebuilt keeps its history.
+Exec={{ monitoring_prometheus_flags | trim | replace('\n', ' ') }}
+
+[Service]
+# on-failure, not always: a container that keeps dying exhausts the budget in
+# [Unit] and stays `failed` instead of looping out of sight.
+Restart=on-failure
+RestartSec=10
+# Replaying the write-ahead log of a database with a month of samples in it is
+# not instant, and systemd's default would give up on it.
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

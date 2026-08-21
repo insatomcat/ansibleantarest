@@ -44,6 +44,28 @@
     - role: hardening
       when: hardening_enabled | bool
 
+# The node exporter, on every machine of the inventory. Early on purpose, and
+# for the same reason as the hardening play above: what is deployed first is
+# what is watching while the rest of the run happens, and the first thing an
+# operator asks of a machine that misbehaved during a deployment is what its
+# memory and its disks were doing at the time. It depends on nothing else, so
+# there is nothing to wait for.
+#
+# The role runs whatever monitoring_enabled says: turning it back off is what
+# takes the exporters down, rather than leaving them behind on every machine
+# of a fleet that no longer collects them.
+- name: Monitoring - the node exporter of every machine
+  # Not `all`: a builder is listed in the same inventory in the example file,
+  # it is a machine that exists for the length of a build, and Prometheus does
+  # not scrape it. An exporter nobody reads is one more container to explain.
+  hosts: all:!builder
+  become: true
+  tags: monitoring
+  roles:
+    - role: podman
+      when: monitoring_enabled | bool
+    - monitoring_node
+
 # ---------------------------------------------------------------------------
 #  Slurm cluster
 # ---------------------------------------------------------------------------
@@ -88,6 +110,13 @@
     - role: podman
       when: slurm_enabled | bool and slurmdbd_enabled | bool
     - role: slurm_frontend
+      when: slurm_enabled | bool
+    # After the controller it reads and the munge it authenticates through,
+    # both of which are installed by the roles above. Like every monitoring
+    # role it runs whatever the switches say, so that turning either off takes
+    # the container down.
+    - role: monitoring_slurm
+      tags: monitoring
       when: slurm_enabled | bool
 
 - name: Slurm compute nodes
@@ -178,5 +207,11 @@
     # that changing it takes the previous connector down.
     - role: antares_auth
       tags: auth
+    # Before the front door, which routes monitoring_grafana_path to it, and
+    # after everything it watches - although it depends on none of it: both
+    # containers are in the host network namespace and would come up on a
+    # machine whose stack is down, which is the point of monitoring.
+    - role: monitoring_server
+      tags: monitoring
     - role: antares_edge
       tags: edge

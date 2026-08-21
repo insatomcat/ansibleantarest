@@ -1,0 +1,109 @@
+---
+# What has to be true before this container is worth starting: munged is
+# running, the image is on the machine, and the Slurm client inside it can
+# talk to the slurmctld of this one.
+
+# munged is installed and started by the munge role, which runs on every node
+# of the cluster well before this one. A machine that got here without it
+# would give the container an empty directory and an exporter that answers
+# /metrics with nothing in it - a failure that reads as "the exporter is
+# broken" rather than as what it is.
+- name: Check munged is running on this machine
+  ansible.builtin.stat:
+    path: "{{ monitoring_slurm_munge_dir }}/munge.socket.2"
+  register: monitoring_slurm_munge_socket
+
+- name: Fail when the munge socket is missing
+  ansible.builtin.assert:
+    that: monitoring_slurm_munge_socket.stat.exists
+    fail_msg: >-
+      {{ monitoring_slurm_munge_dir }}/munge.socket.2 does not exist on
+      {{ inventory_hostname }}, so no Slurm command can authenticate and the
+      exporter would report an empty cluster. Check munged is running
+      (`systemctl status munge`), or set monitoring_slurm_enabled to false.
+    quiet: true
+
+# Before the version probe below, which runs the image.
+- name: Load the Slurm exporter image from the artefacts
+  ansible.builtin.include_role:
+    name: monitoring_node
+    tasks_from: load_artifacts
+  vars:
+    monitoring_load_images: "{{ [monitoring_slurm_exporter_image] }}"
+  when: antarest_image_source == 'archive'
+
+# ---------------------------------------------------------------------------
+#  The version pair
+#
+#  This is the one container of the deployment whose version has to agree with
+#  something outside it. Slurm's rule is one-directional: slurmctld serves
+#  commands of its own release and of the two before it, and refuses anything
+#  *newer* than itself - the RPC carries a protocol version it does not know,
+#  and the answer is "Zero Bytes were transmitted or received". The exporter
+#  ships its own slurm-client, so an image built on a newer Slurm than the
+#  cluster runs is an exporter that answers /metrics with its Go runtime
+#  metrics and nothing under `slurm_`.
+#
+#  Both halves are read rather than assumed: the cluster's from the machine
+#  itself, the image's from the image. A hardcoded table would be wrong the
+#  day either moves, and both do - the distributions ship 23.11 (Ubuntu
+#  24.04), 24.11 (Debian 13), 25.05 (OpenHPC 4 on EL 10) and 25.11 (OpenHPC 3
+#  on EL 9, Ubuntu 26.04), and the image follows its own base.
+# ---------------------------------------------------------------------------
+- name: Ask this machine which Slurm it runs
+  ansible.builtin.command: scontrol --version
+  register: monitoring_slurm_cluster_version_raw
+  changed_when: false
+
+# `--entrypoint sinfo` because the entrypoint of the image is the exporter
+# itself. Tolerated failure on purpose: the publisher's `-minimal` images
+# carry no slurm-client at all and are meant to run the host's binaries, so
+# there is nothing to read there and nothing to second-guess - see
+# monitoring_slurm_exporter_extra_flags.
+- name: Ask the image which Slurm client it carries
+  ansible.builtin.command: >-
+    {{ container_cmd }} run --rm --entrypoint sinfo
+    {{ monitoring_slurm_exporter_image }} --version
+  register: monitoring_slurm_image_version_raw
+  changed_when: false
+  failed_when: false
+
+- name: Work out whether the two can talk
+  ansible.builtin.set_fact:
+    # Kept in the fact cache so that a later run limited to the web machine
+    # still knows whether to declare this exporter as a Prometheus target.
+    cacheable: true
+    monitoring_slurm_cluster_version: "{{ monitoring_slurm_cluster_version_raw.stdout | regex_search('[0-9]+\\.[0-9]+') }}"
+    monitoring_slurm_image_version: >-
+      {{ (monitoring_slurm_image_version_raw.stdout | regex_search('[0-9]+\\.[0-9]+'))
+         if monitoring_slurm_image_version_raw.rc == 0 else '' }}
+
+- name: Decide whether the exporter is deployed
+  ansible.builtin.set_fact:
+    cacheable: true
+    # Unknown means supported: the check exists to catch a pair that is known
+    # to be wrong, not to refuse everything it cannot read.
+    monitoring_slurm_exporter_supported: >-
+      {{ true if (not monitoring_slurm_version_check | bool
+                  or monitoring_slurm_image_version | trim | length == 0
+                  or monitoring_slurm_cluster_version | trim | length == 0)
+         else monitoring_slurm_cluster_version is version(monitoring_slurm_image_version | trim, '>=') }}
+
+# A warning and not a failure: the cluster is healthy, the machines are still
+# monitored, and what is missing is one exporter. Prometheus is not told about
+# it either (roles/monitoring_server/vars/main.yml reads this very fact), so
+# nothing ends up scraping a target that cannot answer.
+- name: Say why the Slurm exporter is not deployed
+  ansible.builtin.debug:
+    msg: >-
+      The Slurm exporter is skipped on {{ inventory_hostname }}:
+      {{ monitoring_slurm_exporter_image }} carries a Slurm
+      {{ monitoring_slurm_image_version | trim }} client and this cluster runs
+      {{ monitoring_slurm_cluster_version }}. slurmctld serves commands of its
+      own release and of the two before it, never a newer one, so that
+      exporter would answer without any slurm_ metric in it. Pin an image
+      whose client matches the cluster with monitoring_slurm_exporter_image
+      (see docs/monitoring.md), or set monitoring_slurm_enabled to false to
+      stop being told. monitoring_slurm_version_check turns this check off and
+      deploys it anyway.
+  when: not monitoring_slurm_exporter_supported | bool

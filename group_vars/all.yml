@@ -431,6 +431,135 @@ antares_auth_port: 8870
 antares_auth_container: "antares-auth-{{ antares_auth_provider }}"
 
 # ---------------------------------------------------------------------------
+#  Monitoring
+#
+#  Three containers and one exporter per machine, all driven by quadlet like
+#  the rest of the deployment:
+#
+#    node-exporter   on every machine of the inventory, the web server and the
+#                    compute nodes alike. It is what says a node is out of
+#                    memory, out of disk or gone.
+#    slurm-exporter  on the Slurm front-end alone, next to the controller it
+#                    reads: the queue, the partitions and the state of every
+#                    node as the scheduler sees them.
+#    prometheus      on the web machine, scraping all of the above.
+#    grafana         next to it, served by the front door under
+#                    monitoring_grafana_path.
+#
+#  The whole stack runs in the *host* network namespace and publishes on the
+#  loopback, for the same reason the front door does (see
+#  roles/antares_edge/defaults/main.yml): it must not depend on the podman
+#  network of Antares-Web, since the moment that stack is down is precisely
+#  the moment its graphs are worth reading. Nothing here is on the podman
+#  network and nothing here resolves a container name.
+#
+#  What the operator does after the first deployment: open
+#  https://<domain>/grafana/, log in with monitoring_grafana_admin_user, and
+#  read the dashboard the playbook provisions. Prometheus itself stays on the
+#  loopback unless monitoring_prometheus_public says otherwise.
+# ---------------------------------------------------------------------------
+monitoring_enabled: false
+
+# The Slurm exporter, on the front-end. Follows the cluster by default.
+#
+# It is the only container here whose *version* has to agree with something
+# outside it: it runs the `sinfo`, `squeue` and `sdiag` of its image against
+# the controller of that machine, and a controller serves the commands of its
+# own release and of the two before it, never a newer one. The role reads both
+# versions before deploying anything and skips the exporter when the image is
+# ahead, rather than leaving one that answers without a single `slurm_` metric
+# in it - which is what a cluster on Debian 13 (24.11), Ubuntu 24.04 (23.11)
+# or EL 10 (25.05) gets from an image built on 25.11 today. See
+# docs/monitoring.md; this flag is how an operator says no to it outright.
+monitoring_slurm_enabled: "{{ slurm_enabled }}"
+
+# Images, fully qualified and pinned like every other third-party image here.
+# Not under container_registry: none of these live in docker.io/library.
+#
+# Pinned on the major where the publisher keeps a major alias (Prometheus and
+# node-exporter do, and both take compatibility across a major seriously), on
+# the minor for Grafana, which migrates its own sqlite database on the first
+# start of a new version and does not migrate back - the same reasoning as
+# keycloak_image above. The Slurm exporter is pinned on the patch: its Docker
+# Hub tags carry no `v` prefix and the floating aliases are young.
+monitoring_node_exporter_image: "docker.io/prom/node-exporter:v1"
+monitoring_prometheus_image: "docker.io/prom/prometheus:v3"
+monitoring_grafana_image: "docker.io/grafana/grafana:13.1"
+monitoring_slurm_exporter_image: "docker.io/sckyzo/slurm-exporter:1.8.4"
+
+# Where each exporter listens. node-exporter and the Slurm exporter are on the
+# machine's own address, not on the loopback: Prometheus runs on the web
+# machine and has to reach them across the network. What keeps them private is
+# the firewall, whose trusted set is exactly the machines of this inventory
+# (see roles/hardening). Prometheus and Grafana are the other way round: they
+# only ever answer the front door, so they are on 127.0.0.1 like everything
+# else the deployment publishes there.
+monitoring_node_exporter_port: 9100
+monitoring_slurm_exporter_port: 9341
+monitoring_prometheus_port: 8084
+monitoring_grafana_port: 8083
+
+# The path the front door serves Grafana under. It is also what Grafana is
+# told to build its own URLs with (GF_SERVER_SERVE_FROM_SUB_PATH), so the two
+# cannot disagree.
+monitoring_grafana_path: /grafana
+
+# Prometheus through the front door as well, under monitoring_prometheus_path.
+# Off: the expression browser is an unauthenticated read of every metric of the
+# fleet, and Grafana is what this deployment gives people to look at. On a
+# machine where it is off, reach it with an SSH tunnel:
+#
+#   ssh -L 8084:127.0.0.1:8084 <the web machine>
+#
+# Turning it on sets --web.external-url as well, without which Prometheus
+# builds its own links at the root and the console answers 404 on its own
+# static files.
+monitoring_prometheus_public: false
+monitoring_prometheus_path: /prometheus
+
+# How often every target is scraped, and how long the samples are kept. 30s is
+# what the Slurm exporter documentation asks for: each scrape runs sdiag,
+# sinfo and squeue on the controller, and that is not free on a busy cluster.
+# The retention is what decides the size of the database on disk; a fleet of a
+# dozen machines at 30s costs a couple of gigabytes a month.
+monitoring_scrape_interval: 30s
+monitoring_prometheus_retention: 30d
+
+# Secrets - CHANGE THIS.
+#
+# Read once, when Grafana creates its database, exactly like the Antares-Web
+# and Keycloak administrators: changing it afterwards is done from the
+# interface, or with `podman exec grafana grafana cli admin reset-admin-password`.
+# See docs/monitoring.md.
+monitoring_grafana_admin_user: admin
+monitoring_grafana_admin_password: "admin"
+
+# The images the monitoring stack needs. The counterpart of
+# antarest_thirdparty_images for this half of the deployment: build.yml
+# archives exactly this list and each machine loads exactly what it runs, so
+# the two cannot drift. It lives here rather than in a role because the
+# builder reads it and runs none of these roles - same reason as
+# keycloak_image and slurmdbd_thirdparty_images above.
+monitoring_images: >-
+  {{ ([monitoring_node_exporter_image, monitoring_prometheus_image,
+       monitoring_grafana_image]
+      + ([monitoring_slurm_exporter_image]
+         if (slurm_enabled | bool and monitoring_slurm_enabled | bool) else []))
+     | unique if monitoring_enabled | bool else [] }}
+
+# The name build.yml gives each of those archives, as a mapping so that the
+# rule lives in one place rather than in each of the three roles that ship
+# one. Derived from the image name by the very expression the save step of
+# roles/antares_build uses, so repinning a tag renames the archive on both
+# sides at once instead of silently loading the old one. A prefix of their
+# own, like the Slurm front-end's: a compute node has no business receiving
+# Grafana, and load_artifacts ships names rather than a whole directory.
+monitoring_image_archives: >-
+  {{ dict(monitoring_images | zip(monitoring_images
+          | map('regex_replace', '[^a-zA-Z0-9]', '-')
+          | map('regex_replace', '^(.*)$', 'monitoring-thirdparty-\1.tar.gz'))) }}
+
+# ---------------------------------------------------------------------------
 #  Containers
 #
 #  The stack runs on podman, driven by quadlet: each container is a systemd

@@ -1,0 +1,51 @@
+{{ ansible_managed | comment }}
+#
+# The Prometheus node exporter of {{ inventory_hostname }}.
+#
+# In the host network namespace, like the front door and like everything else
+# in the monitoring half: this container has to be reachable from the machine
+# that scrapes it, and it has to report the interfaces, the mounts and the load
+# of the *machine* rather than of a network namespace of its own.
+#
+# It is on no podman network and depends on no other unit. A node exporter that
+# needed the Antares-Web stack to be up would go down with the incident it
+# exists to explain.
+
+[Unit]
+Description=Prometheus node exporter
+# Start budget for the Restart= below: five attempts, then the unit gives up
+# and stays visible in `systemctl --failed` instead of looping out of sight.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Container]
+ContainerName={{ monitoring_node_exporter_container }}
+Image={{ monitoring_node_exporter_image }}
+Network=host
+{% for volume in monitoring_node_exporter_volumes %}
+Volume={{ volume }}
+{% endfor %}
+PodmanArgs={{ monitoring_node_exporter_podman_args | trim }}
+
+# --path.rootfs is what the read-only mount of / above is for: it is the
+# prefix node-exporter strips from every mount point it reports, so the
+# filesystems come out named as the machine names them rather than as /host/...
+#
+# The dollar signs of the two regular expressions are doubled because systemd
+# expands `$` on a command line; `$$` is how it is told to pass one through.
+# Doubled or not the expressions mean the same thing to node-exporter, which
+# reads them with RE2, where `$$` is two end-of-text anchors in a row.
+Exec=--path.rootfs=/host --web.listen-address={{ monitoring_node_exporter_bind | trim }}:{{ monitoring_node_exporter_port }} --collector.filesystem.mount-points-exclude={{ monitoring_node_exporter_mount_exclude | trim | replace('$', '$$') }} --collector.filesystem.fs-types-exclude={{ monitoring_node_exporter_fs_exclude | trim | replace('$', '$$') }}
+
+[Service]
+# on-failure, not always: a container that keeps dying exhausts the budget in
+# [Unit] and stays `failed` rather than restarting for ever.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+# No target of its own, unlike the Antares-Web stack: the exporters have
+# nothing to be grouped with. They are independent of each other and of
+# everything else on the machine, and that is what makes them trustworthy
+# during an incident.
+WantedBy=multi-user.target
