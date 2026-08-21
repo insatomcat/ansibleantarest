@@ -33,6 +33,8 @@ The solver tarballs are cached for the builder's own family. A mixed fleet, or a
 antares_build_solver_os: ["Ubuntu-22.04", "OracleServer-8.10"]
 ```
 
+`antares_build_xpansion_os` is the same knob for the Xpansion releases, which are only fetched at all when the builder sees `antares_xpansion_enabled`. A release whose asset name is spelled out per family in `roles/antares_defaults/defaults/main/solvers.yml` - 1.3.0 is one - is cached under the builder's own name whatever the list says, since that expression is resolved on the builder.
+
 A target that finds no tarball for its family in the cache falls back to downloading it from GitHub, so getting this wrong costs time, not a failure.
 
 Five constraints to know:
