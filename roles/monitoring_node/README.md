@@ -39,5 +39,5 @@ trusts the addresses of the inventory and drops everyone else, and `verify.yml`
 probes both halves from outside. `monitoring_node_exporter_bind` pins it to one
 address on a machine whose interfaces are not all equal.
 
-Variables in `defaults/main.yml` and `group_vars/all.yml`, documented in
+Variables in `defaults/main.yml` and `roles/antares_defaults/`, documented in
 [Monitoring](../../docs/monitoring.md).

@@ -53,6 +53,9 @@
   hosts: all
   gather_facts: false
   tags: always
+  roles:
+    - antares_defaults
+
   tasks:
     - name: Gather facts
       ansible.builtin.setup:
@@ -79,6 +82,9 @@
     # keeps its state on the boot disk, and the volume checks do not apply.
     verify_data_device: "{{ antarest_data_device | default('') }}"
     verify_data_dir: "{{ antarest_data_dir | default(antarest_base_dir ~ '/data') }}"
+  roles:
+    - antares_defaults
+
   tasks:
 
     # `until` rather than a single shot, and the state itself rather than the
@@ -305,6 +311,9 @@
          | selectattr('labels.job', 'defined')
          | selectattr('labels.job', 'equalto', 'slurm')
          | map(attribute='labels.instance') | list }}
+  roles:
+    - antares_defaults
+
   tasks:
 
     # From the machine and not from the controller: Prometheus is bound to the
@@ -482,6 +491,9 @@
   become: true
   gather_facts: false
   tags: [verify, slurm]
+  roles:
+    - antares_defaults
+
   tasks:
 
     - name: Ask slurmctld whether it is alive
@@ -575,6 +587,9 @@
   tags: [verify, slurm]
   vars:
     verify_frontend: "{{ (groups['slurm_frontend'] | default([])) | first | default('') }}"
+  roles:
+    - antares_defaults
+
   tasks:
 
     - name: Read the marker from the shared home
@@ -706,6 +721,9 @@
     # The role default, which is not in scope in a play that does not run the
     # role. An inventory that overrides it wins, as it should.
     verify_ssh_key: "{{ antarest_ssh_key | default(antarest_base_dir ~ '/deploy/id_rsa') }}"
+  roles:
+    - antares_defaults
+
   tasks:
 
     # As root rather than as the antares user, deliberately: the backend reads
@@ -772,6 +790,9 @@
   become: true
   gather_facts: false
   tags: [verify, hardening]
+  roles:
+    - antares_defaults
+
   tasks:
 
     # `--header` lists the files journald would read, with their path, which
@@ -893,6 +914,9 @@
                and monitoring_slurm_enabled | default(slurm_enabled) | bool
                and monitoring_slurm_exporter_supported | default(false) | bool
                and inventory_hostname in (groups['slurm_frontend'] | default([])) else []) }}
+  roles:
+    - antares_defaults
+
   tasks:
 
     - name: Read the listening sockets
@@ -996,6 +1020,9 @@
          + ([monitoring_prometheus_port | int, monitoring_grafana_port | int]
             if monitoring_enabled | default(false) | bool
                and inventory_hostname in (groups['antares_web'] | default([])) else []) }}
+  roles:
+    - antares_defaults
+
   tasks:
 
     - name: Probe from the controller the ports the world must reach
@@ -1027,6 +1054,9 @@
   tags: [verify, firewall]
   vars:
     verify_frontend: "{{ (groups['slurm_frontend'] | default([])) | first | default('') }}"
+  roles:
+    - antares_defaults
+
   tasks:
 
     # From the compute node itself, over the cluster network: these are the
@@ -1063,6 +1093,9 @@
   gather_facts: false
   become: false
   tags: [verify, firewall]
+  roles:
+    - antares_defaults
+
   tasks:
 
     - name: Reach slurmd on every compute node
@@ -1084,6 +1117,9 @@
   tags: [verify, firewall]
   vars:
     verify_frontend: "{{ (groups['slurm_frontend'] | default([])) | first | default('') }}"
+  roles:
+    - antares_defaults
+
   tasks:
 
     - name: Reach the SSH port of the front-end
@@ -1106,6 +1142,9 @@
   become: true
   gather_facts: false
   tags: [verify, slurm]
+  roles:
+    - antares_defaults
+
   tasks:
 
     - name: Delete the marker

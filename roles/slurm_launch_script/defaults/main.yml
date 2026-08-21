@@ -1,0 +1,27 @@
+---
+# ===========================================================================
+#  launchAntares.sh - the script the Slurm launcher of Antares-Web submits
+# ===========================================================================
+
+# Debian and Ubuntu put the Open MPI `benders` is linked against in the default
+# library path; EL keeps its own under /usr/lib64/openmpi, which nothing finds
+# without help. The launch script prepends these to PATH and LD_LIBRARY_PATH
+# when they are set. The package itself is antares_xpansion_mpi_packages, in
+# roles/antares_xpansion/.
+antares_xpansion_mpi_bin_dir: >-
+  {{ '/usr/lib64/openmpi/bin' if ansible_facts['os_family'] == 'RedHat' else '' }}
+antares_xpansion_mpi_lib_dir: >-
+  {{ '/usr/lib64/openmpi/lib' if ansible_facts['os_family'] == 'RedHat' else '' }}
+
+# Number of MPI ranks the Benders decomposition runs with. The sbatch header
+# of the launch script asks for one task on one node, and Open MPI counts its
+# slots from that allocation, so anything above 1 needs --ntasks raised in
+# templates/launchAntares.sh.j2 as well - or it fails with "not enough slots
+# available".
+slurm_xpansion_mpi_procs: 1
+
+# Scratch space used by the launch script. Must live in the shared /home so
+# that the front-end can pick the results up. The path of the script itself is
+# slurm_launch_script, in roles/antares_defaults/: Antares-Web is configured
+# to submit it and verify.yml runs it.
+slurm_scratch_dir: "{{ antares_home }}/scratch"

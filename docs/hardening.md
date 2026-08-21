@@ -3,7 +3,7 @@
 A blank VM, a few minutes, and an Antares-Web reachable on the internet with 22 and 80 open is exactly what this playbook makes easy, so the `hardening` role runs right after the base configuration and before anything is deployed. Five independent blocks, each switched on its own:
 
 ```yaml
-hardening_enabled: true               # group_vars/all.yml
+hardening_enabled: true               # roles/antares_defaults/defaults/main/hardening.yml
 hardening_firewall_enabled: false     # off: a cloud VM already has a security group
 hardening_fail2ban_enabled: true
 hardening_ssh_enabled: true
@@ -51,7 +51,7 @@ journalctl --list-boots        # more than one line: it is persistent
 
 **firewalld (RedHat family).** The RHEL rebuilds boot with firewalld enabled and a default zone that accepts SSH and nothing else. Debian and Ubuntu ship no host filter, so `hardening_firewall_enabled: false` (the default: the cloud security group is enough) only meant the same thing on one family. firewalld is therefore stopped, disabled and **masked** whether our nftables table is on or not. `systemctl unmask firewalld` puts it back. Set `hardening_manage_firewalld: false` to be left alone with it.
 
-**Secrets.** The role also reports the secrets of [Before production](../README.md#before-production) still holding the value this repository ships, admin/admin being a faster way in than any brute force. Set `hardening_fail_on_default_secrets: true` to make that a failure rather than a message.
+**Secrets.** The role also reports the secrets of [Before production](../README.md#before-production) still holding the value this repository ships, admin/admin being a faster way in than any brute force. `hardening_fail_on_default_secrets` is on by default, so that is a failure naming the variables to set, not a message you can scroll past. Set it to false on a throwaway machine. The accounting, Keycloak and Grafana passwords are only asked about where those things are actually deployed.
 
 The bans do not depend on the firewall: fail2ban writes its own table, so it keeps working with `hardening_firewall_enabled: false`.
 

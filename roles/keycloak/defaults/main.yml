@@ -12,8 +12,8 @@
 #  nobody here.
 #
 #  The switch (keycloak_enabled), the ports, the images and the secrets live in
-#  group_vars/all.yml: the front door has to route to it and the builder has to
-#  archive its image, and neither can read a role default.
+#  roles/antares_defaults/: the front door has to route to it and the builder
+#  has to archive its image, and neither of them runs this role.
 # ===========================================================================
 
 # Load-bearing: it is the name kc-rest resolves on the podman network.
@@ -31,7 +31,7 @@ keycloak_db_name: keycloak
 keycloak_db_user: keycloak
 
 # Port Keycloak listens on inside the container. Published on
-# 127.0.0.1:keycloak_port, see group_vars/all.yml.
+# 127.0.0.1:keycloak_port, see roles/antares_defaults/.
 keycloak_http_port: 8080
 
 # Import the realm rendered from templates/realm.json.j2 at the first start.
@@ -68,3 +68,8 @@ keycloak_admin_permanent: true
 # between two tasks of the same run, and the run deletes it whenever it finds
 # one.
 keycloak_admin_rotate_user: "{{ keycloak_admin_user }}-rotate"
+
+# The name of that first administrator. Only this role uses it; the password
+# that goes with it is keycloak_admin_password, in roles/antares_defaults/,
+# where the hardening role can see it is still the shipped one.
+keycloak_admin_user: admin

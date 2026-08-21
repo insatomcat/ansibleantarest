@@ -15,8 +15,8 @@
 #  path from "a machine of the fleet" to "the image it has to load".
 #
 #  The switch (monitoring_enabled), the images and the ports live in
-#  group_vars/all.yml: the builder has to archive the images and the front
-#  door has to route to Grafana, and neither can read a role default.
+#  roles/antares_defaults/: the builder has to archive the images and the
+#  front door has to route to Grafana, and neither runs a monitoring role.
 # ===========================================================================
 
 # Load-bearing only as a unit name: nothing resolves it, since this container

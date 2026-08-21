@@ -1,0 +1,74 @@
+---
+# ===========================================================================
+#  Distributions, host naming
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+#  Distributions
+#
+#  Two families are supported: Debian (Debian and Ubuntu, apt) and RedHat
+#  (Oracle Linux and the other RHEL rebuilds, dnf). Package names, service
+#  names and a handful of habits differ between the two; everything that does
+#  is resolved from `ansible_facts['os_family']`, either here or in the defaults of the
+#  role concerned, so a role never carries the same task twice.
+#
+#  What a RHEL-compatible target additionally needs, and what the playbook
+#  therefore does for it:
+#    - EPEL and CRB, for htop, fail2ban, certbot and the Slurm build below,
+#    - SELinux, which is enforcing out of the box: the bind mounts of the
+#      containers are labelled and the NFS booleans are set,
+#    - firewalld, which is enabled out of the box and would drop the traffic
+#      this deployment expects: see the hardening section at the bottom,
+#    - Slurm, which no EL repository ships: it comes from OpenHPC, see
+#      slurm_repo below.
+#
+#  EL 9 and EL 10 both carry a Slurm node, from two different OpenHPC series:
+#  OpenHPC 3 for EL 9, OpenHPC 4 for EL 10, see slurm_openhpc_release below.
+#  A major OpenHPC does not publish for at all is stopped by the check in
+#  roles/slurm_common/tasks/repo.yml rather than left to fail on a missing
+#  slurm-ohpc package.
+#
+#  One caveat, on both families: the Slurm version differs between releases
+#  (23.11 on Ubuntu 24.04, 24.11 on Debian 13, 25.11 from OpenHPC 3 on EL 9
+#  and 25.05 from OpenHPC 4 on EL 10) and the daemons only interoperate across
+#  a couple of majors, so a single cluster must run a single distribution.
+#
+#  The list below is what the playbook claims, and it is meant to be read as a
+#  claim rather than as a wish. All but one line is deployed on every pull
+#  request by .github/workflows/ci.yml, twice: a single machine running
+#  Antares-Web, and a five-machine cluster. RedHat is the exception, on both
+#  counts: the CRB repository id and the epel-release URL are written for it,
+#  but it needs a subscription that CI has not got, so it is here on the
+#  strength of its rebuilds rather than of a run.
+#
+#  What is deliberately *not* here:
+#
+#    Debian 12 and Ubuntu 22.04, which ship podman 4.3.1 and 3.4.4. Quadlet
+#    needs 4.4, so roles/podman refuses them by name a few tasks after this
+#    check would have let them through. Claiming a release the playbook stops
+#    on is worse than not claiming it.
+#
+#    AlmaLinux, which nothing here has ever run on. It is the same code path
+#    as Rocky Linux, which is exercised twice per pull request, so adding
+#    "AlmaLinux 9" to this list is a reasonable thing for an operator to do -
+#    which is exactly what the failure message of the check suggests. It is
+#    not a reasonable thing for this file to assert on their behalf.
+# ---------------------------------------------------------------------------
+supported_distros:
+  - "Debian 13"
+  - "Ubuntu 24"
+  - "Ubuntu 26"
+  - "OracleLinux 9"
+  - "OracleLinux 10"
+  - "RedHat 9"
+  - "RedHat 10"
+  - "Rocky 9"
+  - "Rocky 10"
+  - "CentOS 9"
+  - "CentOS 10"
+
+# Set /etc/hostname to the inventory short name (needs a reboot to fully apply).
+# Shared: a Slurm daemon refuses to start when the machine does not answer to
+# the name slurm.conf gives it, so slurm_common has to know whether the play
+# is the one setting that name.
+manage_hostname: false

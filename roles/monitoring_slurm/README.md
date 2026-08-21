@@ -37,5 +37,5 @@ The munge *key* is not mounted, although the image's documentation lists it: a
 client does not read it, `munged` signs the credentials, and `munged` is on the
 host.
 
-Variables in `defaults/main.yml` and `group_vars/all.yml`, documented in
+Variables in `defaults/main.yml` and `roles/antares_defaults/`, documented in
 [Monitoring](../../docs/monitoring.md).

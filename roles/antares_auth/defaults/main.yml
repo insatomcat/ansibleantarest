@@ -12,7 +12,7 @@
 #                               any other one
 #    ldap      files/ldap-rest  against a directory that already exists
 #
-#  antares_auth_provider (group_vars/all.yml) picks one, and picking one is
+#  antares_auth_provider (roles/antares_defaults/) picks one, and picking one is
 #  also what points antarest_external_auth_url at it. They never run together:
 #  the application reads a single URL.
 #

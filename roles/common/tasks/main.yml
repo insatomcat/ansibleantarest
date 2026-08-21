@@ -45,8 +45,8 @@
       "{{ common_uid_holder.stdout | default('') | trim | default('free', true) }}",
       group says
       "{{ common_gid_holder.stdout | default('') | trim | default('free', true) }}".
-      Pick a pair that is free on every machine of the inventory in
-      group_vars/all.yml, high enough to stay clear of the accounts login.defs
+      Pick a pair that is free on every machine of the inventory, and set it
+      there: high enough to stay clear of the accounts login.defs
       hands out from 1000 upwards. Beware that changing it on a machine that
       already holds data orphans everything the antares account owns.
     quiet: true

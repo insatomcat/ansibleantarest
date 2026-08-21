@@ -5,7 +5,8 @@
 # does not take passwords, security updates that install themselves, and a
 # journal that survives the reboot they eventually call for.
 #
-# Every block can be switched off on its own, see group_vars/all.yml.
+# Every block can be switched off on its own, see
+# roles/antares_defaults/defaults/main/hardening.yml.
 
 - name: Collect what the firewall and the jails have to let through
   ansible.builtin.include_tasks: facts.yml

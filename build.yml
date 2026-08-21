@@ -67,6 +67,14 @@
   # store, which has to exist by then.
   pre_tasks:
 
+    # The shared defaults, imported rather than listed in `roles:` below,
+    # because pre_tasks run *before* roles and everything here reads them:
+    # supported_distros for the preflight, and the three directories created
+    # at the end. No tasks, so this only brings its defaults into the play.
+    - name: Load the shared defaults
+      ansible.builtin.import_role:
+        name: antares_defaults
+
     # Same reason as the first play of site.yml: gather_facts would reuse a
     # stale cache after this builder is rebuilt as another distribution.
     - name: Gather facts

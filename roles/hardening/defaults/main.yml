@@ -1,7 +1,8 @@
 ---
 # ===========================================================================
-#  What each block does is documented in group_vars/all.yml, next to the
-#  on/off switches. What follows is the tuning.
+#  What each block does is documented in
+#  roles/antares_defaults/defaults/main/hardening.yml, next to the on/off
+#  switches. What follows is the tuning.
 # ===========================================================================
 
 hardening_packages: "{{ _hardening_packages_by_family[ansible_facts['os_family']] }}"
@@ -180,10 +181,6 @@ hardening_ssh_extra_ports: []
 # ---------------------------------------------------------------------------
 #  Journal
 # ---------------------------------------------------------------------------
-# Whether journald keeps its journal in /var/log/journal rather than in the
-# /run tmpfs it is wiped from at every reboot.
-hardening_journal_persistent: true
-
 # How much of the root filesystem the journal may take. Left unset, journald
 # would help itself to 10% of it, capped at 4G.
 hardening_journal_max_use: "500M"
@@ -212,18 +209,21 @@ hardening_dnf_automatic_upgrade_type: security
 # ---------------------------------------------------------------------------
 #  Secrets
 # ---------------------------------------------------------------------------
-# The values shipped in group_vars/all.yml. A deployment still carrying them is
-# reported; set hardening_fail_on_default_secrets to make that a failure.
-# The Keycloak and Grafana entries are only added when they are deployed:
-# reporting the password of a container that does not exist would be noise,
-# and the check reads whatever is in scope. Grafana is qualified by the group
-# as well, since monitoring_enabled is fleet-wide while Grafana itself runs on
-# the web machine alone - a compute node has no business being asked about it.
+# The values this repository ships. A deployment still carrying one of them is
+# stopped by name, unless hardening_fail_on_default_secrets is turned off.
+# The accounting, Keycloak and Grafana entries are only added when they are
+# deployed: reporting the password of a container that does not exist would be
+# noise, and the check reads whatever is in scope. Grafana is qualified by the
+# group as well, since monitoring_enabled is fleet-wide while Grafana itself
+# runs on the web machine alone - a compute node has no business being asked
+# about it.
 hardening_default_secrets: >-
   {{ {'antarest_jwt_key': 'secretkeytochange',
       'antarest_admin_password': 'admin',
-      'antarest_db_password': 'somepass',
-      'slurmdbd_db_password': 'changeme-slurm-acct'}
+      'antarest_db_password': 'somepass'}
+     | combine({'slurmdbd_db_password': 'changeme-slurm-acct'}
+               if (slurm_enabled | default(false) | bool
+                   and slurmdbd_enabled | default(false) | bool) else {})
      | combine({'keycloak_admin_password': 'admin',
                 'keycloak_db_password': 'changeme-keycloak-db',
                 'keycloak_client_secret': 'changeme-keycloak-client'}
@@ -231,3 +231,19 @@ hardening_default_secrets: >-
      | combine({'monitoring_grafana_admin_password': 'admin'}
                if (monitoring_enabled | default(false) | bool
                    and inventory_hostname in (groups['antares_web'] | default([]))) else {}) }}
+
+# Report the secrets above still holding the value this repository ships.
+hardening_check_secrets: true
+# Make that report a failure. On by default: now that every default lives in a
+# role rather than in a file the quick start tells you to open, a shipped
+# password is much easier to leave in place without noticing. Set it to false
+# for a throwaway test machine you want to be a one-liner.
+hardening_fail_on_default_secrets: true
+
+# The blocks that only this role reads. hardening_enabled,
+# hardening_firewall_enabled and hardening_journal_persistent are in
+# roles/antares_defaults/ instead: site.yml guards the role with the first and
+# verify.yml checks the other two from outside.
+hardening_fail2ban_enabled: true
+hardening_ssh_enabled: true
+hardening_unattended_upgrades: true

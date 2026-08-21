@@ -18,7 +18,7 @@ What that deploys, all of it in quadlet units like the rest of the deployment:
 
 Grafana is served by the front door under `monitoring_grafana_path` (`/grafana`), behind the same certificate as everything else: `https://<domain>/grafana/`, with `monitoring_grafana_admin_user` and the password above.
 
-The rest of the knobs, all in `group_vars/all.yml` because the builder archives the images and the front door routes to Grafana, and neither can read a role default:
+The rest of the knobs, all in `roles/antares_defaults/defaults/main/monitoring.yml` because the builder archives the images and the front door routes to Grafana, and neither runs a monitoring role:
 
 ```yaml
 monitoring_slurm_enabled: "{{ slurm_enabled }}"   # the exporter on the front-end
