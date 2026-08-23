@@ -48,8 +48,16 @@ antarest_jwt_key: "secretkeytochange"
 antarest_admin_password: "admin"
 antarest_db_password: "somepass"       # postgres password used by the containers
 
-# Expose adminer (DB web UI) next to Antares-Web, bound on 127.0.0.1:8080.
+# Expose adminer (DB web UI) next to Antares-Web, bound on the loopback.
 antarest_enable_adminer: false
+
+# The port it is published on. A variable, and not the same default as
+# slurmdbd_adminer_port, because one machine can be an antares_web *and* a
+# slurm_frontend - that is the standalone-slurm shape - and two adminers on
+# 8080 means the second one never starts. Both live in this file so that
+# either role can see the other's, which is what the assert comparing them
+# needs. See docs/antares-web.md.
+antarest_adminer_port: 8080
 
 # Ports the machine answers on. They are held by the front door of the
 # antares_edge role, the one container that is not on the podman network: it
