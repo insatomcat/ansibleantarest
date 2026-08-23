@@ -1,0 +1,12 @@
+---
+common_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - htop
+  - unzip
+  - zip
+  - zstd
+  - rsync
+
+common_manage_timesync: true

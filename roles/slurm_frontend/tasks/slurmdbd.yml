@@ -1,0 +1,96 @@
+---
+- name: Install slurmdbd
+  ansible.builtin.apt:
+    name: slurmdbd
+    state: present
+
+- name: Create the accounting database directory
+  ansible.builtin.file:
+    path: "{{ slurmdbd_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy the MariaDB compose file
+  ansible.builtin.template:
+    src: slurmdb-compose.yml.j2
+    dest: "{{ slurmdbd_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0600"
+  register: slurmdb_compose
+
+- name: Deploy the MariaDB systemd unit
+  ansible.builtin.template:
+    src: slurmdb.service.j2
+    dest: /etc/systemd/system/slurmdb.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: slurmdb_unit
+
+- name: Start and enable the accounting database
+  ansible.builtin.systemd:
+    name: slurmdb
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Restart the accounting database after a change
+  ansible.builtin.systemd:
+    name: slurmdb
+    state: restarted
+  when: slurmdb_compose.changed or slurmdb_unit.changed
+
+- name: Wait for MariaDB to accept connections
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 3306
+    timeout: 180
+
+# MariaDB accepts TCP connections a few seconds before it is done
+# initialising the data directory on a first start.
+# `mariadb-admin` only exists from MariaDB 10.5 on, hence the fallback.
+- name: Wait for MariaDB to finish its initialisation
+  ansible.builtin.shell:
+    cmd: >-
+      {{ docker_compose_cmd }} -f {{ slurmdbd_dir }}/docker-compose.yml
+      exec -T -e MYSQL_PWD={{ slurmdbd_db_password | quote }} db
+      sh -c 'mariadb-admin ping --silent -uroot 2>/dev/null
+             || mysqladmin ping --silent -uroot'
+    executable: /bin/bash
+  register: slurmdb_ping
+  until: slurmdb_ping.rc == 0
+  retries: 30
+  delay: 5
+  changed_when: false
+  no_log: true
+
+- name: Deploy slurmdbd.conf
+  ansible.builtin.template:
+    src: slurmdbd.conf.j2
+    dest: "{{ slurm_conf_dir }}/slurmdbd.conf"
+    owner: "{{ slurm_user }}"
+    group: "{{ slurm_user }}"
+    mode: "0600"
+  register: slurmdbd_conf
+
+- name: Start and enable slurmdbd
+  ansible.builtin.systemd:
+    name: slurmdbd
+    enabled: true
+    state: started
+
+- name: Restart slurmdbd after a configuration change
+  ansible.builtin.systemd:
+    name: slurmdbd
+    state: restarted
+  when: slurmdbd_conf.changed
+
+# slurmdbd binds on DbdHost, which is the front-end name, not localhost.
+- name: Wait for slurmdbd to listen
+  ansible.builtin.wait_for:
+    host: "{{ slurm_frontend_ip | trim }}"
+    port: 6819
+    timeout: 120

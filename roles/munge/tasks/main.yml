@@ -1,0 +1,57 @@
+---
+- name: Install munge
+  ansible.builtin.apt:
+    name:
+      - munge
+      - libmunge2
+      - libmunge-dev
+    state: present
+
+# The Debian package already generates a key at install time; this only kicks
+# in on a host where the key is missing.
+- name: Generate the munge key on the front-end
+  ansible.builtin.command:
+    cmd: dd if=/dev/urandom bs=1 count=1024 of=/etc/munge/munge.key
+    creates: /etc/munge/munge.key
+  delegate_to: "{{ _slurm_frontend_host }}"
+  run_once: true
+
+- name: Read the munge key from the front-end
+  ansible.builtin.slurp:
+    src: /etc/munge/munge.key
+  delegate_to: "{{ _slurm_frontend_host }}"
+  run_once: true
+  register: munge_key
+  no_log: true
+
+# The key is binary, so it travels base64-encoded and is decoded on the
+# target. The .b64 copy is what makes the whole thing idempotent.
+- name: Ship the munge key (base64) to every node
+  ansible.builtin.copy:
+    content: "{{ munge_key.content }}"
+    dest: /etc/munge/munge.key.b64
+    owner: munge
+    group: munge
+    mode: "0400"
+  register: munge_key_shipped
+  no_log: true
+
+- name: Decode the munge key
+  ansible.builtin.shell:
+    cmd: set -o pipefail && base64 -d /etc/munge/munge.key.b64 > /etc/munge/munge.key
+    executable: /bin/bash
+  when: munge_key_shipped.changed
+  notify: Restart munge
+
+- name: Enforce the munge key ownership and permissions
+  ansible.builtin.file:
+    path: /etc/munge/munge.key
+    owner: munge
+    group: munge
+    mode: "0400"
+
+- name: Start and enable munge
+  ansible.builtin.systemd:
+    name: munge
+    enabled: true
+    state: started

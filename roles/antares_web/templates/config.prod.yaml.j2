@@ -1,0 +1,95 @@
+{{ ansible_managed | comment }}
+# Mounted as /resources/application.yaml inside the antarest containers.
+
+security:
+  disabled: false
+  jwt:
+    key: "{{ antarest_jwt_key }}"
+  login:
+    admin:
+      pwd: "{{ antarest_admin_password }}"
+  external_auth:
+    url: ""
+    default_group_role: 10
+
+db:
+  url: "postgresql://postgres:{{ antarest_db_password }}@postgresql:5432/postgres"
+  admin_url: "postgresql://postgres:{{ antarest_db_password }}@postgresql:5432/postgres"
+  pool_recycle: 3600
+
+storage:
+  tmp_dir: /antarest_tmp_dir
+  archive_dir: /studies/archives
+  matrixstore: /matrixstore
+  matrix_gc_dry_run: true
+  workspaces:
+    # required, no filter applied, this folder is not watched
+    default:
+      path: /workspaces/internal_studies/
+    # place a file named AW_NO_SCAN in a directory to keep the watcher out
+    tmp:
+      path: /workspaces/studies/
+
+# ---------------------------------------------------------------------------
+# Launchers
+#
+# Since Antares-Web 2.20 the launchers are a list, each entry carrying its own
+# `id`, `name` and `type`; `launcher.default` points at one of those ids.
+# ---------------------------------------------------------------------------
+launcher:
+  default: {{ antarest_default_launcher }}
+  launchers:
+
+    - id: local
+      name: Local solver
+      type: local
+      local_workspace: /local_workspace/local
+      enable_nb_cores_detection: true
+      binaries:
+{% for s in antares_solvers %}
+        "{{ s.study_version }}": /antares_simulator/antares-{{ s.version }}-{{ antares_solver_os }}/bin/{{ s.bin }}
+{% endfor %}
+{% if slurm_enabled | bool %}
+
+    - id: slurm
+      name: Slurm cluster
+      type: slurm
+      local_workspace: /local_workspace/slurm
+      username: {{ antares_user }}
+      hostname: {{ slurm_frontend_ip | trim }}
+      port: 22
+      private_key_file: "/id_rsa"
+      default_wait_time: {{ slurm_launcher_default_wait_time }}
+      default_time_limit: {{ slurm_launcher_default_time_limit }}
+      enable_nb_cores_detection: false
+      nb_cores:
+        min: {{ slurm_launcher_nb_cores_min }}
+        default: {{ slurm_launcher_nb_cores_default }}
+        max: {{ slurm_launcher_nb_cores_max }}
+      default_json_db_name: launcher_db.json
+      slurm_script_path: {{ slurm_launch_script }}
+      partition: {{ slurm_partition }}
+      antares_versions_on_remote_server:
+{% for s in antares_solvers %}
+        - "{{ s.study_version }}"
+{% endfor %}
+{% endif %}
+
+debug: false
+
+# See https://fastapi.tiangolo.com/advanced/behind-a-proxy/
+# root_path is used when the API is served behind a proxy which adds a prefix
+# for clients. It does NOT add any prefix to the URLs fastapi serves.
+root_path: "api"
+
+server:
+  worker_threadpool_size: 12
+
+logging:
+  level: INFO
+
+# Redis is required when the application runs with several workers in a
+# preforked model, which is what gunicorn does here.
+redis:
+  host: redis
+  port: 6379

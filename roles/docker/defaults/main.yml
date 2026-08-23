@@ -1,0 +1,20 @@
+---
+docker_apt_arch: "{{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}"
+
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+# Used when docker_use_upstream_repo is false. Note that Debian's
+# docker-compose is compose v1, so docker_compose_cmd must then be set to
+# /usr/bin/docker-compose.
+docker_distro_packages:
+  - docker.io
+  - docker-compose
+
+# Membership in the docker group is equivalent to root on the machine; the
+# playbook itself always runs docker as root, so this is off by default.
+docker_add_antares_to_group: false

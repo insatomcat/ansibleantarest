@@ -1,0 +1,70 @@
+{{ ansible_managed | comment }}
+# Identical on every node of the cluster.
+
+ClusterName={{ slurm_cluster_name }}
+SlurmctldHost={{ slurm_frontend_name | trim }}({{ slurm_frontend_ip | trim }})
+SlurmUser={{ slurm_user }}
+
+AuthType=auth/munge
+SlurmctldPort=6817
+SlurmdPort=6818
+StateSaveLocation={{ slurm_spool_dir }}/ctld
+SlurmdSpoolDir={{ slurm_spool_dir }}/d
+SlurmctldPidFile=/run/slurmctld.pid
+SlurmdPidFile=/run/slurmd.pid
+ProctrackType=proctrack/pgid
+ReturnToService=2
+
+# Resource selection. cons_tres honours the --cpus-per-task that
+# antares-launcher passes to sbatch, so several studies can share a node.
+SelectType={{ slurm_select_type }}
+{% if slurm_select_type_parameters %}
+SelectTypeParameters={{ slurm_select_type_parameters }}
+{% endif %}
+
+# ACCOUNTING
+JobAcctGatherType=jobacct_gather/linux
+{% if slurmdbd_enabled | bool %}
+AccountingStorageType=accounting_storage/slurmdbd
+AccountingStorageHost={{ slurm_frontend_name | trim }}
+AccountingStoragePort=6819
+{% else %}
+AccountingStorageType=accounting_storage/none
+{% endif %}
+JobCompType=jobcomp/none
+
+# TIMERS
+SlurmctldTimeout=300
+SlurmdTimeout=300
+InactiveLimit=0
+MinJobAge=300
+KillWait=30
+Waittime=0
+
+# LOGGING
+DebugFlags=NO_CONF_HASH
+SlurmctldDebug=3
+SlurmctldLogFile={{ slurm_log_dir }}/slurmctld.log
+SlurmdDebug=3
+SlurmdLogFile={{ slurm_log_dir }}/slurmd.log
+{% for line in slurm_extra_config %}
+{{ line }}
+{% endfor %}
+
+# COMPUTE NODES
+{% for host in (groups['slurm_compute'] | default([])) | sort %}
+{% set h = hostvars[host] %}
+{% set cpus = h.slurm_node_cpus | int %}
+{% set sockets = h.slurm_node_sockets | int %}
+{% set cores = h.slurm_node_cores_per_socket | int %}
+{% set threads = h.slurm_node_threads_per_core | int %}
+{% if sockets * cores * threads == cpus %}
+NodeName={{ h.slurm_node_name }} NodeAddr={{ h.slurm_node_ip }} CPUs={{ cpus }} Boards=1 SocketsPerBoard={{ sockets }} CoresPerSocket={{ cores }} ThreadsPerCore={{ threads }} RealMemory={{ h.slurm_node_real_memory }} State=UNKNOWN
+{% else %}
+{# The detected topology is inconsistent with the CPU count; let slurmd sort
+   it out from CPUs alone rather than writing a config it would reject. #}
+NodeName={{ h.slurm_node_name }} NodeAddr={{ h.slurm_node_ip }} CPUs={{ cpus }} RealMemory={{ h.slurm_node_real_memory }} State=UNKNOWN
+{% endif %}
+{% endfor %}
+
+PartitionName={{ slurm_partition }} Nodes=ALL Default=YES MaxTime=INFINITE State=UP

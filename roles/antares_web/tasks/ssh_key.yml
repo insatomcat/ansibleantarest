@@ -1,0 +1,31 @@
+---
+# antares-web reads this key with paramiko's RSAKey loader, so it has to be an
+# RSA key: ed25519 works for the job submission path but breaks the code that
+# displays the cluster load.
+- name: Generate the SSH key used to reach the Slurm front-end
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t rsa -b 4096 -N "" -q
+      -C "antares-web@{{ inventory_hostname }}"
+      -f {{ antarest_ssh_key }}
+    creates: "{{ antarest_ssh_key }}"
+
+- name: Set the ownership of the SSH key
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ antares_user }}"
+    group: "{{ antares_group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ antarest_ssh_key }}", mode: "0600"}
+    - {path: "{{ antarest_ssh_key }}.pub", mode: "0644"}
+
+- name: Read the public key
+  ansible.builtin.slurp:
+    src: "{{ antarest_ssh_key }}.pub"
+  register: antarest_pubkey
+
+# Consumed by the antares_ssh_access role on the Slurm front-end.
+- name: Publish the public key as a fact
+  ansible.builtin.set_fact:
+    antares_web_public_key: "{{ antarest_pubkey.content | b64decode | trim }}"
