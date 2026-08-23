@@ -43,15 +43,65 @@ L'inventaire ne contient alors que le groupe `antares_web`.
 
 ## Prérequis
 
-- Debian 12 (bookworm) ou 13 sur toutes les machines, accès `root` via
-  `sudo`, Python 3 présent.
+- Une distribution de la famille Debian sur toutes les machines (voir
+  ci-dessous), accès `root` via `sudo`, Python 3 présent.
 - La machine `antares_web` a besoin d'un accès Internet (images Docker,
   paquets npm et Python, binaires du solveur).
 - Le front-end Slurm télécharge lui aussi les solveurs depuis GitHub.
-- L'UID/GID 1000 doit être libre sur toutes les machines : le playbook y crée
-  le compte `antares` et s'arrête avec un message explicite si un autre compte
-  l'occupe déjà.
+- Un UID/GID libre et identique partout pour le compte `antares`, `1000` par
+  défaut. Le playbook s'arrête en nommant le compte en place si la paire est
+  déjà prise, ce qui est le cas par défaut sur les images Ubuntu.
 - Ansible ≥ 2.15 sur la machine de contrôle, `ansible.posix` installé.
+
+### Distributions supportées
+
+Toutes les installations passent par `apt`, donc le périmètre est la famille
+Debian. Les noms de paquets, les noms d'unités systemd et `/etc/slurm` sont
+identiques sur les versions listées, et le dépôt Docker est déduit des facts de
+la cible (`ansible_distribution`, `ansible_distribution_release`), donc rien
+n'est à adapter pour passer de l'une à l'autre :
+
+```yaml
+supported_distros:      # group_vars/all.yml
+  - "Debian 12"
+  - "Debian 13"
+  - "Ubuntu 22"
+  - "Ubuntu 24"
+```
+
+Le playbook refuse de démarrer ailleurs, avec un message qui indique la
+variable à étendre. `distro_check_enabled: false` désactive complètement le
+contrôle.
+
+Deux points d'attention en dehors de Debian 13, la cible de la procédure de
+référence :
+
+- **UID/GID 1000.** Les images Ubuntu (cloud comme serveur) attribuent déjà
+  `1000:1000` au compte `ubuntu`, et les images cloud Debian à `debian` ou
+  `admin`. Il faut alors choisir une autre paire dans `group_vars/all.yml` :
+
+  ```yaml
+  antares_uid: 1500
+  antares_gid: 1500
+  ```
+
+  L'UID est paramétré de bout en bout (compte système, `user:` des conteneurs,
+  image dérivée, `/home` partagé en NFS), donc c'est la seule chose à changer.
+  En revanche il ne faut pas y toucher sur une machine déjà déployée : les
+  fichiers sous `/var/antares-web` et dans le `/home` partagé appartiennent à
+  l'ancien UID.
+
+- **Un cluster, une distribution.** La version de Slurm empaquetée diffère
+  (23.11 sur Ubuntu 24.04, 24.11 sur Debian 13) et les démons
+  `slurmctld` / `slurmd` / `slurmdbd` ne s'interopèrent que sur quelques
+  versions majeures. Le `slurm.conf` généré convient aux deux, mais il ne faut
+  pas mélanger un front-end Debian 13 avec des nœuds de calcul Ubuntu 24.04
+  dans le même cluster. La machine `antares_web` n'est pas concernée : elle ne
+  parle au front-end qu'en SSH.
+
+Le verrou `apt` est attendu jusqu'à `apt_lock_timeout` secondes (300 par
+défaut), les images Ubuntu lançant `apt-daily` et `unattended-upgrades` au
+démarrage.
 
 ## À changer avant la mise en production
 
@@ -188,8 +238,11 @@ en amont depuis.
   `ENV ANTARES_CONF` visée par le PDF s'appelle maintenant `ENV ANTAREST_CONF`).
 - **`docker-compose` v1** est en fin de vie : le playbook installe le dépôt
   Docker officiel et le plugin `docker compose` v2 (≥ 2.24 pour les tags
-  `!override`). `docker_use_upstream_repo: false` repasse aux paquets Debian,
-  il faut alors ajuster `docker_compose_cmd`.
+  `!override`). `docker_use_upstream_repo: false` repasse aux paquets de la
+  distribution, il faut alors ajuster `docker_compose_cmd` : Debian fournit
+  `docker-compose`, qui est la v1, et le `docker-compose-v2` d'Ubuntu 24.04
+  peut rester sous la 2.24 exigée. Garder le dépôt amont est le chemin
+  supporté sur les deux.
 - **`ControlMachine` / `ControlAddr`** sont remplacés par `SlurmctldHost`.
 - **Persistance de la base de comptabilité.** Le `docker-compose.yml` du PDF
   ne déclare aucun volume pour MariaDB : la comptabilité disparaît à la
