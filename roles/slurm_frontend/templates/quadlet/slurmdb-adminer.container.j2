@@ -1,0 +1,25 @@
+{{ ansible_managed | comment }}
+#
+# Optional web UI on the accounting database, off by default
+# (slurmdbd_enable_adminer). Published on 127.0.0.1 only; reach it through an
+# SSH tunnel:
+#   ssh -L 8080:127.0.0.1:8080 {{ inventory_hostname }}
+
+[Unit]
+Description=Slurm accounting database web UI
+Requires=slurmdb-mariadb.service
+After=slurmdb-mariadb.service
+PartOf=slurmdb.target
+
+[Container]
+ContainerName=slurmdb-adminer
+Image={{ slurmdbd_adminer_image }}
+PublishPort=127.0.0.1:8080:8080
+Exec=php -S 0.0.0.0:8080 -t /var/www/html
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=slurmdb.target

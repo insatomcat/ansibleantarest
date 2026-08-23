@@ -1,0 +1,75 @@
+---
+- name: Install podman
+  ansible.builtin.apt:
+    name: "{{ podman_packages if podman_install_docker_shim | bool else podman_packages | difference(['podman-docker']) }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: "{{ apt_lock_timeout }}"
+
+# `podman --version` prints "podman version 5.4.2" on one line. Deliberately
+# not `podman version --format {{ ".Client.Version" }}`: the Go template braces
+# collide with Jinja and have to be escaped, for no gain.
+- name: Read the podman version
+  ansible.builtin.command: podman --version
+  register: podman_version
+  changed_when: false
+
+# Quadlet is what runs the whole stack, and it landed in podman 4.4. Every
+# release in supported_distros is well past that, but a manually pinned or
+# backported podman could not be.
+- name: Check podman is recent enough for quadlet
+  ansible.builtin.assert:
+    that:
+      - (podman_version.stdout | regex_search('([0-9]+\.[0-9]+\.[0-9]+)', '\1') | first) is version('4.4.0', '>=')
+    fail_msg: >-
+      "{{ podman_version.stdout | trim }}" on {{ inventory_hostname }} is too
+      old: the deployment is driven by quadlet units, which need podman 4.4 or
+      later. Debian 13 ships 5.x and Ubuntu 24.04 ships 4.9.
+    quiet: true
+
+- name: Create the registry configuration directory
+  ansible.builtin.file:
+    path: /etc/containers/registries.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Without this, `podman pull postgres:16` fails instead of resolving to
+# docker.io. The playbook writes fully qualified names everywhere, so this only
+# matters for whoever logs in and types a short name by hand.
+- name: Allow short image names to resolve to Docker Hub
+  ansible.builtin.copy:
+    content: |
+      {{ ansible_managed | comment }}
+      unqualified-search-registries = {{ podman_unqualified_search_registries | to_json }}
+    dest: /etc/containers/registries.conf.d/10-antares-unqualified.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Create the quadlet unit directory
+  ansible.builtin.file:
+    path: /etc/containers/systemd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Quadlet is a systemd generator: it turns the .container/.network files into
+# transient services at every daemon-reload. Nothing to enable, but the
+# generator has to be there.
+- name: Check the quadlet generator is installed
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/system-generators/podman-system-generator
+  register: podman_quadlet_generator
+
+- name: Fail when the quadlet generator is missing
+  ansible.builtin.assert:
+    that: podman_quadlet_generator.stat.exists
+    fail_msg: >-
+      /usr/lib/systemd/system-generators/podman-system-generator is missing on
+      {{ inventory_hostname }}, so the quadlet units would never be turned into
+      services. It ships with the podman package; check the install above.
+    quiet: true

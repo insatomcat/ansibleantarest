@@ -1,13 +1,28 @@
 ---
-- name: Validate the effective compose configuration
-  ansible.builtin.command: "{{ docker_compose_cmd }} {{ antarest_compose_files }} config --quiet"
-  args:
-    chdir: "{{ antarest_dir }}"
+# The generator is what systemd itself runs on reload, so this catches a
+# malformed unit before the stack is asked to start. It exits non-zero and names
+# the offending file and key. Note that it validates the whole of
+# /etc/containers/systemd, so an unrelated broken unit on the machine trips it
+# too, which is fair: systemd would skip that one as well.
+- name: Validate the quadlet units
+  ansible.builtin.command: /usr/lib/systemd/system-generators/podman-system-generator -dryrun
+  register: antarest_quadlet_check
   changed_when: false
 
-- name: Start and enable Antares-Web
+- name: Check every expected service was generated
+  ansible.builtin.assert:
+    that:
+      - "'---' ~ item ~ '---' in antarest_quadlet_check.stdout"
+    fail_msg: >-
+      The quadlet generator did not produce {{ item }}. Units present in
+      /etc/containers/systemd:
+      {{ antarest_quadlet_check.stdout | regex_findall('---(.+?)---') | join(', ') }}
+    quiet: true
+  loop: "{{ antarest_quadlet_services }}"
+
+- name: Start and enable the Antares-Web stack
   ansible.builtin.systemd:
-    name: "{{ antarest_service_name }}"
+    name: "{{ antarest_service_name }}.target"
     enabled: true
     state: started
     daemon_reload: true

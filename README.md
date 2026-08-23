@@ -9,7 +9,7 @@ Trois types de machines :
 
 | Groupe d'inventaire | Rôle |
 |---|---|
-| `antares_web` | Construit et exécute Antares-Web (Docker Compose) |
+| `antares_web` | Construit et exécute Antares-Web (podman + quadlet) |
 | `slurm_frontend` | Contrôleur Slurm, base de comptabilité, serveur NFS du `/home` |
 | `slurm_compute` | Nœuds de calcul, montent le `/home` partagé en NFS |
 
@@ -45,7 +45,7 @@ L'inventaire ne contient alors que le groupe `antares_web`.
 
 - Une distribution de la famille Debian sur toutes les machines (voir
   ci-dessous), accès `root` via `sudo`, Python 3 présent.
-- La machine `antares_web` a besoin d'un accès Internet (images Docker,
+- La machine `antares_web` a besoin d'un accès Internet (images de conteneurs,
   paquets npm et Python, binaires du solveur).
 - Le front-end Slurm télécharge lui aussi les solveurs depuis GitHub.
 - Un UID/GID libre et identique partout pour le compte `antares`, `9000` par
@@ -57,8 +57,8 @@ L'inventaire ne contient alors que le groupe `antares_web`.
 
 Toutes les installations passent par `apt`, donc le périmètre est la famille
 Debian. Les noms de paquets, les noms d'unités systemd et `/etc/slurm` sont
-identiques sur les versions listées, et le dépôt Docker est déduit des facts de
-la cible (`ansible_distribution`, `ansible_distribution_release`), donc rien
+identiques sur les versions listées, et podman vient de la distribution (5.x sur
+Debian 13, 4.9 sur Ubuntu 24.04, quadlet étant présent depuis la 4.4), donc rien
 n'est à adapter pour passer de l'une à l'autre :
 
 ```yaml
@@ -214,13 +214,65 @@ nœud n'en possède reste en attente indéfiniment.
 ```
 /var/antares-web/
 ├── AntaREST/     dépôt git, jetable : rien de généré n'y est écrit
-├── deploy/       config.prod.yaml, docker-compose.override.yml, id_rsa, solveurs
+├── deploy/       config.prod.yaml, id_rsa, solveurs
+├── image/        contexte de build de l'image dérivée
 └── data/         état persistant : études, matrices, base PostgreSQL, logs
+
+/etc/containers/systemd/     unités quadlet des conteneurs
+/etc/systemd/system/antares-web.target
 ```
 
 La configuration et les données vivent hors du dépôt : changer
 `antarest_version` puis relancer le playbook met à jour l'application sans
 toucher aux données.
+
+## Conteneurs : podman et quadlet
+
+Il n'y a **ni démon docker, ni fichier compose**. Chaque conteneur est décrit par
+une unité quadlet dans `/etc/containers/systemd`, que le générateur
+`podman-system-generator` transforme en service systemd à chaque
+`daemon-reload`. systemd possède donc l'ordonnancement, les redémarrages et les
+journaux.
+
+Podman tourne en **rootful**, ce qui n'est pas un détail : en rootless les UID du
+conteneur sont remappés à travers `/etc/subuid`, donc un conteneur tournant en
+`antares_uid` n'écrirait pas des fichiers appartenant à `antares_uid` sur
+l'hôte, et toute la cohérence d'UID avec le `/home` NFS s'effondrerait.
+
+Le stack est groupé par un `.target`, ce qui remplace `compose up/down` :
+
+```bash
+systemctl start   antares-web.target
+systemctl stop    antares-web.target
+systemctl restart antares-web.target     # propagé aux conteneurs via PartOf=
+systemctl status  antares-web.target
+podman ps
+journalctl -u antarest.service -f
+```
+
+Les services générés sont `antarest`, `antarest-watcher`,
+`antarest-matrix-gc`, `postgresql`, `redis`, `antares-nginx` et
+`antares-web-network`. Sur le front-end Slurm, la base de comptabilité suit le
+même schéma sous `slurmdb.target` (`slurmdb-mariadb`, plus `slurmdb-adminer` si
+activé).
+
+Trois noms de conteneurs sont porteurs, ce sont les noms DNS sur le réseau
+podman, et les renommer casse le stack silencieusement :
+
+| Conteneur | Qui en dépend |
+|---|---|
+| `antarest` | `nginx.conf` amont proxifie vers `http://antarest:5000/` |
+| `postgresql` | `config.prod.yaml` pointe la base sur `postgresql:5432` |
+| `redis` | `config.prod.yaml` pointe le cache sur `redis` |
+
+`postgresql` porte en plus l'alias réseau `postgres`, qui est le `container_name`
+du compose amont. Compose résolvait à la fois le nom de service et le nom de
+conteneur ; podman ne résout que le nom du conteneur et ses alias.
+
+Toutes les images sont écrites **pleinement qualifiées**
+(`docker.io/library/postgres:latest`, `localhost/antarest:latest`) : Debian et
+Ubuntu ne définissent pas `unqualified-search-registries`, donc un nom court
+n'est pas résolu et podman refuse plutôt que de deviner un registre.
 
 ## Tags utiles
 
@@ -258,13 +310,13 @@ en amont depuis.
   ajouter `useradd`. Le playbook laisse le dépôt intact et empile une image
   dérivée, ce qui survit aux évolutions du `Dockerfile` amont (la ligne
   `ENV ANTARES_CONF` visée par le PDF s'appelle maintenant `ENV ANTAREST_CONF`).
-- **`docker-compose` v1** est en fin de vie : le playbook installe le dépôt
-  Docker officiel et le plugin `docker compose` v2 (≥ 2.24 pour les tags
-  `!override`). `docker_use_upstream_repo: false` repasse aux paquets de la
-  distribution, il faut alors ajuster `docker_compose_cmd` : Debian fournit
-  `docker-compose`, qui est la v1, et le `docker-compose-v2` d'Ubuntu 24.04
-  peut rester sous la 2.24 exigée. Garder le dépôt amont est le chemin
-  supporté sur les deux.
+- **Pas de compose du tout.** Le PDF s'appuie sur `docker-compose` v1, en fin de
+  vie. Le playbook ne remplace pas cela par compose v2 mais par podman et
+  quadlet : chaque conteneur est une unité systemd, et le `docker-compose.yml`
+  amont n'est plus utilisé (voir la section podman plus haut). Cela supprime au
+  passage la dépendance à compose ≥ 2.24 dont les tags `!override` avaient
+  besoin, puisque plus rien n'est fusionné : chaque montage est écrit
+  explicitement dans son unité.
 - **`ControlMachine` / `ControlAddr`** sont remplacés par `SlurmctldHost`.
 - **Persistance de la base de comptabilité.** Le `docker-compose.yml` du PDF
   ne déclare aucun volume pour MariaDB : la comptabilité disparaît à la
@@ -274,7 +326,7 @@ en amont depuis.
   tournant sur la même machine. Idem pour adminer, désactivé par défaut.
 - **`archive_dir`.** La configuration pointe sur `/studies/archives`, chemin
   qu'aucun montage du `docker-compose.yml` amont ne fournit. Le playbook ajoute
-  le montage correspondant.
+  le montage correspondant dans l'unité du backend.
 - **Répertoire de scratch.** Comme dans le PDF il est placé dans le `/home`
   partagé, mais sous `~/scratch/` créé par le playbook.
 - **Champ « NNI ».** Toujours présent en 2.33.0, mais déplacé de
@@ -291,6 +343,13 @@ en amont depuis.
   réseau de confiance, comme dans la procédure de référence.
 - Pas de TLS devant l'interface web. Placer un reverse proxy devant si
   l'exposition dépasse le réseau interne.
+- **Migration depuis une version docker de ce playbook.** Le rôle
+  `slurm_frontend` arrête et supprime l'ancienne unité `slurmdb.service` et son
+  `docker-compose.yml`, mais **ne touche pas au volume docker `slurmdb_data`** :
+  il contient l'historique de comptabilité. Reprendre une base vivante demande
+  un `mariadb-dump` depuis l'ancien volume puis une restauration dans le volume
+  podman `slurmdb-data`. Sur le serveur web, les données sous
+  `/var/antares-web/data` sont des bind mounts et sont reprises telles quelles.
 - Le patch du libellé « NNI » modifie le source avant build. Le checkout étant
   réinitialisé à chaque exécution (`git force`), le patch est réappliqué à
   chaque fois ; c'est une empreinte de build

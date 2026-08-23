@@ -1,0 +1,16 @@
+{{ ansible_managed | comment }}
+#
+# Internal network of the stack. Quadlet turns this into
+# antares-web-network.service, and adds a Requires= on it to every container
+# that references it, so nothing here needs wiring by hand.
+#
+# A network rather than a pod: on a network, aardvark-dns resolves each
+# container by name, which is what nginx.conf and config.prod.yaml rely on. In
+# a pod the containers would share one network namespace and reach each other
+# on 127.0.0.1 instead, and those hostnames would not resolve.
+
+[Unit]
+Description=Antares-Web internal network
+
+[Network]
+NetworkName={{ antarest_service_name }}
