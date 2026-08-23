@@ -97,6 +97,8 @@ The PostgreSQL password is read only at the first initialization of the data vol
 
 `antarest_admin_password` has the same shape: AntaREST writes it when it creates the `admin` row and never again, so it seeds an empty database and nothing more. Changing it on a deployment that already ran is an update in the database, see [Operating a deployment](docs/operations.md#changing-the-admin-password).
 
+The front door can also ask for a login and a password of its own before it proxies anything, in front of the application's login form: two lists of accounts, one for the web application and one for the consoles served next to it, written as logins and hashes rather than passwords. It is off by default, and it takes the interface off the internet for anyone who has not been given an account - see [The password in front of the password](docs/edge-and-tls.md#the-password-in-front-of-the-password).
+
 The `hardening` role stops the deployment on any of these still holding the shipped value, naming them. That is `hardening_fail_on_default_secrets`, on by default; set it to false on a throwaway machine. On anything reachable from the internet, also turn TLS on and read [Hardening](docs/hardening.md).
 
 ## The playbooks
@@ -116,7 +118,7 @@ Every role carries the variables it owns in `roles/<role>/defaults/main.yml`, an
 | Which distributions are claimed, what a RHEL target gets on top, choosing the `antares` UID/GID | [Requirements](docs/requirements.md) |
 | Which solver builds are installed, and Antares-Xpansion | [Solvers and Antares-Xpansion](docs/solvers.md) |
 | Application settings, directory layout, study workspaces, putting the state on its own volume | [Antares-Web](docs/antares-web.md) |
-| The one container holding the ports of the machine, TLS and certbot, extra routes | [The front door and TLS](docs/edge-and-tls.md) |
+| The one container holding the ports of the machine, TLS and certbot, extra routes, the password in front of the password | [The front door and TLS](docs/edge-and-tls.md) |
 | Keycloak, external accounts, what `external_auth` is | [Authentication](docs/authentication.md) |
 | Quadlet units, restart policy, the podman version floor | [Containers: podman and quadlet](docs/containers.md) |
 | celery-beat, celery-worker, the collectors and their dry run | [Background maintenance tasks](docs/background-tasks.md) |

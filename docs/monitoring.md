@@ -16,7 +16,7 @@ What that deploys, all of it in quadlet units like the rest of the deployment:
 | `prometheus` | the Antares-Web machine | the two above, on every machine, every `monitoring_scrape_interval` |
 | `grafana` | the Antares-Web machine | Prometheus, and it is what the operator opens |
 
-Grafana is served by the front door under `monitoring_grafana_path` (`/grafana`), behind the same certificate as everything else: `https://<domain>/grafana/`, with `monitoring_grafana_admin_user` and the password above.
+Grafana is served by the front door under `monitoring_grafana_path` (`/grafana`), behind the same certificate as everything else: `https://<domain>/grafana/`, with `monitoring_grafana_admin_user` and the password above. It is one of the consoles `antares_edge_basic_auth_admin_users` guards when that list is filled, along with Prometheus if it is published; see [The password in front of the password](edge-and-tls.md#the-password-in-front-of-the-password).
 
 The rest of the knobs, all in `roles/antares_defaults/defaults/main/monitoring.yml` because the builder archives the images and the front door routes to Grafana, and neither runs a monitoring role:
 

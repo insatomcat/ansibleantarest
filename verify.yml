@@ -82,6 +82,27 @@
       {{ 'https' if antarest_tls_enabled | default(false) | bool else 'http' }}://{{
          hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}:{{
          antarest_https_port if antarest_tls_enabled | default(false) | bool else antarest_http_port }}
+    # The same front door asked from the machine itself, which is in
+    # antares_edge_basic_auth_trusted and so is never asked for a password.
+    verify_edge_local_url: >-
+      {{ 'https' if antarest_tls_enabled | default(false) | bool else 'http' }}://127.0.0.1:{{
+         antarest_https_port if antarest_tls_enabled | default(false) | bool else antarest_http_port }}
+    # Whether the front door holds a password list in front of the interface,
+    # and another in front of the consoles served next to it. Both are read
+    # from the lists the antares_edge role renders its password files from.
+    #
+    # The controller has no password to give - it is not in
+    # antares_edge_basic_auth_trusted, and putting it there is the operator's
+    # decision, see docs/operations.md - so where a tier is on, the probe that
+    # has to reach what is behind the door is asked from the machine instead,
+    # losing the network path and keeping everything else. The door itself is
+    # then checked for what it is, from here, by the task that expects a 401.
+    verify_web_gated: "{{ (antares_edge_basic_auth_users | default([])) | length > 0 }}"
+    verify_admin_gated: "{{ (antares_edge_basic_auth_admin_users | default([])) | length > 0 }}"
+    verify_web_probe_url: "{{ verify_edge_local_url if verify_web_gated | bool else verify_web_url }}"
+    verify_web_probe_from: "{{ inventory_hostname if verify_web_gated | bool else 'localhost' }}"
+    verify_admin_probe_url: "{{ verify_edge_local_url if verify_admin_gated | bool else verify_web_url }}"
+    verify_admin_probe_from: "{{ inventory_hostname if verify_admin_gated | bool else 'localhost' }}"
     # Both live in the role defaults, which a playbook that does not include
     # the role cannot see, hence the fallbacks. Empty means the deployment
     # keeps its state on the boot disk, and the volume checks do not apply.
@@ -144,26 +165,28 @@
     # deployment is for is answering someone else, and asking from here is
     # what makes the answer cross the input chain of the firewall, the
     # published port of the container and the proxy inside it, rather than a
-    # loopback that skips most of that.
+    # loopback that skips most of that. verify_web_probe_url is the one
+    # exception and says why: a front door holding a password list has
+    # nothing to answer a controller that has no password.
     - name: Ask the backend for its health
       ansible.builtin.uri:
-        url: "{{ verify_web_url }}/api/health"
+        url: "{{ verify_web_probe_url | trim }}/api/health"
         return_content: true
         validate_certs: false
       register: verify_health
       retries: 12
       delay: 5
       until: verify_health.status | default(0) == 200
-      delegate_to: localhost
+      delegate_to: "{{ verify_web_probe_from }}"
       become: false
 
     - name: Ask nginx for the web application
       ansible.builtin.uri:
-        url: "{{ verify_web_url }}/"
+        url: "{{ verify_web_probe_url | trim }}/"
         return_content: true
         validate_certs: false
       register: verify_index
-      delegate_to: localhost
+      delegate_to: "{{ verify_web_probe_from }}"
       become: false
 
     - name: Check nginx really serves the built front-end
@@ -180,7 +203,7 @@
     # container name in the nginx upstream produces.
     - name: Post a login the backend must reject
       ansible.builtin.uri:
-        url: "{{ verify_web_url }}/api/v1/login"
+        url: "{{ verify_web_probe_url | trim }}/api/v1/login"
         method: POST
         body_format: json
         body:
@@ -188,8 +211,34 @@
           password: wrong-on-purpose
         status_code: [200, 401, 422]
         validate_certs: false
+      delegate_to: "{{ verify_web_probe_from }}"
+      become: false
+
+    # And the door itself, from the controller, which is where an unknown
+    # client is. A 401 carrying a Basic challenge is the whole feature: the
+    # interface, its login form and every path under it are unreachable to
+    # anyone without one of the accounts in antares_edge_basic_auth_users,
+    # and there is nothing left of the application for a scanner to find.
+    # See docs/edge-and-tls.md.
+    - name: Ask the front door for the interface with no password
+      ansible.builtin.uri:
+        url: "{{ verify_web_url | trim }}/"
+        status_code: [401]
+        validate_certs: false
+      register: verify_web_challenge
       delegate_to: localhost
       become: false
+      when: verify_web_gated | bool
+
+    - name: Check the front door challenges rather than answers
+      ansible.builtin.assert:
+        that: verify_web_challenge.www_authenticate | default('') is match('Basic ')
+        fail_msg: >-
+          {{ verify_web_url | trim }}/ answered 401 without a Basic challenge
+          ({{ verify_web_challenge.www_authenticate | default('no WWW-Authenticate header') }}),
+          so what refused the request is not the front door's password list.
+        quiet: true
+      when: verify_web_gated | bool
 
     # Through the front door, from the controller, like everything above: what
     # is under test is the route, and a realm that answers proves at the same
@@ -198,15 +247,28 @@
     - name: Ask Keycloak for the realm the connector uses
       ansible.builtin.uri:
         url: >-
-          {{ verify_web_url }}{{ keycloak_relative_path }}/realms/{{ keycloak_realm }}/.well-known/openid-configuration
+          {{ verify_admin_probe_url | trim }}{{ keycloak_relative_path }}/realms/{{ keycloak_realm }}/.well-known/openid-configuration
         validate_certs: false
       register: verify_keycloak
       retries: 12
       delay: 5
       until: verify_keycloak.status | default(0) == 200
-      delegate_to: localhost
+      delegate_to: "{{ verify_admin_probe_from }}"
       become: false
       when: keycloak_enabled | default(false) | bool
+
+    # The consoles are a list of their own, and the console of an identity
+    # provider is the one page on a deployment worth the second password.
+    - name: Ask the front door for the Keycloak console with no password
+      ansible.builtin.uri:
+        url: "{{ verify_web_url | trim }}{{ keycloak_relative_path }}/admin/"
+        status_code: [401]
+        validate_certs: false
+      delegate_to: localhost
+      become: false
+      when:
+        - keycloak_enabled | default(false) | bool
+        - verify_admin_gated | bool
 
     # The connector publishes no port - only the containers of the stack have
     # any business calling it - so this is asked from inside it. What it proves
@@ -299,12 +361,25 @@
   vars:
     # Same shape as the web play above: through the front door, from the
     # controller, on whichever scheme is configured, and without validating a
-    # certificate that may deliberately be self-signed.
+    # certificate that may deliberately be self-signed. Grafana is one of the
+    # consoles antares_edge_basic_auth_admin_users guards, so the same rule as
+    # in the web play applies: with that list filled, the probe that has to
+    # reach Grafana is asked from the machine, whose loopback the front door
+    # never challenges, and the door is checked from here by the task that
+    # expects a 401.
+    verify_admin_gated: "{{ (antares_edge_basic_auth_admin_users | default([])) | length > 0 }}"
     verify_grafana_url: >-
       {{ 'https' if antarest_tls_enabled | default(false) | bool else 'http' }}://{{
          hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}:{{
          antarest_https_port if antarest_tls_enabled | default(false) | bool else antarest_http_port
       }}{{ monitoring_grafana_path }}
+    verify_grafana_probe_url: >-
+      {{ verify_grafana_url if not verify_admin_gated | bool
+         else ('https' if antarest_tls_enabled | default(false) | bool else 'http')
+              ~ '://127.0.0.1:'
+              ~ (antarest_https_port if antarest_tls_enabled | default(false) | bool else antarest_http_port)
+              ~ monitoring_grafana_path }}
+    verify_grafana_probe_from: "{{ inventory_hostname if verify_admin_gated | bool else 'localhost' }}"
     # The prefix Prometheus answers on, on the machine itself: the root unless
     # it was published, where --web.external-url moves everything under it.
     verify_prometheus_prefix: >-
@@ -462,25 +537,37 @@
     # And the half that is not on the machine: the front door really routes
     # monitoring_grafana_path, and Grafana really serves itself under it.
     # /api/health answers a JSON document with the database state in it, which
-    # is more than a 200 on the login page would say.
+    # is more than a 200 on the login page would say. Asked from the machine
+    # when the consoles are behind a password list, for the reason above.
     - name: Ask Grafana for its health, through the front door
       ansible.builtin.uri:
-        url: "{{ verify_grafana_url | trim }}/api/health"
+        url: "{{ verify_grafana_probe_url | trim }}/api/health"
         validate_certs: false
         status_code: [200]
       register: verify_grafana
       retries: 12
       delay: 5
       until: verify_grafana.status | default(0) == 200
-      delegate_to: localhost
+      delegate_to: "{{ verify_grafana_probe_from }}"
       become: false
       when: monitoring_enabled | default(false) | bool
+
+    - name: Ask the front door for Grafana with no password
+      ansible.builtin.uri:
+        url: "{{ verify_grafana_url | trim }}/api/health"
+        status_code: [401]
+        validate_certs: false
+      delegate_to: localhost
+      become: false
+      when:
+        - monitoring_enabled | default(false) | bool
+        - verify_admin_gated | bool
 
     - name: Check Grafana reports its database is up
       ansible.builtin.assert:
         that: verify_grafana.json.database | default('') == 'ok'
         fail_msg: >-
-          {{ verify_grafana_url | trim }}/api/health answered
+          {{ verify_grafana_probe_url | trim }}/api/health answered
           {{ verify_grafana.json | default(verify_grafana.status | default('nothing')) }}.
           Grafana is reached through the front door, so a 502 here is the
           container and anything else is the route.

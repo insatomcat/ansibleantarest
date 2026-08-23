@@ -10,6 +10,8 @@ antarest_external_auth_add_ext_groups: true
 
 A user who logs in that way is created in the database on the spot, with the role `antarest_external_auth_default_group_role` in each group the service returned. `antarest_external_auth_add_ext_groups` decides whether every group it returned is honoured or only those `antarest_external_auth_group_mapping` names, which is the way to expose two or three of them and ignore the rest. The mapping is read in both cases: it turns the id the connector sends into the id of the local group, and a group that is honoured is created when it does not exist yet - a group that already exists keeps its own name, the one the connector sends only names the new ones.
 
+None of this is what [the password in front of the password](edge-and-tls.md#the-password-in-front-of-the-password) is. That one is a list of logins and hashes held by the front door, in front of the login form rather than in place of it: it decides who may reach the application at all, and says nothing about who anybody is. Everything below still happens afterwards, unchanged.
+
 ## The connectors
 
 The bridge between that hook and a real identity provider is a small web service, and the `antares_auth` role holds two of them, in `roles/antares_auth/files/`. `antares_auth_provider` picks one, which is also what points `antarest_external_auth_url` at it:
@@ -28,7 +30,7 @@ Changing provider takes the previous connector down. There is nothing to clean u
 
 ## Keycloak
 
-`keycloak_enabled` puts a Keycloak next to Antares-Web: one more container on the podman network, published on `127.0.0.1:8082`, served by [the front door](edge-and-tls.md) under `/auth/`, and sharing the PostgreSQL the stack already runs.
+`keycloak_enabled` puts a Keycloak next to Antares-Web: one more container on the podman network, published on `127.0.0.1:8082`, served by [the front door](edge-and-tls.md) under `/auth/`, and sharing the PostgreSQL the stack already runs. Its console is one of the interfaces `antares_edge_basic_auth_admin_users` guards, and of everything a deployment publishes it is the one most worth a second password.
 
 It gets a database of its own in that cluster (`keycloak`, with a role of the same name), created by the playbook before the container is ever started. A schema in the Antares-Web database would have worked; a database of its own means a migration on either side has no business meeting the other one's, and a dump of one is not a dump of both.
 

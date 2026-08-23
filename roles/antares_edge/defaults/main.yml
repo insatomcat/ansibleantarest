@@ -44,14 +44,52 @@ antares_edge_proxy_read_timeout: 1200
 #     - path: /reports/
 #       upstream: 127.0.0.1:8090
 #       name: Reports          # comment written next to the location
+#       auth: admin            # optional: app, admin, or nothing at all
 #
 # What the deployment installs itself is already routed and does not belong
 # here: the web application, Keycloak and, with monitoring_enabled, Grafana.
 # See vars/main.yml.
 #
 # `upstream` is deliberately an address and a port rather than a name: see the
-# header of this file.
+# header of this file. `auth` names one of the two password lists below; a
+# route that names neither is served to anyone who reaches the front door.
 antares_edge_extra_routes: []
+
+# ---------------------------------------------------------------------------
+#  The password in front of the password
+#
+#  The accounts themselves are antares_edge_basic_auth_users and
+#  antares_edge_basic_auth_admin_users, in roles/antares_defaults/, because
+#  verify.yml reads them too. What follows is the plumbing of the two tiers.
+# ---------------------------------------------------------------------------
+
+# What the browser writes above its password prompt: nginx sends it as the
+# realm of the WWW-Authenticate header. It is read by whoever is being asked,
+# so it is worth naming the deployment rather than the software.
+antares_edge_basic_auth_realm: "Antares-Web"
+antares_edge_basic_auth_admin_realm: "Antares administration"
+
+# Where the two password files are written, one per tier, named after it. A
+# directory of its own because it is bind-mounted whole into the container:
+# one mount rather than one per tier, and a tier turned off simply loses its
+# file.
+antares_edge_htpasswd_dir: "{{ antares_edge_dir }}/htpasswd"
+antares_edge_htpasswd_container_dir: /etc/nginx/htpasswd
+
+# Addresses the front door never asks a password of, in CIDR form or as single
+# addresses - it is rendered as an nginx `geo` block, which reads both.
+#
+# The machine itself, and that is not a hole to be tidied up. Everything the
+# front door proxies to is published on that same loopback, so a password
+# asked there would protect nothing that is not already reachable without it,
+# and it would break the health checks of the deployment, which go through
+# this container on purpose to test the routing rather than to log in.
+#
+# Adding the controller here is what gives verify.yml back the checks it makes
+# through the front door on a gated deployment; see docs/operations.md.
+antares_edge_basic_auth_trusted:
+  - 127.0.0.0/8
+  - ::1/128
 
 # ---------------------------------------------------------------------------
 #  TLS
