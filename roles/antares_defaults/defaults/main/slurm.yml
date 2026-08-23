@@ -61,6 +61,11 @@ slurmdbd_adminer_image: "{{ container_registry }}/adminer:5"
 # built from it, and the builder resolves that list without running the role.
 slurmdbd_enable_adminer: false
 
+# The port it is published on, deliberately not antarest_adminer_port: a
+# front-end that is also the web machine runs both, and they would fight over
+# 8080. See roles/antares_defaults/defaults/main/antares-web.yml.
+slurmdbd_adminer_port: 8085
+
 # The images the accounting database needs, beyond the packaged daemons. The
 # counterpart of antarest_thirdparty_images for the Slurm half: build.yml
 # archives this very list and slurm_frontend loads it, so the two cannot drift.
