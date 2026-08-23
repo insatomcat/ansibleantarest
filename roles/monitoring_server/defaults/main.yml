@@ -82,9 +82,3 @@ monitoring_grafana_check_updates: false
 # dozen machines at 30s costs a couple of gigabytes a month.
 monitoring_scrape_interval: 30s
 monitoring_prometheus_retention: 30d
-
-# The name of the Grafana administrator. Only this role uses it; the password
-# that goes with it is monitoring_grafana_admin_password, in
-# roles/antares_defaults/, where the hardening role can see it is still the
-# shipped one.
-monitoring_grafana_admin_user: admin

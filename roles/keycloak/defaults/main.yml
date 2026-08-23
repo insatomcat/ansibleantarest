@@ -68,8 +68,3 @@ keycloak_admin_permanent: true
 # between two tasks of the same run, and the run deletes it whenever it finds
 # one.
 keycloak_admin_rotate_user: "{{ keycloak_admin_user }}-rotate"
-
-# The name of that first administrator. Only this role uses it; the password
-# that goes with it is keycloak_admin_password, in roles/antares_defaults/,
-# where the hardening role can see it is still the shipped one.
-keycloak_admin_user: admin

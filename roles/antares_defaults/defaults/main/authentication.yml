@@ -52,6 +52,11 @@ keycloak_client_id: antares-auth
 # password - keycloak_admin_permanent in the role defaults, and
 # docs/authentication.md.
 keycloak_admin_password: "admin"
+# The name that goes with it. Here rather than in the keycloak role because
+# verify.yml logs into the master realm with the pair, to check the admin API
+# the console lives on answers a token through the front door, and a playbook
+# outside a role sees no role default of a role it does not run.
+keycloak_admin_user: admin
 keycloak_db_password: "changeme-keycloak-db"
 keycloak_client_secret: "changeme-keycloak-client"
 

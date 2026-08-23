@@ -109,6 +109,31 @@ all:
       # role asks about it on.
       monitoring_grafana_admin_password: "ci-grafana-not-a-secret"
 
+      # ---------------------------------------------------------------
+      #  The password in front of the password, on the shape where the
+      #  machine that carries it is not the machine the checks come from.
+      #  Two of the three shapes are gated - this one and
+      #  standalone-slurm - and the whole standalone matrix is not, which
+      #  is what keeps the ungated path, the one most deployments run,
+      #  covered on every distribution.
+      #
+      #  The workflow gives verify.yml the passwords behind these hashes,
+      #  which is what makes its probes cross the door from outside rather
+      #  than fall back to the machine's own loopback. That matters: from a
+      #  trusted address the gate is off entirely, and the exemptions it
+      #  makes for everybody else are not exercised at all.
+      #
+      #  Both hash formats on purpose, since nginx reads one itself and
+      #  hands the other to crypt(3). Public by construction, like every
+      #  other secret in this file.
+      # ---------------------------------------------------------------
+      antares_edge_basic_auth_users:
+        - name: ci-user
+          hash: "$6$cieedge01$OrSfjAEMiqmfVzQl2/h682p9GEbPz5TvAPGwMWtvS5a4OLY46r47bPcAMxu4ANGu8.8Hm.PtEjo6JkZecikyj0"
+      antares_edge_basic_auth_admin_users:
+        - name: ci-admin
+          hash: "$apr1$ciedgead$mB3ePas6m2QGX0tfD/.Pa."
+
     slurm-front:
       <<: *ci_cluster_common
       ansible_host: 192.168.77.12
