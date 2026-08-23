@@ -214,6 +214,50 @@
       delegate_to: "{{ verify_web_probe_from }}"
       become: false
 
+    # The same login, carrying the kind of credential the front door consumes.
+    # Once a browser has been let through it sends that header on every
+    # request it makes, and nginx forwards whatever it is not told to clear:
+    # forwarded, it reaches the backend, which reads it as a malformed bearer
+    # token and answers `Bad Authorization header` to a login it never looked
+    # at. That is a deployment where nobody can log in behind a front door
+    # that answers 200 to every check above, which is exactly what this file
+    # failed to notice once.
+    #
+    # The header carries a credential that is not one of the accounts on
+    # purpose: what is under test is that it stops at the door, not that it
+    # opens it, and the probe has no password to give anyway.
+    - name: Post a login carrying the credential the front door consumes
+      ansible.builtin.uri:
+        url: "{{ verify_web_probe_url | trim }}/api/v1/login"
+        method: POST
+        headers:
+          Authorization: "Basic {{ 'verify.yml:not-a-password' | b64encode }}"
+        body_format: json
+        body:
+          username: verify.yml
+          password: wrong-on-purpose
+        status_code: [200, 401, 422]
+        return_content: true
+        validate_certs: false
+      register: verify_gate_login
+      delegate_to: "{{ verify_web_probe_from }}"
+      become: false
+      when: verify_web_gated | bool
+
+    - name: Check the front door keeps what it consumed to itself
+      ansible.builtin.assert:
+        that: verify_gate_login.content | default('') is not search('(?i)authorization header')
+        fail_msg: >-
+          A login carrying a basic credential was answered
+          "{{ verify_gate_login.content | default('') | truncate(120) }}", so
+          the front door forwards the header it authenticates with. The
+          backend reads it as its own and refuses every login, the Keycloak
+          console never loads and Grafana challenges for a password of its
+          own. The Authorization header has to be cleared on every gated
+          location, see roles/antares_edge/templates/nginx.conf.j2.
+        quiet: true
+      when: verify_web_gated | bool
+
     # And the door itself, from the controller, which is where an unknown
     # client is. A 401 carrying a Basic challenge is the whole feature: the
     # interface, its login form and every path under it are unreachable to
@@ -551,6 +595,24 @@
       delegate_to: "{{ verify_grafana_probe_from }}"
       become: false
       when: monitoring_enabled | default(false) | bool
+
+    # Grafana authenticates with a session cookie and has a basic
+    # authentication of its own, so a front door that forwards the credential
+    # it consumed makes Grafana refuse it and challenge for a password again -
+    # in a browser, a prompt that never ends. Health answers 200 through a
+    # door that clears the header and 401 through one that does not.
+    - name: Ask Grafana for its health carrying the credential the front door consumes
+      ansible.builtin.uri:
+        url: "{{ verify_grafana_probe_url | trim }}/api/health"
+        headers:
+          Authorization: "Basic {{ 'verify.yml:not-a-password' | b64encode }}"
+        validate_certs: false
+        status_code: [200]
+      delegate_to: "{{ verify_grafana_probe_from }}"
+      become: false
+      when:
+        - monitoring_enabled | default(false) | bool
+        - verify_admin_gated | bool
 
     - name: Ask the front door for Grafana with no password
       ansible.builtin.uri:

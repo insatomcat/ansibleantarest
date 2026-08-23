@@ -39,25 +39,38 @@ geo $antares_edge_{{ tier.name }}_realm {
     {{ network }} off;
 {% endfor %}
 }
-{% endfor %}
-{% if 'app' in antares_edge_basic_auth_names %}
 
-# And the exception the browser application needs. Its API calls carry a
-# bearer token in the Authorization header, which is the very header basic
-# authentication uses: a browser cannot send both, so a password asked on the
-# API would make the application unusable rather than more private. Same for a
-# websocket handshake, which a browser cannot put a header on at all.
+# The same realm, for the one prefix of that tier whose clients bring a
+# credential of their own. Every interface here authenticates its own API
+# calls with a bearer token, in the Authorization header - the very header
+# basic authentication uses. A browser cannot send both, so a password asked
+# on those calls does not make the deployment more private, it makes the
+# interface unusable: that is the Antares-Web login form answering `Bad
+# Authorization header` and the Keycloak console never loading a realm.
 #
-# A request that qualifies is not let in - it is handed to the backend, which
-# asks it for the token it claims to have. What this opens to the internet is
-# the API's own unauthenticated surface and nothing else, and only under the
-# location that declares a token_path.
-map "$http_upgrade:$http_authorization" $antares_edge_token_realm {
-    default          $antares_edge_app_realm;
+# A request that qualifies is not let in, it is handed to the service behind,
+# which asks it for the token it claims to have. Same for a websocket
+# handshake, which a browser cannot put a header on at all. See the README of
+# this role for what that exemption does and does not leave exposed.
+map "$http_upgrade:$http_authorization" $antares_edge_{{ tier.name }}_token_realm {
+    default          $antares_edge_{{ tier.name }}_realm;
     "~*^websocket:"  off;
     "~*^:bearer "    off;
 }
-{% endif %}
+{% endfor %}
+
+# What the service behind sees in the Authorization header. The basic
+# credential this door has just checked is the door's own business and has to
+# stop here: forwarded, Antares-Web reads it as a malformed bearer token and
+# refuses to log anybody in, and Grafana reads it as one of its own accounts
+# and challenges for a password of its own, which is a browser prompt that
+# never ends. An empty value is not sent at all, which is exactly right - the
+# request reaches the service as if there had been no door. Anything that is
+# not Basic is the caller's own credential and is passed through untouched.
+map $http_authorization $antares_edge_upstream_auth {
+    default      $http_authorization;
+    "~*^Basic "  "";
+}
 {% endif %}
 
 {% macro routes() %}
@@ -89,8 +102,9 @@ map "$http_upgrade:$http_authorization" $antares_edge_token_realm {
     # {{ route.name }}, the part of it whose clients authenticate themselves.
     # Longer prefix than the location below, so it wins whatever the order.
     location {{ route.token_path }} {
-      auth_basic           $antares_edge_token_realm;
+      auth_basic           $antares_edge_{{ tier }}_token_realm;
       auth_basic_user_file {{ antares_edge_htpasswd_container_dir }}/{{ tier }};
+      proxy_set_header     Authorization $antares_edge_upstream_auth;
       proxy_pass http://{{ route.upstream }};
     }
 {% endif %}
@@ -99,6 +113,7 @@ map "$http_upgrade:$http_authorization" $antares_edge_token_realm {
 {% if gated %}
       auth_basic           $antares_edge_{{ tier }}_realm;
       auth_basic_user_file {{ antares_edge_htpasswd_container_dir }}/{{ tier }};
+      proxy_set_header     Authorization $antares_edge_upstream_auth;
 {% endif %}
       proxy_pass http://{{ route.upstream }};
     }

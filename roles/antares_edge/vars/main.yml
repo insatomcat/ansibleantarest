@@ -70,6 +70,14 @@ antares_edge_volumes: >-
 # people who operate it. `token_path` is the sub-path of a route whose clients
 # carry a credential of their own, see the template.
 #
+# Two routes declare one, and for the same reason: the Antares-Web front-end
+# calls /api/ with a bearer token, and the Keycloak console calls the admin
+# API under /auth/admin/ with one of its own. The console's own pages are
+# under that prefix too and are still asked for a password, since they are
+# fetched by the browser and carry no token. Grafana declares none: it
+# authenticates with a session cookie and never touches the Authorization
+# header.
+#
 # Antares-Web is always there and is the catch-all; anything else claims a
 # prefix of its own, and nginx picks the longest match whatever the order.
 # The Keycloak location is written without a trailing slash, so that /auth and
@@ -86,7 +94,8 @@ antares_edge_routes: >-
      + ([{'path': keycloak_relative_path,
           'upstream': '127.0.0.1:' ~ keycloak_port,
           'name': 'Keycloak',
-          'auth': 'admin'}]
+          'auth': 'admin',
+          'token_path': keycloak_relative_path ~ '/admin/'}]
         if keycloak_enabled | bool else [])
      + ([{'path': monitoring_grafana_path,
           'upstream': '127.0.0.1:' ~ monitoring_grafana_port,
