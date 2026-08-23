@@ -73,3 +73,24 @@ antarest_tls_domain: ""                # e.g. antares.example.org
 # ---------------------------------------------------------------------------
 antares_edge_basic_auth_users: []
 antares_edge_basic_auth_admin_users: []
+
+# The accounts verify.yml presents at the door, one per tier. Empty by
+# default, and meant to be given at run time rather than stored - they are
+# passwords in the clear, which is what the lists above exist to avoid:
+#
+#   ansible-playbook verify.yml \
+#       -e antares_edge_basic_auth_probe_user=alice \
+#       -e antares_edge_basic_auth_probe_password='...'
+#
+# Without them a probe that has to get past a gated door is asked from the
+# machine instead, whose loopback the door never challenges. Every check keeps
+# its meaning that way except the ones about the door itself: from a trusted
+# address the gate is off entirely, so the exemptions it makes for everybody
+# else - a bearer token under the token paths - are not exercised at all, and
+# the CI had to log in through the door from outside to see one of them
+# missing. Giving the credentials is what puts those back, and is what the CI
+# does. See docs/operations.md.
+antares_edge_basic_auth_probe_user: ""
+antares_edge_basic_auth_probe_password: ""
+antares_edge_basic_auth_admin_probe_user: ""
+antares_edge_basic_auth_admin_probe_password: ""

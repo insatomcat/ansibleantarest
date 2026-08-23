@@ -97,6 +97,10 @@ monitoring_prometheus_path: /prometheus
 # interface, or with `podman exec grafana grafana cli admin reset-admin-password`.
 # See docs/monitoring.md.
 monitoring_grafana_admin_password: "admin"
+# The name that goes with it, here for the same reason as the password: the
+# hardening role checks the one, and verify.yml logs in with the pair to check
+# Grafana still issues a session through the front door.
+monitoring_grafana_admin_user: admin
 
 # The images the monitoring stack needs. The counterpart of
 # antarest_thirdparty_images for this half of the deployment: build.yml
