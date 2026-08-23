@@ -31,9 +31,19 @@ not written into the locations but computed per request, by a `geo` block that
 answers `off` for the addresses in `antares_edge_basic_auth_trusted`. That is
 what lets one location be closed to the internet and open to the machine
 itself, which is where every health check of the deployment comes from. The
-Antares-Web route carries one more key, `token_path`: the sub-path whose
-clients authenticate themselves with a bearer token, in the header a password
-would have to travel in.
+Antares-Web and Keycloak routes carry one more key, `token_path`: the sub-path
+whose clients authenticate themselves with a bearer token, in the header a
+password would have to travel in. `/api/` for the first, `/auth/admin/` for the
+second, and nothing for Grafana, which uses a session cookie.
+
+**What the door consumes, it clears.** Every gated location sets
+`Authorization` from a map that drops a `Basic` credential and passes anything
+else through. Without it the header reaches the service behind, which reads it
+as its own: Antares-Web answers `Bad Authorization header` to every login, the
+Keycloak console never loads a realm, and Grafana challenges for a password of
+its own, which in a browser is a prompt that never ends. All three are checked
+in CI by logging into them through the door, since a front door that answers
+200 on a health endpoint proves nothing about whether anybody can log in.
 
 The TLS variables keep the `antarest_` prefix they were deployed under when the
 Antares-Web nginx still terminated TLS: renaming them would have turned TLS

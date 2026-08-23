@@ -1585,26 +1585,75 @@ jobs:
           ansible-playbook -i inventory/ci-standalone-slurm.yml verify.yml \
             -e antares_xpansion_enabled=${{ matrix.target.xpansion || false }}
 
-      # The half of the front door's password list verify.yml deliberately
-      # does not carry: that the door also opens. It refuses the runner
-      # without credentials, which verify.yml has just checked from the same
-      # place, and serves it the interface with the account
-      # inventory/ci-standalone-slurm.yml lists - the hash of that very
-      # password. Written here rather than in verify.yml because a password
-      # in an inventory is the thing this feature exists to avoid.
-      - name: Check the front door opens for a listed account
+      # The half verify.yml cannot carry: that the door opens, and that the
+      # three interfaces behind it still authenticate their own users through
+      # it. That last part is the check this feature was missing - a front
+      # door that answers 200 to a health endpoint says nothing about whether
+      # anybody can log in, and the first version of it broke all three
+      # logins while every check in verify.yml stayed green.
+      #
+      # Every request below carries the portal credential in the Authorization
+      # header, which is what a browser does on every request once it has been
+      # let through, and which is the header all three interfaces also use for
+      # their own tokens. That collision is the whole difficulty.
+      - name: Check the interfaces still authenticate through the front door
         run: |
           set -euo pipefail
-          code=$(curl -s -o /dev/null -w '%{http_code}' \
-                   -u ci-user:ci-edge-not-a-secret http://192.168.77.11/)
+          host=http://192.168.77.11
+          portal='ci-user:ci-edge-not-a-secret'
+          admin_portal='ci-admin:ci-edge-admin-not-a-secret'
+
+          # The door itself: it opens for a listed account, stays shut for
+          # nobody, and the two tiers are separate lists rather than one read
+          # twice.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -u "$portal" "$host/")
           test "$code" = 200 || { echo "::error::the interface answered $code to a listed account"; exit 1; }
-          code=$(curl -s -o /dev/null -w '%{http_code}' \
-                   -u ci-admin:ci-edge-admin-not-a-secret http://192.168.77.11/grafana/api/health)
-          test "$code" = 200 || { echo "::error::Grafana answered $code to a listed administrator"; exit 1; }
-          # The tiers are separate lists, not one list read twice.
-          code=$(curl -s -o /dev/null -w '%{http_code}' \
-                   -u ci-user:ci-edge-not-a-secret http://192.168.77.11/grafana/api/health)
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$host/")
+          test "$code" = 401 || { echo "::error::the interface answered $code with no password at all"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' -u "$portal" "$host/grafana/api/health")
           test "$code" = 401 || { echo "::error::Grafana answered $code to an account of the other tier"; exit 1; }
+
+          # Antares-Web. The login form posts through the door, and the token
+          # it hands back has to work on the API behind it. A door that
+          # forwards the basic credential it just consumed gets `Bad
+          # Authorization header` here instead of a token.
+          body=$(curl -s -u "$portal" -H 'Content-Type: application/json' \
+                   -d '{"username":"admin","password":"ci-admin-not-a-secret"}' \
+                   "$host/api/v1/login")
+          token=$(printf '%s' "$body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' || true)
+          test -n "$token" || { echo "::error::no token from the login form through the door: $body"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' -u "$portal" \
+                   -H "Authorization: Bearer $token" "$host/api/v1/users")
+          test "$code" = 200 || { echo "::error::the API answered $code to the token its own login form issued"; exit 1; }
+
+          # Keycloak. The console is a page the browser fetches with the
+          # portal credential, and the admin API it calls carries a bearer
+          # token of its own: both have to get through the same door.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -u "$admin_portal" "$host/auth/admin/master/console/")
+          test "$code" = 200 || { echo "::error::the Keycloak console answered $code through the door"; exit 1; }
+          body=$(curl -s -u "$admin_portal" \
+                   -d 'grant_type=password&client_id=admin-cli&username=admin&password=ci-keycloak-not-a-secret' \
+                   "$host/auth/realms/master/protocol/openid-connect/token")
+          kctoken=$(printf '%s' "$body" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' || true)
+          test -n "$kctoken" || { echo "::error::no token from Keycloak through the door: $body"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $kctoken" \
+                   "$host/auth/admin/realms/antares")
+          test "$code" = 200 || { echo "::error::the Keycloak admin API answered $code to its own token"; exit 1; }
+
+          # Grafana. It authenticates with a session cookie, and it has a
+          # basic authentication of its own: a door that forwards the portal
+          # credential makes Grafana refuse it and challenge for a password
+          # again, which in a browser is a prompt that never ends. So the
+          # login has to work, and the answer must carry no challenge.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -c /tmp/grafana.jar -D /tmp/grafana.head \
+                   -u "$admin_portal" -H 'Content-Type: application/json' \
+                   -d '{"user":"admin","password":"ci-grafana-not-a-secret"}' "$host/grafana/login")
+          test "$code" = 200 || { echo "::error::the Grafana login answered $code through the door"; exit 1; }
+          ! grep -qi '^www-authenticate' /tmp/grafana.head || {
+            echo "::error::Grafana challenged for a password of its own, which is the prompt loop"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/grafana.jar -u "$admin_portal" \
+                   "$host/grafana/api/user")
+          test "$code" = 200 || { echo "::error::Grafana answered $code to the session it just issued"; exit 1; }
 
       # Last on purpose: a failure here says the deployment converged but
       # does not settle, which is worth knowing and worth fixing, but only
