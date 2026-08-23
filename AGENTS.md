@@ -18,7 +18,7 @@ than grepping the tree:
 | Which distributions are claimed and why not the others, what a RHEL target gets on top (CRB, EPEL, OpenHPC, SELinux), the `antares` UID/GID | `docs/requirements.md` |
 | Which solver build lands where, Antares-Xpansion and what it costs | `docs/solvers.md` |
 | Application settings, where files land on the web server, study workspaces, putting the state on a block device | `docs/antares-web.md` |
-| The one container holding the ports of the machine, TLS, certbot, extra routes | `docs/edge-and-tls.md` |
+| The one container holding the ports of the machine, TLS, certbot, extra routes, the basic-auth gate in front of the app and of the consoles | `docs/edge-and-tls.md` |
 | Keycloak, external accounts, what `external_auth` is | `docs/authentication.md` |
 | Quadlet units, restart policy, podman version floor | `docs/containers.md` |
 | celery-beat, celery-worker, the collectors | `docs/background-tasks.md` |

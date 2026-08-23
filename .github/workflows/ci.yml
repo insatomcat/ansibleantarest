@@ -1585,6 +1585,27 @@ jobs:
           ansible-playbook -i inventory/ci-standalone-slurm.yml verify.yml \
             -e antares_xpansion_enabled=${{ matrix.target.xpansion || false }}
 
+      # The half of the front door's password list verify.yml deliberately
+      # does not carry: that the door also opens. It refuses the runner
+      # without credentials, which verify.yml has just checked from the same
+      # place, and serves it the interface with the account
+      # inventory/ci-standalone-slurm.yml lists - the hash of that very
+      # password. Written here rather than in verify.yml because a password
+      # in an inventory is the thing this feature exists to avoid.
+      - name: Check the front door opens for a listed account
+        run: |
+          set -euo pipefail
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+                   -u ci-user:ci-edge-not-a-secret http://192.168.77.11/)
+          test "$code" = 200 || { echo "::error::the interface answered $code to a listed account"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+                   -u ci-admin:ci-edge-admin-not-a-secret http://192.168.77.11/grafana/api/health)
+          test "$code" = 200 || { echo "::error::Grafana answered $code to a listed administrator"; exit 1; }
+          # The tiers are separate lists, not one list read twice.
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+                   -u ci-user:ci-edge-not-a-secret http://192.168.77.11/grafana/api/health)
+          test "$code" = 401 || { echo "::error::Grafana answered $code to an account of the other tier"; exit 1; }
+
       # Last on purpose: a failure here says the deployment converged but
       # does not settle, which is worth knowing and worth fixing, but only
       # after the steps above have said whether it works at all.

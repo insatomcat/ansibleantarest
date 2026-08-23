@@ -8,6 +8,10 @@
   ansible.builtin.include_tasks: tls.yml
   when: antarest_tls_enabled | bool
 
+# Before the configuration, which names the files this writes.
+- name: Install the front door password files
+  ansible.builtin.include_tasks: basic_auth.yml
+
 - name: Render the front door
   ansible.builtin.include_tasks: nginx.yml
 

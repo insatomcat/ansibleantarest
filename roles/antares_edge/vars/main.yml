@@ -31,13 +31,44 @@ antares_edge_tls_volumes: >-
       | map('regex_replace', '$', _antares_edge_volume_opts) | list)
      if antarest_tls_enabled | bool else [] }}
 
+# The two password lists resolved to what the template needs: the name of the
+# tier, the realm it announces and the accounts in it. A tier whose list is
+# empty is dropped here, and that is the whole switch - no file is written, no
+# mount is added, and the locations naming that tier are generated without an
+# auth_basic line.
+antares_edge_basic_auth_tiers: >-
+  {{ [{'name': 'app',
+       'realm': antares_edge_basic_auth_realm,
+       'users': antares_edge_basic_auth_users},
+      {'name': 'admin',
+       'realm': antares_edge_basic_auth_admin_realm,
+       'users': antares_edge_basic_auth_admin_users}]
+     | selectattr('users') | list }}
+
+# The tiers that are on, for a route to be tested against: a route may name a
+# tier the inventory left empty, which is not an error but an ungated route.
+antares_edge_basic_auth_names: >-
+  {{ antares_edge_basic_auth_tiers | map(attribute='name') | list }}
+
+# The password files, mounted as the directory holding them rather than one by
+# one, so that the mount does not change when a tier is turned on or off.
+# Read-only, like everything else this container is given.
+antares_edge_basic_auth_volumes: >-
+  {{ ([antares_edge_htpasswd_dir ~ ':' ~ antares_edge_htpasswd_container_dir ~ ':ro']
+      | map('regex_replace', '$', _antares_edge_volume_opts) | list)
+     if antares_edge_basic_auth_tiers else [] }}
+
 antares_edge_volumes: >-
   {{ ([antares_edge_dir ~ '/nginx.conf:/etc/nginx/conf.d/default.conf:ro']
       | map('regex_replace', '$', _antares_edge_volume_opts) | list)
-     + antares_edge_tls_volumes }}
+     + antares_edge_tls_volumes + antares_edge_basic_auth_volumes }}
 
 # The locations of the generated configuration. `path` is an nginx location
-# prefix, `upstream` an address and a port on the loopback, `name` a comment.
+# prefix, `upstream` an address and a port on the loopback, `name` a comment,
+# and `auth` the password list that guards it, if any: the web application is
+# for the people who use the deployment, the three consoles next to it for the
+# people who operate it. `token_path` is the sub-path of a route whose clients
+# carry a credential of their own, see the template.
 #
 # Antares-Web is always there and is the catch-all; anything else claims a
 # prefix of its own, and nginx picks the longest match whatever the order.
@@ -49,17 +80,22 @@ antares_edge_volumes: >-
 antares_edge_routes: >-
   {{ [{'path': '/',
        'upstream': '127.0.0.1:' ~ antarest_nginx_port,
-       'name': 'Antares-Web'}]
+       'name': 'Antares-Web',
+       'auth': 'app',
+       'token_path': '/api/'}]
      + ([{'path': keycloak_relative_path,
           'upstream': '127.0.0.1:' ~ keycloak_port,
-          'name': 'Keycloak'}]
+          'name': 'Keycloak',
+          'auth': 'admin'}]
         if keycloak_enabled | bool else [])
      + ([{'path': monitoring_grafana_path,
           'upstream': '127.0.0.1:' ~ monitoring_grafana_port,
-          'name': 'Grafana'}]
+          'name': 'Grafana',
+          'auth': 'admin'}]
         if monitoring_enabled | bool else [])
      + ([{'path': monitoring_prometheus_path,
           'upstream': '127.0.0.1:' ~ monitoring_prometheus_port,
-          'name': 'Prometheus'}]
+          'name': 'Prometheus',
+          'auth': 'admin'}]
         if (monitoring_enabled | bool and monitoring_prometheus_public | bool) else [])
      + antares_edge_extra_routes }}

@@ -135,6 +135,24 @@ all:
           # antarest_tls_staging: true             # while debugging the ACME flow
 
           # ---------------------------------------------------------------
+          #  The password in front of the password. Off here: both lists are
+          #  empty, and a list with one account in it is what turns its tier
+          #  on. The first guards the web application, the second the consoles
+          #  served next to it (Keycloak, Grafana). The front door then
+          #  answers 401 to anyone else, which is most of what a WAF in front
+          #  of the application would have bought - see docs/edge-and-tls.md.
+          #
+          #  Logins and hashes, never passwords: `openssl passwd -6` or
+          #  `htpasswd -n <login>` prints one.
+          # ---------------------------------------------------------------
+          # antares_edge_basic_auth_users:
+          #   - name: alice
+          #     hash: "$6$Xk1u...$Yy8..."
+          # antares_edge_basic_auth_admin_users:
+          #   - name: ops
+          #     hash: "$6$dQ2p...$Zt4..."
+
+          # ---------------------------------------------------------------
           #  Hardening. All on except the firewall, which duplicates what a
           #  cloud security group already does. Turn it on for a machine with
           #  nothing in front of it: it opens the SSH port sshd actually
