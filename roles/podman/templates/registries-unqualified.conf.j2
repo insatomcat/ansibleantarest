@@ -1,0 +1,9 @@
+{{ ansible_managed | comment }}
+#
+# Debian and Ubuntu ship no unqualified-search-registries, and short-name-mode
+# defaults to prompting, which never succeeds unattended: `podman pull postgres`
+# fails instead of resolving to Docker Hub.
+#
+# The playbook itself always writes fully qualified image names, so this is only
+# here for whoever logs in and types a short name by hand.
+unqualified-search-registries = {{ podman_unqualified_search_registries | to_json }}

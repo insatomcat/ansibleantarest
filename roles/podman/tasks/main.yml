@@ -21,11 +21,33 @@
 - name: Check podman is recent enough for quadlet
   ansible.builtin.assert:
     that:
-      - (podman_version.stdout | regex_search('([0-9]+\.[0-9]+\.[0-9]+)', '\1') | first) is version('4.4.0', '>=')
+      - (podman_version.stdout | regex_search('[0-9]+\.[0-9]+\.[0-9]+')) is version('4.4.0', '>=')
     fail_msg: >-
       "{{ podman_version.stdout | trim }}" on {{ inventory_hostname }} is too
       old: the deployment is driven by quadlet units, which need podman 4.4 or
       later. Debian 13 ships 5.x and Ubuntu 24.04 ships 4.9.
+    quiet: true
+
+# Checked rather than assumed: the whole deployment resolves containers by name
+# on the podman network, and a missing aardvark-dns degrades silently. Asking
+# podman where it expects the binary beats hardcoding a path that varies by
+# distribution and version; with aardvark-dns absent, dns carries no `path` key
+# at all.
+- name: Read the podman network backend configuration
+  ansible.builtin.command: "{{ container_cmd }} info --format json"
+  register: podman_info_raw
+  changed_when: false
+
+- name: Fail when container name resolution would be unavailable
+  ansible.builtin.assert:
+    that:
+      - ((podman_info_raw.stdout | from_json).host.networkBackendInfo.dns.path | default('')) | length > 0
+    fail_msg: >-
+      podman reports no DNS backend on {{ inventory_hostname }}, so containers
+      could not resolve each other by name and the backend would never reach
+      postgresql or redis. That binary ships in the aardvark-dns package, which
+      podman merely *recommends*, so it is absent from any machine installed
+      with --no-install-recommends. Check that the install above pulled it in.
     quiet: true
 
 - name: Create the registry configuration directory
@@ -36,14 +58,9 @@
     group: root
     mode: "0755"
 
-# Without this, `podman pull postgres:16` fails instead of resolving to
-# docker.io. The playbook writes fully qualified names everywhere, so this only
-# matters for whoever logs in and types a short name by hand.
 - name: Allow short image names to resolve to Docker Hub
-  ansible.builtin.copy:
-    content: |
-      {{ ansible_managed | comment }}
-      unqualified-search-registries = {{ podman_unqualified_search_registries | to_json }}
+  ansible.builtin.template:
+    src: registries-unqualified.conf.j2
     dest: /etc/containers/registries.conf.d/10-antares-unqualified.conf
     owner: root
     group: root

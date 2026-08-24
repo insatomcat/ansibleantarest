@@ -14,6 +14,7 @@
     - "{{ antarest_data_dir }}/matrices"
     - "{{ antarest_data_dir }}/archives"
     - "{{ antarest_data_dir }}/logs"
+    - "{{ antarest_data_dir }}/blobstore"
     - "{{ antarest_data_dir }}/db"
     - "{{ antarest_data_dir }}/local_workspace"
     - "{{ antarest_data_dir }}/local_workspace/local"

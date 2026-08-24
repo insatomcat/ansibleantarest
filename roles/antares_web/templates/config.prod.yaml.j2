@@ -21,6 +21,12 @@ storage:
   tmp_dir: /antarest_tmp_dir
   archive_dir: /studies/archives
   matrixstore: /matrixstore
+  # Must be set: the default in antarest/core/config.py is the *relative* path
+  # ./blobstore, so the application tries to create it in its working directory
+  # (/ inside the container) and dies with
+  # `PermissionError: [Errno 13] Permission denied: 'blobstore'`, since the
+  # containers do not run as root.
+  blobstore: /blobstore
   matrix_gc_dry_run: true
   workspaces:
     # required, no filter applied, this folder is not watched

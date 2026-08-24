@@ -5,6 +5,15 @@
 # distribution packages are enough on every release in supported_distros.
 podman_packages:
   - podman
+  # netavark is a hard dependency of podman, but aardvark-dns is only a
+  # *recommendation*, so it is absent from any machine installed with
+  # --no-install-recommends. Without it podman logs "aardvark-dns binary not
+  # found, container dns will not be enabled" and containers cannot resolve each
+  # other by name, which is precisely how antarest reaches postgresql and redis.
+  # The stack then fails several minutes later, in the health check, with nothing
+  # pointing at the cause.
+  - netavark
+  - aardvark-dns
   - podman-docker
 
 # `podman-docker` provides a /usr/bin/docker shim. Off by default for a concrete
