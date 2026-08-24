@@ -13,17 +13,41 @@
     group: "{{ antares_solver_group }}"
     mode: "0755"
 
-- name: Download and unpack the Antares solvers
+# Downloading a few hundred megabytes from GitHub is one of the longest steps of
+# a from-scratch run, and it repeats on every machine. When build.yml has left a
+# copy on the controller, push that instead.
+- name: Look for the solver tarballs in the controller-side cache
+  ansible.builtin.stat:
+    path: "{{ antares_solver_cache_dir }}/antares-{{ item.version }}-{{ antares_solver_os }}.tar.gz"
+  loop: "{{ antares_solvers }}"
+  loop_control:
+    label: "antares-{{ item.version }}"
+  register: antares_solver_cached
+  delegate_to: localhost
+  become: false
+
+- name: Unpack the cached solver tarballs
   ansible.builtin.unarchive:
-    src: "{{ antares_solver_base_url }}/v{{ item.version }}/antares-{{ item.version }}-{{ antares_solver_os }}.tar.gz"
+    src: "{{ antares_solver_cache_dir }}/antares-{{ item.item.version }}-{{ antares_solver_os }}.tar.gz"
+    dest: "{{ antares_solver_dest }}"
+    owner: "{{ antares_solver_owner }}"
+    group: "{{ antares_solver_group }}"
+    creates: "{{ antares_solver_dest }}/antares-{{ item.item.version }}-{{ antares_solver_os }}/bin/{{ item.item.bin }}"
+  loop: "{{ antares_solver_cached.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "antares-{{ item.item.version }} (cache)"
+
+- name: Download and unpack the solvers that are not cached
+  ansible.builtin.unarchive:
+    src: "{{ antares_solver_base_url }}/v{{ item.item.version }}/antares-{{ item.item.version }}-{{ antares_solver_os }}.tar.gz"
     dest: "{{ antares_solver_dest }}"
     remote_src: true
     owner: "{{ antares_solver_owner }}"
     group: "{{ antares_solver_group }}"
-    creates: "{{ antares_solver_dest }}/antares-{{ item.version }}-{{ antares_solver_os }}/bin/{{ item.bin }}"
-  loop: "{{ antares_solvers }}"
+    creates: "{{ antares_solver_dest }}/antares-{{ item.item.version }}-{{ antares_solver_os }}/bin/{{ item.item.bin }}"
+  loop: "{{ antares_solver_cached.results | rejectattr('stat.exists') | list }}"
   loop_control:
-    label: "antares-{{ item.version }}"
+    label: "antares-{{ item.item.version }} (github)"
 
 - name: Check every solver binary is there and executable
   ansible.builtin.file:

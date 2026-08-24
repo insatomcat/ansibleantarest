@@ -1,0 +1,116 @@
+---
+# Used when antarest_image_source is `archive`: instead of building on the
+# target, load what build.yml produced. This is what makes a destroy-and-replay
+# test loop bearable, and what guarantees that several servers run identical
+# bits.
+
+- name: Check the artefacts exist on the controller
+  ansible.builtin.stat:
+    path: "{{ antares_artifacts_dir }}/{{ item }}"
+  loop:
+    - antarest-image.tar.gz
+    - webapp-dist.tar.gz
+  register: antarest_artifacts
+  delegate_to: localhost
+  become: false
+
+- name: Fail when the artefacts are missing
+  ansible.builtin.assert:
+    that: antarest_artifacts.results | rejectattr('stat.exists') | list | length == 0
+    fail_msg: >-
+      antarest_image_source is `archive` but
+      {{ antarest_artifacts.results | rejectattr('stat.exists') | map(attribute='item') | join(', ') }}
+      {{ 'is' if (antarest_artifacts.results | rejectattr('stat.exists') | list | length) == 1 else 'are' }}
+      missing from {{ antares_artifacts_dir }}. Produce them with
+      `ansible-playbook build.yml`, or deploy with
+      `-e antarest_image_source=build` to build on the target instead.
+    quiet: true
+
+- name: Create the artefact staging directory
+  ansible.builtin.file:
+    path: "{{ antarest_base_dir }}/artifacts"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# rsync rather than the copy module: these archives run to hundreds of megabytes
+# and copy checksums and streams them in chunks. rsync is in common_packages, so
+# it is present by the time this runs.
+- name: Ship the archives to the target
+  ansible.posix.synchronize:
+    src: "{{ antares_artifacts_dir }}/"
+    dest: "{{ antarest_base_dir }}/artifacts/"
+    rsync_opts:
+      - "--include=*.tar.gz"
+      - "--include=manifest.yml"
+      - "--exclude=*"
+  register: antarest_artifacts_shipped
+
+# Idempotence matters here: loading is not free, and the archives do not change
+# between two runs of the same build.
+- name: Look for the images already present
+  ansible.builtin.command: "{{ container_cmd }} image inspect {{ item }}"
+  loop: "{{ [antarest_image] + antarest_thirdparty_images }}"
+  register: antarest_images_present
+  changed_when: false
+  failed_when: false
+
+- name: Find the archives that were shipped
+  ansible.builtin.find:
+    paths: "{{ antarest_base_dir }}/artifacts"
+    patterns: "*.tar.gz"
+  register: antarest_archives
+
+- name: Load the images that are missing
+  ansible.builtin.command: "{{ container_cmd }} load -i {{ item }}"
+  loop: >-
+    {{ antarest_archives.files | map(attribute='path')
+       | reject('search', 'webapp-dist')
+       | reject('search', 'antares-[0-9]')
+       | list }}
+  when: antarest_images_present.results | selectattr('rc', 'ne', 0) | list | length > 0
+  changed_when: true
+  notify: Restart Antares-Web
+
+- name: Check the Antares-Web image is now present
+  ansible.builtin.command: "{{ container_cmd }} image inspect {{ antarest_image }}"
+  register: antarest_image_after_load
+  changed_when: false
+  failed_when: false
+
+- name: Fail when the image did not load
+  ansible.builtin.assert:
+    that: antarest_image_after_load.rc == 0
+    fail_msg: >-
+      {{ antarest_image }} is still not present after loading
+      antarest-image.tar.gz. The archive was probably built with a different
+      antarest_image name; check manifest.yml in {{ antares_artifacts_dir }}.
+    quiet: true
+
+# The web application is a plain directory served by nginx through a bind mount,
+# not something baked into an image, so it travels as a tarball and lands in the
+# checkout exactly where a local build would have put it.
+- name: Unpack the web application into the checkout
+  ansible.builtin.unarchive:
+    src: "{{ antarest_base_dir }}/artifacts/webapp-dist.tar.gz"
+    dest: "{{ antarest_dir }}/webapp"
+    remote_src: true
+    owner: "{{ antares_user }}"
+    group: "{{ antares_group }}"
+    creates: "{{ antarest_dir }}/webapp/dist/index.html"
+  notify: Restart Antares-Web
+
+- name: Check the web application is there
+  ansible.builtin.stat:
+    path: "{{ antarest_dir }}/webapp/dist/index.html"
+  register: antarest_dist_loaded
+
+- name: Fail when the web application is missing
+  ansible.builtin.assert:
+    that: antarest_dist_loaded.stat.exists
+    fail_msg: >-
+      webapp/dist/index.html is absent after unpacking webapp-dist.tar.gz, so
+      nginx would serve nothing. Check that the archive contains a `dist`
+      directory at its root.
+    quiet: true
