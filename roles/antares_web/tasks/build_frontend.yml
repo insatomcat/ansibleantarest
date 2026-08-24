@@ -52,8 +52,8 @@
   ansible.builtin.file:
     path: "{{ antarest_dir }}/webapp/.home"
     state: directory
-    owner: "{{ antares_user }}"
-    group: "{{ antares_group }}"
+    owner: "{{ antarest_frontend_build_uid }}"
+    group: "{{ antarest_frontend_build_gid }}"
     mode: "0755"
   when: antarest_rebuild_frontend | bool
 
@@ -64,7 +64,7 @@
   ansible.builtin.command:
     cmd: >-
       {{ container_cmd }} run --rm
-      -u {{ antares_uid }}:{{ antares_gid }}
+      -u {{ antarest_frontend_build_uid }}:{{ antarest_frontend_build_gid }}
       -v {{ antarest_dir }}:/antares
       -w /antares/webapp
       -e HOME=/antares/webapp/.home

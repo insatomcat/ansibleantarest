@@ -3,11 +3,16 @@
 # and webapp/dist in the checkout. Its only job is to turn those into archives
 # the controller can hand to any number of targets.
 
-- name: Create the artefact directory on the builder
+# Emptied rather than just created: everything below is regenerated, and an
+# archive left over from an older build would otherwise be shipped to the
+# targets and loaded. Silently deploying a stale image is the worst failure mode
+# this playbook could have.
+- name: Reset the artefact directory on the builder
   ansible.builtin.file:
     path: "{{ antares_build_artifacts }}"
-    state: directory
+    state: "{{ item }}"
     mode: "0755"
+  loop: [absent, directory]
 
 - name: Save the Antares-Web image
   ansible.builtin.shell:
@@ -74,12 +79,15 @@
     patterns: ["*.tar.gz", "manifest.yml"]
   register: antares_build_produced
 
+# become: false because the play runs with become, and delegating to the
+# controller would otherwise try to sudo on the machine running Ansible.
 - name: Create the artefact directory on the controller
   ansible.builtin.file:
     path: "{{ antares_artifacts_dir }}"
     state: directory
     mode: "0755"
   delegate_to: localhost
+  become: false
   run_once: true
 
 - name: Fetch the artefacts back to the controller
