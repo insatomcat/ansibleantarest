@@ -13,6 +13,34 @@
 # `alembic upgrade head` is idempotent, so re-running the play costs one no-op
 # container.
 
+# PostgreSQL refuses to start on a cluster written by another major, and says so
+# only in the container journal: without this check the operator sees nothing but
+# thirty failed readiness probes over 150 seconds. PG_VERSION is written by
+# initdb and holds the major in plain text, so the mismatch can be named before
+# anything starts. Absent on a first deployment, hence the guard.
+- name: Read the major version of the cluster on disk
+  ansible.builtin.slurp:
+    src: "{{ antarest_data_dir }}/db/pgdata/PG_VERSION"
+  register: antarest_pg_on_disk
+  failed_when: false
+
+- name: Fail when the data directory and the image disagree on the major
+  vars:
+    antarest_pg_disk_major: "{{ antarest_pg_on_disk.content | default('') | b64decode | trim }}"
+    antarest_pg_image_major: >-
+      {{ antarest_postgres_image | regex_replace('^.*:', '') | regex_replace('[^0-9].*$', '') }}
+  ansible.builtin.assert:
+    that: antarest_pg_disk_major == antarest_pg_image_major
+    fail_msg: >-
+      {{ antarest_data_dir }}/db/pgdata holds a PostgreSQL
+      {{ antarest_pg_disk_major }} cluster and antarest_postgres_image is
+      {{ antarest_postgres_image }}. PostgreSQL will not start on it. Changing
+      major is a dump and a restore, see "Major database versions" in the README.
+    quiet: true
+  when:
+    - antarest_pg_disk_major | length > 0
+    - antarest_pg_image_major | length > 0
+
 - name: Start the database before migrating
   ansible.builtin.systemd:
     name: postgresql.service

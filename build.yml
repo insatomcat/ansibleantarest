@@ -6,7 +6,7 @@
 #
 #  Produces, in ./artifacts on the controller:
 #    - antarest-image.tar.gz     the backend image, UID baked in
-#    - thirdparty-*.tar.gz       postgres, redis, nginx
+#    - thirdparty-*.tar.gz       postgres, redis, nginx, adminer if enabled
 #    - webapp-dist.tar.gz        the built web application
 #    - antares-*.tar.gz          the solver tarballs
 #    - manifest.yml              what is actually in there

@@ -209,7 +209,7 @@ ansible-playbook site.yml -e antarest_image_source=archive  # many times
 | File | Content |
 |---|---|
 | `antarest-image.tar.gz` | backend image, UID baked in |
-| `thirdparty-*.tar.gz` | postgres, redis, nginx |
+| `thirdparty-*.tar.gz` | postgres, redis, nginx, and adminer if enabled |
 | `webapp-dist.tar.gz` | built web application |
 | `antares-*.tar.gz` | solver tarballs |
 | `manifest.yml` | version, commit, UID, date |
@@ -252,24 +252,37 @@ The reference procedure dates from September 2025; several upstream changes have
 
 ## Major database versions
 
-Third-party images are pinned to majors (`postgres:18`, `mariadb:11`, `redis:8`, `nginx:1.31`, `adminer:5`) rather than `latest` to avoid accidental major upgrades.
+Third-party images are pinned to majors (`postgres:18`, `mariadb:11`, `redis:8`, `nginx:1.30`, `adminer:5`) rather than `latest` to avoid accidental major upgrades. nginx is pinned on a minor because its major is always `1`, and on the stable branch rather than the mainline one, which stops being rebuilt as soon as the next mainline opens.
+
+Since these tags are also the names of the archives `build.yml` produces, changing one invalidates the whole artifact set: re-run `build.yml` before the next `archive` deployment. The target says so explicitly rather than failing later on a missing image.
 
 The `data/db` directory contains a PostgreSQL cluster of a given major version. PostgreSQL refuses to start on data written by a different major without `pg_upgrade`. If you use `latest`, a future major bump in the tag could silently stop your stack on the next playbook run. `archive` mode does not avoid this risk, it only postpones the problem to the next `build.yml`.
 
 Changing major versions is therefore an explicit operation:
 
 ```bash
-# dump the database while the old image is still present
+# dump while the old image is still present, then stop everything
 podman exec postgresql pg_dumpall -U postgres > antarest-db.sql
 systemctl stop antares-web.target
 
-# update antarest_postgres_image, move aside data dir, redeploy
+# update antarest_postgres_image, move the old cluster aside, redeploy
 mv /var/antares-web/data/db/pgdata /var/antares-web/data/db/pgdata.old
 ansible-playbook site.yml --limit <host> --tags antares_web
 
-# reload
-podman exec -i postgresql psql -U postgres < antarest-db.sql
+# the redeploy did not only create an empty cluster: it also ran the schema
+# migration in it and started the backend. Empty the schema before restoring,
+# with only postgres running.
+systemctl stop antares-web.target
+systemctl start postgresql.service
+podman exec -i postgresql psql -v ON_ERROR_STOP=1 -U postgres \
+    -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+
+# restore, then bring the stack back up
+podman exec -i postgresql psql -v ON_ERROR_STOP=1 -U postgres < antarest-db.sql
+systemctl start antares-web.target
 ```
+
+Do not skip the two steps before the restore, and do not drop `ON_ERROR_STOP`. Restoring into the schema the migration has just created fails in the worst possible way: `pg_dumpall` writes table data in alphabetical order and only recreates the foreign keys at the end, so a `COPY group_metadata` arriving before `COPY groups` is rejected by the constraint that is already there. Without `ON_ERROR_STOP`, `psql` skips it, leaves the table empty, exits 0, and buries the message in the hundreds of "already exists" errors from the `CREATE` statements.
 
 Same idea for MariaDB on the Slurm frontend (use `mariadb-dump` and the `slurmdb-data` volume).
 
