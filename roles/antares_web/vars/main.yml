@@ -36,10 +36,39 @@ antarest_backend_volumes: >-
         antarest_solvers_dir ~ ':/antares_simulator:ro']
      + ([antarest_ssh_key ~ ':/id_rsa:ro'] if slurm_enabled | bool else []) }}
 
-antarest_nginx_volumes:
-  - "{{ antarest_dir }}/resources/deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro"
-  - "{{ antarest_dir }}/webapp/dist:/www"
-  - "{{ antarest_dir }}/resources/deploy/web.config.json:/www/config.json:ro"
+# Certificate actually served, resolved from the provider. `manual` is the only
+# one where the operator chooses the paths; the other two are managed here.
+antarest_tls_cert: >-
+  {{ ('/etc/letsencrypt/live/' ~ antarest_tls_domain ~ '/fullchain.pem')
+     if antarest_tls_provider == 'letsencrypt' else antarest_tls_certificate }}
+antarest_tls_key: >-
+  {{ ('/etc/letsencrypt/live/' ~ antarest_tls_domain ~ '/privkey.pem')
+     if antarest_tls_provider == 'letsencrypt' else antarest_tls_certificate_key }}
+
+# What nginx needs mounted to serve TLS. /etc/letsencrypt whole, because
+# live/<domain>/*.pem are symlinks into archive/<domain>/ and a mount of live/
+# alone would leave them dangling inside the container. The webroot is where
+# certbot drops the challenge files, so it is only useful to that provider.
+# Mounted read-only: nothing in the container writes there.
+antarest_tls_volumes: >-
+  {{ (['/etc/letsencrypt:/etc/letsencrypt:ro',
+       antarest_tls_webroot ~ ':' ~ antarest_tls_webroot_container ~ ':ro']
+      if antarest_tls_provider == 'letsencrypt'
+      else ([antarest_tls_cert | dirname, antarest_tls_key | dirname]
+            | unique | map('regex_replace', '^(.*)$', '\1:\1:ro') | list))
+     if antarest_tls_enabled | bool else [] }}
+
+# With TLS off the project file is mounted unchanged, exactly as before; with
+# TLS on it is the rendered one, which is that file plus the port 443 server.
+antarest_nginx_conf_source: >-
+  {{ (antarest_deploy_dir ~ '/nginx.conf') if antarest_tls_enabled | bool
+     else (antarest_dir ~ '/resources/deploy/nginx.conf') }}
+
+antarest_nginx_volumes: >-
+  {{ [antarest_nginx_conf_source ~ ':/etc/nginx/conf.d/default.conf:ro',
+      antarest_dir ~ '/webapp/dist:/www',
+      antarest_dir ~ '/resources/deploy/web.config.json:/www/config.json:ro']
+     + antarest_tls_volumes }}
 
 # The quadlet units, rendered into /etc/containers/systemd. Order is irrelevant,
 # systemd resolves the dependencies declared inside each unit.

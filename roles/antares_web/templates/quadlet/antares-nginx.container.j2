@@ -14,13 +14,21 @@ After=antarest.service
 PartOf={{ antarest_service_name }}.target
 
 [Container]
-ContainerName=antares-nginx
+ContainerName={{ antarest_nginx_container }}
 Image={{ antarest_nginx_image }}
 Network={{ antarest_service_name }}.network
 PublishPort={{ antarest_http_port }}:80
+{% if antarest_tls_active | bool %}
+PublishPort={{ antarest_https_port }}:443
+{% endif %}
 {% for volume in antarest_nginx_volumes %}
 Volume={{ volume }}
 {% endfor %}
+# The access log is what the fail2ban jail watching the login endpoint reads,
+# through journalctl CONTAINER_NAME={{ antarest_nginx_container }}. journald is
+# already podman's default here, but the jail stops seeing anything at all if
+# that default ever moves, so it is pinned rather than assumed.
+LogDriver=journald
 
 [Service]
 Restart=always

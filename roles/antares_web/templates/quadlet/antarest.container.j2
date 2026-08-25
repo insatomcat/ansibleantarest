@@ -19,6 +19,13 @@ Network={{ antarest_service_name }}.network
 User={{ antares_uid }}:{{ antares_gid }}
 Environment=UVICORN_ROOT_PATH=/api
 Environment=GUNICORN_WORKERS={{ antarest_gunicorn_workers }}
+{% if antarest_tls_enabled | bool %}
+# Behind TLS the backend only learns the scheme from the X-Forwarded-Proto
+# nginx sets, and gunicorn ignores that header unless the proxy address is
+# trusted. Nothing but nginx can reach port 5000, which is published nowhere
+# and lives on the podman network, so the wildcard trusts exactly one client.
+Environment=FORWARDED_ALLOW_IPS={{ antarest_forwarded_allow_ips }}
+{% endif %}
 {% for volume in antarest_backend_volumes %}
 Volume={{ volume }}
 {% endfor %}

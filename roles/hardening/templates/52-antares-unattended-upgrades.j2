@@ -1,0 +1,9 @@
+{{ ansible_managed | comment('c') }}
+//
+// Read after 50unattended-upgrades, whose origins list (the security pocket
+// only) is deliberately left alone.
+
+// A study can run for hours, and a machine that reboots on its own in the
+// middle of one loses it. Kernel and libc updates therefore wait for an
+// operator; `needrestart` or `/var/run/reboot-required` will say when.
+Unattended-Upgrade::Automatic-Reboot "{{ 'true' if hardening_unattended_reboot | bool else 'false' }}";

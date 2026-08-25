@@ -1,0 +1,136 @@
+---
+# Everything that has to be true *before* nginx starts. Obtaining a Let's
+# Encrypt certificate is the other half and lives in certbot.yml, because the
+# http-01 challenge needs the very nginx this configures to be up.
+
+- name: Check the TLS settings are complete
+  ansible.builtin.assert:
+    that:
+      - antarest_tls_domain | length > 0
+      - antarest_tls_provider in ['letsencrypt', 'selfsigned', 'manual']
+      - antarest_tls_provider != 'letsencrypt' or antarest_tls_email | length > 0
+      - antarest_tls_provider != 'manual' or antarest_tls_certificate | length > 0
+      - antarest_tls_provider != 'manual' or antarest_tls_certificate_key | length > 0
+    fail_msg: >-
+      antarest_tls_enabled is on but the settings are incomplete on
+      {{ inventory_hostname }}. antarest_tls_domain is the name the certificate
+      is issued for and the one users type, antarest_tls_provider is one of
+      letsencrypt / selfsigned / manual, letsencrypt also needs
+      antarest_tls_email (expiry notices) and manual needs
+      antarest_tls_certificate and antarest_tls_certificate_key, two paths on
+      the target holding the full chain and the private key.
+    quiet: true
+
+# The ACME server connects to port 80 of the domain, full stop: the http-01
+# challenge has no port to negotiate. A stack published on 8080 can never be
+# validated, and certbot would only say so after a failed challenge.
+- name: Check the interface is published where the ACME challenge is looked for
+  ansible.builtin.assert:
+    that:
+      - antarest_http_port | int == 80
+    fail_msg: >-
+      antarest_http_port is {{ antarest_http_port }} and
+      antarest_tls_provider is letsencrypt: the http-01 challenge is always
+      fetched on port 80, so no certificate can be issued. Publish the stack on
+      80 (a reverse proxy in front can still forward from anywhere), or use
+      antarest_tls_provider `manual` with a certificate obtained elsewhere.
+    quiet: true
+  when: antarest_tls_provider == 'letsencrypt'
+
+# The rendered configuration is derived from the project file, so a change on
+# their side would otherwise be silently dropped: the mount points at ours.
+# A warning rather than a failure, since a reformatting is not a reason to stop
+# a deployment.
+- name: Read the nginx configuration shipped by the project
+  ansible.builtin.stat:
+    path: "{{ antarest_dir }}/resources/deploy/nginx.conf"
+    checksum_algorithm: sha1
+  register: antarest_nginx_upstream
+
+- name: Warn when the project changed its nginx configuration
+  ansible.builtin.debug:
+    msg: >-
+      {{ antarest_dir }}/resources/deploy/nginx.conf has checksum
+      {{ antarest_nginx_upstream.stat.checksum }}, not the
+      {{ antarest_nginx_upstream_sha1 }} the TLS template was derived from.
+      With TLS on, that file is not mounted any more: compare it to
+      roles/antares_web/templates/nginx.conf.j2, carry over what changed, and
+      update antarest_nginx_upstream_sha1.
+  when:
+    - antarest_nginx_upstream.stat.exists | default(false)
+    - antarest_nginx_upstream.stat.checksum != antarest_nginx_upstream_sha1
+
+- name: Create the TLS directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ [antarest_tls_dir] + ([antarest_tls_webroot] if antarest_tls_provider == 'letsencrypt' else []) }}"
+
+# openssl is a dependency of nothing installed so far, and Debian cloud images
+# built with --no-install-recommends do without it.
+- name: Install openssl
+  ansible.builtin.apt:
+    name: openssl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: "{{ apt_lock_timeout }}"
+  when: antarest_tls_provider == 'selfsigned'
+
+# Ten years: this certificate exists to encrypt an internal deployment whose
+# users click through the browser warning anyway, and a yearly regeneration
+# would only mean clicking through it again.
+- name: Generate the self-signed certificate
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes
+      -subj "/CN={{ antarest_tls_domain }}"
+      -addext "subjectAltName=DNS:{{ antarest_tls_domain }}"
+      -keyout {{ antarest_tls_key }}
+      -out {{ antarest_tls_cert }}
+    creates: "{{ antarest_tls_cert }}"
+  when: antarest_tls_provider == 'selfsigned'
+
+- name: Protect the private key
+  ansible.builtin.file:
+    path: "{{ antarest_tls_key }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: antarest_tls_provider == 'selfsigned'
+
+- name: Look for the certificate
+  ansible.builtin.stat:
+    path: "{{ antarest_tls_cert }}"
+  register: antarest_tls_cert_stat
+
+- name: Look for the private key
+  ansible.builtin.stat:
+    path: "{{ antarest_tls_key }}"
+  register: antarest_tls_key_stat
+
+- name: Check the supplied certificate is there
+  ansible.builtin.assert:
+    that:
+      - antarest_tls_cert_stat.stat.exists
+      - antarest_tls_key_stat.stat.exists
+    fail_msg: >-
+      antarest_tls_provider is `manual` but {{ antarest_tls_cert }} or
+      {{ antarest_tls_key }} is missing on {{ inventory_hostname }}. Copy the
+      full chain and the private key there before running the playbook, or
+      switch to letsencrypt / selfsigned.
+    quiet: true
+  when: antarest_tls_provider == 'manual'
+
+# The knob the templates read. Distinct from antarest_tls_enabled on purpose:
+# on the very first run with letsencrypt there is no certificate yet, nginx
+# would refuse to start with `cannot load certificate`, so the stack comes up
+# on plain http, certbot answers its challenge through it, and certbot.yml
+# turns this on and reloads the configuration.
+- name: Record whether nginx can serve TLS now
+  ansible.builtin.set_fact:
+    antarest_tls_active: >-
+      {{ antarest_tls_cert_stat.stat.exists and antarest_tls_key_stat.stat.exists }}

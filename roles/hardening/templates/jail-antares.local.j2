@@ -1,0 +1,47 @@
+{{ ansible_managed | comment }}
+#
+# Read after every .conf of /etc/fail2ban/jail.d (the .local suffix is what
+# gives it the last word), so this also overrides the [sshd] jail Debian
+# enables in defaults-debian.conf.
+
+[DEFAULT]
+# Read the journal rather than /var/log/auth.log: the Ubuntu images ship no
+# rsyslog at all, so that file does not exist and a jail pointed at it starts
+# dead. It is also the only way to see the nginx log, which lives in the
+# journal of the container.
+backend = systemd
+
+# See /etc/fail2ban/action.d/{{ hardening_fail2ban_action }}.conf: the stock
+# nftables and iptables actions filter on the input hook, which the traffic to
+# a published container port never reaches.
+banaction = {{ hardening_fail2ban_action }}
+banaction_allports = {{ hardening_fail2ban_action }}
+
+bantime = {{ hardening_fail2ban_bantime }}
+findtime = {{ hardening_fail2ban_findtime }}
+maxretry = {{ hardening_fail2ban_maxretry }}
+
+# The machines of the deployment, and whoever runs the playbook, are never
+# banned: locking Ansible out of the front-end because a task retried a
+# connection would be an expensive way to be secure.
+ignoreip = {{ (hardening_fail2ban_ignoreip + hardening_peers_v4 + hardening_peers_v6) | unique | join(' ') }}
+
+[sshd]
+enabled = true
+port = {{ hardening_ssh_ports | join(',') }}
+
+{% if hardening_fail2ban_web_jail | bool and inventory_hostname in (groups['antares_web'] | default([])) %}
+# Brute force on the Antares-Web login form. The backend answers 401 on a wrong
+# password, nginx logs the request, and podman sends that log to the journal.
+# Two matches, OR'ed by the `+`: the CONTAINER_NAME field the journald log
+# driver sets, and the unit the container runs under, so the jail still sees
+# the log if one of the two ever changes. No `port`: the ban action drops
+# everything from the address, whatever port it aims at.
+[antares-web-login]
+enabled = true
+filter = antares-web-login
+journalmatch = CONTAINER_NAME={{ hardening_fail2ban_web_container }} + _SYSTEMD_UNIT={{ hardening_fail2ban_web_container }}.service
+maxretry = {{ hardening_fail2ban_web_maxretry }}
+findtime = {{ hardening_fail2ban_web_findtime }}
+bantime = {{ hardening_fail2ban_web_bantime }}
+{% endif %}
