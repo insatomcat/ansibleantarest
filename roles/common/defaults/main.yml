@@ -1,12 +1,58 @@
 ---
-common_packages:
-  - ca-certificates
-  - curl
-  - gnupg
-  - htop
-  - unzip
-  - zip
-  - zstd
-  - rsync
+# Package names differ between the two families, so every role that installs
+# anything resolves its list from ansible_os_family. The `_by_family` dict is
+# the data, the plain name is what the tasks use and what an inventory
+# overrides.
+common_packages: "{{ _common_packages_by_family[ansible_os_family] }}"
+_common_packages_by_family:
+  Debian:
+    - ca-certificates
+    - curl
+    - gnupg
+    - htop
+    - unzip
+    - zip
+    - zstd
+    - rsync
+  RedHat:
+    # No curl: EL 9 installs curl-minimal, which already provides
+    # /usr/bin/curl, and asking for the full `curl` package makes dnf report a
+    # conflict rather than swap the two.
+    - ca-certificates
+    - gnupg2
+    - htop                          # EPEL
+    - unzip
+    - zip
+    - zstd
+    - tar
+    - rsync
+    # Time synchronisation, see common_timesync_service below.
+    - chrony
+    # semanage and the python bindings the SELinux tasks of the NFS roles use.
+    - policycoreutils-python-utils
 
+# Debian and Ubuntu synchronise the clock with systemd-timesyncd, the RHEL
+# rebuilds with chronyd. A cluster whose nodes disagree on the time gets munge
+# authentication failures ("Rewound credential"), so this is not cosmetic.
+common_timesync_service: >-
+  {{ 'chronyd' if ansible_os_family == 'RedHat' else 'systemd-timesyncd' }}
 common_manage_timesync: true
+
+# The CodeReady Builder repository, which EPEL builds against. Named
+# differently by each rebuild, and on plain RHEL it carries the architecture.
+# Set to an empty string to leave the repositories alone.
+common_crb_repo: "{{ _common_crb_repo_by_distro[ansible_distribution] | default('crb') }}"
+_common_crb_repo_by_distro:
+  OracleLinux: "ol{{ ansible_distribution_major_version }}_codeready_builder"
+  RedHat: "codeready-builder-for-rhel-{{ ansible_distribution_major_version }}-{{ ansible_architecture }}-rpms"
+  Rocky: crb
+  AlmaLinux: crb
+  CentOS: crb
+
+# The package that declares EPEL. Oracle ships its own, the other rebuilds
+# carry Fedora's in their extras repository, and plain RHEL has neither, so
+# there it is fetched by URL. Set to an empty string to leave EPEL alone.
+common_epel_release: "{{ _common_epel_release_by_distro[ansible_distribution] | default('epel-release') }}"
+_common_epel_release_by_distro:
+  OracleLinux: "oracle-epel-release-el{{ ansible_distribution_major_version }}"
+  RedHat: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_distribution_major_version }}.noarch.rpm"

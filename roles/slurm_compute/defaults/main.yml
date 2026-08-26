@@ -1,0 +1,9 @@
+---
+# The node daemon. Names follow slurm_repo, see group_vars/all.yml and
+# roles/slurm_common/defaults/main.yml.
+slurmd_packages: "{{ _slurmd_packages_by_repo[slurm_repo] }}"
+_slurmd_packages_by_repo:
+  distro: >-
+    {{ ['slurmd'] if ansible_os_family == 'Debian' else ['slurm-slurmd'] }}
+  openhpc:
+    - slurm-slurmd-ohpc

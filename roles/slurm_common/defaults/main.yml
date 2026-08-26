@@ -1,8 +1,29 @@
 ---
-slurm_common_packages:
-  - slurm-client
-  - slurm-wlm-basic-plugins
-  - build-essential
+# The client commands and the plugins, plus a compiler toolchain, which is what
+# the reference procedure pulls in with build-essential.
+#
+# Two axes here, not one: where Slurm comes from (slurm_repo, see
+# group_vars/all.yml) decides the Slurm package names, and the family decides
+# the toolchain ones. The Debian family splits the plugins out of the client
+# package; OpenHPC and the EL packaging both ship everything in one.
+slurm_common_packages: >-
+  {{ _slurm_client_packages_by_repo[slurm_repo]
+     + _slurm_build_packages_by_family[ansible_os_family] }}
+
+_slurm_client_packages_by_repo:
+  distro: >-
+    {{ ['slurm-client', 'slurm-wlm-basic-plugins']
+       if ansible_os_family == 'Debian' else ['slurm'] }}
+  openhpc:
+    - slurm-ohpc
+
+_slurm_build_packages_by_family:
+  Debian:
+    - build-essential
+  RedHat:
+    - gcc
+    - gcc-c++
+    - make
 
 # Extra raw lines appended to slurm.conf just before the node definitions.
 # Handy for GresTypes, MpiDefault, QOS settings...

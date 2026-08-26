@@ -1,0 +1,34 @@
+{{ ansible_managed | comment }}
+#
+# Read by dnf-automatic.service, which dnf-automatic.timer fires daily. A stock
+# install ships this file with apply_updates = no, i.e. it downloads the
+# updates and reports them; the three settings that matter here are what turns
+# that into "install the security updates and say nothing else".
+
+[commands]
+# `security` is the counterpart of the origins list Debian's
+# 50unattended-upgrades ships: only what the vendor flagged as a security fix.
+# `default` would install every available update instead.
+upgrade_type = {{ hardening_dnf_automatic_upgrade_type }}
+
+# The timer already carries a RandomizedDelaySec, so there is nothing to spread
+# out a second time here.
+random_sleep = 0
+network_online_timeout = 60
+
+download_updates = yes
+apply_updates = yes
+
+# A study can run for hours, and a machine that reboots on its own in the
+# middle of one loses it. Kernel and glibc updates therefore wait for an
+# operator; `dnf needs-restarting -r` will say when.
+reboot = {{ 'when-needed' if hardening_unattended_reboot | bool else 'never' }}
+
+[emitters]
+# The journal, through the service's stdout. `email` would need a working MTA
+# on every machine of the deployment.
+emit_via = stdio
+system_name = {{ inventory_hostname }}
+
+[base]
+debuglevel = 1

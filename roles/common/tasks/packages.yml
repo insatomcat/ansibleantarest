@@ -1,0 +1,84 @@
+---
+# Everything the package manager has to be told once, before the first install
+# of the run. Every other task in this repository then uses
+# ansible.builtin.package and stays family-agnostic.
+#
+# Tagged `always` by its include: a run limited to --tags antares_web still
+# installs packages, and would otherwise do it on an apt cache that has never
+# been refreshed or without EPEL.
+
+# ---------------------------------------------------------------------------
+#  Debian family
+# ---------------------------------------------------------------------------
+
+# The Ubuntu images run apt-daily and unattended-upgrades on boot, which holds
+# the dpkg lock for a few minutes; an install that meets it fails immediately
+# with "Could not get lock". Written into apt.conf.d rather than passed as the
+# `lock_timeout` of every single install task: it is one place instead of
+# fifteen, and it also covers the apt commands this playbook does not run
+# itself, unattended-upgrades included.
+- name: Make apt wait for the dpkg lock instead of failing
+  ansible.builtin.copy:
+    content: |
+      {{ ansible_managed | comment('c') }}
+      DPkg::Lock::Timeout "{{ apt_lock_timeout }}";
+    dest: /etc/apt/apt.conf.d/80-antares-lock-timeout
+    owner: root
+    group: root
+    mode: "0644"
+  when: ansible_os_family == 'Debian'
+
+# Once per run rather than once per install task. cache_valid_time keeps a
+# second play on the same machine from refreshing it again.
+- name: Refresh the apt package lists
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_os_family == 'Debian'
+
+# ---------------------------------------------------------------------------
+#  RedHat family
+#
+#  Two extra repositories, both of which EPEL itself documents as a pair:
+#    - CRB (CodeReady Builder, `crb` or ol9_codeready_builder depending on the
+#      rebuild) holds the -devel packages EPEL builds against,
+#    - EPEL holds htop, fail2ban and certbot, none of which RHEL ships.
+#  OpenHPC, on a Slurm machine, needs both as well.
+# ---------------------------------------------------------------------------
+
+- name: Install the dnf plugins
+  ansible.builtin.dnf:
+    name: dnf-plugins-core
+    state: present
+  when: ansible_os_family == 'RedHat'
+
+- name: List the repositories currently enabled
+  ansible.builtin.command: dnf repolist --enabled
+  register: common_dnf_repolist
+  changed_when: false
+  check_mode: false
+  when: ansible_os_family == 'RedHat'
+
+# `dnf config-manager` rather than a repo file of our own: the repository is
+# already defined by the distribution, merely disabled, and rewriting its
+# definition would fork it from whatever the next distribution update ships.
+- name: Enable the CodeReady Builder repository
+  ansible.builtin.command: "dnf config-manager --set-enabled {{ common_crb_repo }}"
+  when:
+    - ansible_os_family == 'RedHat'
+    - common_crb_repo | length > 0
+    - common_crb_repo not in common_dnf_repolist.stdout
+  changed_when: true
+
+- name: Enable EPEL
+  ansible.builtin.dnf:
+    name: "{{ common_epel_release }}"
+    state: present
+    # The EPEL release package carries the key its own repository is signed
+    # with, so on the run that installs it there is nothing to verify against
+    # yet. Only reached on plain RHEL, where it is fetched by URL; the rebuilds
+    # ship it in a repository that is already trusted.
+    disable_gpg_check: "{{ common_epel_release is search('://') }}"
+  when:
+    - ansible_os_family == 'RedHat'
+    - common_epel_release | length > 0

@@ -1,11 +1,19 @@
 ---
 - name: Install the NFS server
-  ansible.builtin.apt:
-    name:
-      - nfs-kernel-server
-      - nfs-common
+  ansible.builtin.package:
+    name: "{{ nfs_server_packages }}"
     state: present
-    lock_timeout: "{{ apt_lock_timeout }}"
+
+# With SELinux enforcing, an export is read-only whatever /etc/exports says
+# unless the directory carries public_content_rw_t or this boolean is on.
+# /home is home_root_t and stays that way - relabelling the shared home would
+# be a far bigger hammer than allowing the export.
+- name: Allow SELinux to export the shared home read-write
+  ansible.posix.seboolean:
+    name: nfs_export_all_rw
+    state: true
+    persistent: true
+  when: (ansible_facts.selinux.status | default('disabled')) == 'enabled'
 
 - name: Export the shared home
   ansible.builtin.lineinfile:

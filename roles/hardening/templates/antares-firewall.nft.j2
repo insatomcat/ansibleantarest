@@ -2,9 +2,9 @@
 {{ ansible_managed | comment }}
 #
 # Loaded by {{ hardening_firewall_service }}.service, and by nothing else:
-# /etc/nftables.conf is left alone on purpose, since what Debian ships in it
-# starts with `flush ruleset`, which would also wipe the rules netavark writes
-# for the containers.
+# /etc/nftables.conf is left alone on purpose, since what both families ship in
+# it starts with `flush ruleset`, which would also wipe the rules netavark
+# writes for the containers.
 #
 # The add/delete pair below is the idiom that makes the file reloadable: the
 # table is created if it is missing, then dropped, then rebuilt, all in one

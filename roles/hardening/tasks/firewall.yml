@@ -10,12 +10,9 @@
 # 127.0.0.1 in their units.
 
 - name: Install nftables
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name: nftables
     state: present
-    update_cache: true
-    cache_valid_time: 3600
-    lock_timeout: "{{ apt_lock_timeout }}"
   when: hardening_firewall_enabled | bool
 
 - name: Create the ruleset directory

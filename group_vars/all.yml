@@ -42,24 +42,44 @@ antares_home: "/home/{{ antares_user }}"
 # ---------------------------------------------------------------------------
 #  Distributions
 #
-#  Everything here goes through apt, so the playbook covers the Debian family.
-#  The package names, the systemd unit names and /etc/slurm are identical on
-#  Debian 12/13 and Ubuntu 22.04/24.04, and the Docker repository is derived
-#  from the facts of the target.
+#  Two families are supported: Debian (Debian and Ubuntu, apt) and RedHat
+#  (Oracle Linux and the other RHEL rebuilds, dnf). Package names, service
+#  names and a handful of habits differ between the two; everything that does
+#  is resolved from `ansible_os_family`, either here or in the defaults of the
+#  role concerned, so a role never carries the same task twice.
 #
-#  One caveat: the Slurm version differs between releases (23.11 on Ubuntu
-#  24.04, 24.11 on Debian 13) and the daemons only interoperate across a
-#  couple of majors, so a single cluster must run a single distribution.
+#  What a RHEL-compatible target additionally needs, and what the playbook
+#  therefore does for it:
+#    - EPEL and CRB, for htop, fail2ban, certbot and the Slurm build below,
+#    - SELinux, which is enforcing out of the box: the bind mounts of the
+#      containers are labelled and the NFS booleans are set,
+#    - firewalld, which is enabled out of the box and would drop the traffic
+#      this deployment expects: see the hardening section at the bottom,
+#    - Slurm, which no EL 9 repository ships: it comes from OpenHPC, see
+#      slurm_repo below.
+#
+#  One caveat, on both families: the Slurm version differs between releases
+#  (23.11 on Ubuntu 24.04, 24.11 on Debian 13, whatever OpenHPC currently
+#  ships on EL 9) and the daemons only interoperate across a couple of majors,
+#  so a single cluster must run a single distribution.
 # ---------------------------------------------------------------------------
 supported_distros:
   - "Debian 12"
   - "Debian 13"
   - "Ubuntu 22"
   - "Ubuntu 24"
+  - "OracleLinux 9"
+  - "RedHat 9"
+  - "Rocky 9"
+  - "AlmaLinux 9"
+  - "CentOS 9"
 distro_check_enabled: true
 
 # The Ubuntu images run apt-daily and unattended-upgrades on boot, which holds
-# the dpkg lock for a few minutes. Wait for it instead of failing.
+# the dpkg lock for a few minutes. Rather than passing this to every single
+# install task, the common role writes it into apt.conf.d, where it also covers
+# the apt commands this playbook does not run itself. Debian family only; dnf
+# takes its own lock and waits by itself.
 apt_lock_timeout: 300
 
 # ---------------------------------------------------------------------------
@@ -82,8 +102,20 @@ slurm_enabled: true
 #  archive: `antares-<major>.<minor>-solver` up to 8.x, `antares-solver` from
 #  9.x on.
 #  Releases: https://github.com/AntaresSimulatorTeam/Antares_Simulator/releases
+#
+#  `antares_solver_os` picks which build of a release is downloaded, and that
+#  is not cosmetic: the Ubuntu 22.04 build is linked against glibc 2.35 and
+#  does not start on EL 9, which ships 2.34. The project also publishes an
+#  Oracle Linux 8 build, whose glibc 2.28 runs on every EL 9 rebuild, so the
+#  default follows the family of the target.
+#
+#  On a Slurm deployment the solvers are installed twice: on the Antares-Web
+#  machine for the local launcher, and in the shared /home for the cluster.
+#  Each side resolves this against its own facts, so a Debian web server
+#  driving an Oracle Linux cluster gets the right binary on both.
 # ---------------------------------------------------------------------------
-antares_solver_os: "Ubuntu-22.04"
+antares_solver_os: >-
+  {{ 'OracleServer-8.10' if ansible_os_family == 'RedHat' else 'Ubuntu-22.04' }}
 antares_solver_base_url: "https://github.com/AntaresSimulatorTeam/Antares_Simulator/releases/download"
 antares_solvers:
   - version: "8.8.17"
@@ -227,8 +259,28 @@ container_cmd: /usr/bin/podman
 
 # Images are always written fully qualified: Debian and Ubuntu ship no
 # unqualified-search-registries, so a short name cannot be resolved and podman
-# refuses rather than guessing a registry.
+# refuses rather than guessing a registry. The RHEL rebuilds do ship one, and
+# it lists Red Hat's registries before Docker Hub, so a short name there would
+# resolve somewhere else entirely. Fully qualified is the only spelling that
+# means the same thing on both.
 container_registry: docker.io/library
+
+# Mount options appended to every bind mount of every container.
+#
+# On a machine with SELinux enforcing - which is every RHEL rebuild out of the
+# box - a bind mount carries the label of the host directory, and a container
+# is not allowed to read it: the process is container_t and the directory is
+# var_t or home_root_t. `z` relabels the host directory container_file_t, the
+# shared flavour of the two, which is the one that matters here because
+# several containers mount the same directories (the backend and the celery
+# worker share the workspaces, the matrix store and the logs). The private
+# flavour `Z` stamps a per-container category on them instead, so the second
+# container to start would lose access to what the first one relabelled.
+#
+# Empty on a machine without SELinux, where the flag would be a no-op that
+# only makes the units harder to read.
+container_volume_opts: >-
+  {{ ',z' if (ansible_facts.selinux.status | default('disabled')) == 'enabled' else '' }}
 
 # Podman prefixes images built locally with `localhost/`. Both forms resolve
 # for a local lookup, but the explicit one keeps podman from ever reaching out
@@ -240,6 +292,23 @@ container_local_prefix: localhost
 # ---------------------------------------------------------------------------
 slurm_cluster_name: antares
 slurm_partition: antares
+
+# Where the Slurm packages come from.
+#
+#   distro  : the distribution ships them. True on Debian and Ubuntu
+#             (slurm-wlm), false on every EL 9 rebuild: neither the base
+#             repositories nor EPEL carry Slurm any more.
+#   openhpc : the OpenHPC 3 repositories, which package Slurm for EL 9 and are
+#             what the HPC world actually uses there. The package names then
+#             carry an -ohpc suffix, and /etc/slurm, the systemd units and the
+#             slurm account are the same as everywhere else, so nothing beyond
+#             the names changes.
+#
+# The default follows the family. Point slurm_openhpc_release at another
+# release rpm to pin a different OpenHPC version, or set this to `distro` on a
+# RedHat machine whose Slurm you install yourself.
+slurm_repo: "{{ 'openhpc' if ansible_os_family == 'RedHat' else 'distro' }}"
+slurm_openhpc_release: "http://repos.openhpc.community/OpenHPC/3/EL_9/x86_64/ohpc-release-3-1.el9.x86_64.rpm"
 
 # Paths and system account used by the Slurm daemons. Defined here rather
 # than in the roles because several plays need them.
@@ -308,12 +377,24 @@ manage_hostname: false
 #    ssh        : no password authentication (the role checks your key is in
 #                 place first and stops rather than lock you out), no root
 #                 password login, a shorter grace time.
-#    updates    : unattended-upgrades on the security pocket, without the
-#                 automatic reboot.
+#    updates    : security updates that install themselves, without the
+#                 automatic reboot. unattended-upgrades on the Debian family,
+#                 dnf-automatic on the RedHat one.
 #
 #  Turning the firewall on is the one that can cut you off, so read what it
 #  opens above. It never closes the port you are connected on, and the play
 #  refuses to run if it cannot work out which one that is.
+#
+#  On a RHEL rebuild there is already a firewall running: firewalld, enabled by
+#  the installer, dropping everything but SSH. Two packet filters that have to
+#  agree is exactly the situation the comment above warns about, so the role
+#  picks one rather than leaving both in place:
+#    - with hardening_firewall_enabled on, firewalld is stopped, disabled and
+#      masked, and the nftables table below is the whole filtering policy;
+#    - with it off, firewalld stays in charge and the role opens in it what the
+#      nftables table would have opened - the interface on an antares_web
+#      machine, and the other machines of the inventory as a trusted source.
+#  Set hardening_manage_firewalld to false to be left alone with it.
 # ---------------------------------------------------------------------------
 hardening_enabled: true
 

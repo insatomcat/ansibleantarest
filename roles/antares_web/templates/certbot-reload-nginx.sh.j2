@@ -9,6 +9,16 @@
 # in flight. Should the container be gone or the reload fail, fall back to the
 # unit, which is also what puts the stack back if something is wrong.
 set -eu
+{% if antarest_tls_selinux | bool %}
+
+# A renewal writes brand new files under /etc/letsencrypt/archive, and they get
+# the label the policy says they should have, cert_t - not the container_file_t
+# the nginx container is allowed to read. The playbook has recorded the right
+# context for this tree with semanage, so restoring it here is enough; without
+# this the reload below succeeds and nginx then fails to read the certificate
+# it was just handed.
+restorecon -R /etc/letsencrypt || true
+{% endif %}
 
 if {{ container_cmd }} exec {{ antarest_nginx_container }} nginx -s reload; then
     exit 0

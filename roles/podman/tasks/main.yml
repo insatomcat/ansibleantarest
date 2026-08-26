@@ -1,11 +1,8 @@
 ---
 - name: Install podman
-  ansible.builtin.apt:
+  ansible.builtin.package:
     name: "{{ podman_packages if podman_install_docker_shim | bool else podman_packages | difference(['podman-docker']) }}"
     state: present
-    update_cache: true
-    cache_valid_time: 3600
-    lock_timeout: "{{ apt_lock_timeout }}"
 
 # `podman --version` prints "podman version 5.4.2" on one line. Deliberately
 # not `podman version --format {{ ".Client.Version" }}`: the Go template braces
@@ -25,7 +22,8 @@
     fail_msg: >-
       "{{ podman_version.stdout | trim }}" on {{ inventory_hostname }} is too
       old: the deployment is driven by quadlet units, which need podman 4.4 or
-      later. Debian 13 ships 5.x and Ubuntu 24.04 ships 4.9.
+      later. Debian 13 ships 5.x, Ubuntu 24.04 ships 4.9, and EL 9 has been on
+      4.4 or later since 9.2.
     quiet: true
 
 # Checked rather than assumed: the whole deployment resolves containers by name
@@ -46,8 +44,9 @@
       podman reports no DNS backend on {{ inventory_hostname }}, so containers
       could not resolve each other by name and the backend would never reach
       postgresql or redis. That binary ships in the aardvark-dns package, which
-      podman merely *recommends*, so it is absent from any machine installed
-      with --no-install-recommends. Check that the install above pulled it in.
+      podman merely *recommends* on the Debian family, so it is absent from any
+      machine installed with --no-install-recommends. Check that the install
+      above pulled it in.
     quiet: true
 
 - name: Create the registry configuration directory
@@ -57,7 +56,11 @@
     owner: root
     group: root
     mode: "0755"
+  when: podman_write_unqualified_registries | bool
 
+# Debian family only, see the default: the RHEL rebuilds already ship an
+# unqualified-search-registries list, and replacing it from here would quietly
+# reorder which registry a short name resolves to on that machine.
 - name: Allow short image names to resolve to Docker Hub
   ansible.builtin.template:
     src: registries-unqualified.conf.j2
@@ -65,6 +68,7 @@
     owner: root
     group: root
     mode: "0644"
+  when: podman_write_unqualified_registries | bool
 
 - name: Create the quadlet unit directory
   ansible.builtin.file:

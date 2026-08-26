@@ -1,34 +1,17 @@
 ---
-# The distribution ships /etc/apt/apt.conf.d/50unattended-upgrades with an
-# origins list that only covers the security pocket, and it is left untouched:
-# this turns the mechanism on and decides about the reboot, nothing else.
+# Security updates that install themselves. The two families have different
+# machinery for it - unattended-upgrades and dnf-automatic - but the same
+# policy: the security pocket only, and no automatic reboot.
 
-- name: Install unattended-upgrades
-  ansible.builtin.apt:
+- name: Install the unattended update mechanism
+  ansible.builtin.package:
     name: "{{ hardening_unattended_packages }}"
     state: present
-    update_cache: true
-    cache_valid_time: 3600
-    lock_timeout: "{{ apt_lock_timeout }}"
 
-- name: Enable the periodic security upgrades
-  ansible.builtin.template:
-    src: 20auto-upgrades.j2
-    dest: /etc/apt/apt.conf.d/20auto-upgrades
-    owner: root
-    group: root
-    mode: "0644"
+- name: Configure unattended-upgrades
+  ansible.builtin.include_tasks: updates_debian.yml
+  when: ansible_os_family == 'Debian'
 
-- name: Decide about the automatic reboot
-  ansible.builtin.template:
-    src: 52-antares-unattended-upgrades.j2
-    dest: /etc/apt/apt.conf.d/52-antares-unattended-upgrades
-    owner: root
-    group: root
-    mode: "0644"
-
-# apt.conf syntax errors take *every* apt command down with them, including the
-# next `apt install` of this very playbook, so the parser gets asked first.
-- name: Check apt still parses its configuration
-  ansible.builtin.command: apt-config dump
-  changed_when: false
+- name: Configure dnf-automatic
+  ansible.builtin.include_tasks: updates_redhat.yml
+  when: ansible_os_family == 'RedHat'
