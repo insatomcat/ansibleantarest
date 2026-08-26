@@ -59,6 +59,50 @@ antarest_service_name: antares-web
 # heavy lifting happens in the solver, not here.
 antarest_gunicorn_workers: 4
 
+# ---------------------------------------------------------------------------
+#  Background maintenance tasks
+#
+#  Scheduled by the antarest-celery-beat container and executed by
+#  antarest-celery-worker. Eight periodic jobs: the watcher scan, the matrix,
+#  blob, variable-view and task collectors, the auto archiver and the two disk
+#  usage reports. This replaces the `watcher` and `matrix_gc` singleton
+#  containers of the upstream compose file, which covered two of the eight.
+#
+#  Intervals are not exposed here: the upstream defaults (a scan every 15
+#  minutes, the matrix GC hourly, the blob GC daily) are sensible, and every
+#  `*_sleeping_time` of docs/configuration.md can still be added to
+#  config.prod.yaml.j2 if a deployment needs its own.
+# ---------------------------------------------------------------------------
+
+# `solo` runs one task at a time in the worker process itself. See the unit for
+# why `prefork` is not simply a matter of raising the concurrency: the worker
+# builds its database engine before celery would fork.
+antarest_celery_pool: solo
+antarest_celery_concurrency: 1
+
+# Working directory of the beat container, holding its `celerybeat-schedule`
+# state file. A path inside the container, bind-mounted from
+# antarest_data_dir/celerybeat.
+antarest_celerybeat_dir: /celerybeat
+
+# What the collectors are allowed to delete. Upstream defaults all four to
+# false, i.e. destructive from the first run; this deployment starts them in
+# dry run, where they log what they would delete and delete nothing. Read a few
+# cycles in `journalctl -u antarest-celery-worker` before turning one off.
+#
+# Nothing has ever been reclaimed on a deployment that ran the upstream compose
+# file, so the first real run of the matrix and blob collectors on an old
+# instance has a lot of catching up to do.
+antarest_matrix_gc_dry_run: true
+antarest_blob_gc_dry_run: true
+antarest_variable_view_gc_dry_run: true
+
+# The auto archiver is not a collector: it moves studies untouched for
+# `auto_archive_threshold_days` (60 upstream) into the archive directory, which
+# is visible to users. Left in dry run so that turning the maintenance stack on
+# does not silently archive half the studies of an existing instance.
+antarest_auto_archive_dry_run: true
+
 # The ports the interface is published on (antarest_http_port,
 # antarest_https_port) live in group_vars/all.yml, next to the TLS settings:
 # the hardening role has to open them in the firewall, and role defaults are

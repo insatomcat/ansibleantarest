@@ -1,0 +1,49 @@
+{{ ansible_managed | comment }}
+#
+# Executes the maintenance tasks that antarest-celery-beat schedules: the
+# watcher scan, the matrix / blob / variable-view collectors, the auto
+# archiver, the task GC and the two disk usage reports. Same image as the
+# backend, started with the `celery-worker` argument of scripts/start.sh.
+#
+# This container and the beat next to it replace the `watcher` and `matrix_gc`
+# ones the upstream compose file still declares. Those two are IService
+# singletons, described upstream as the fallback for non-Celery environments
+# (the desktop build), and they cover two of the eight periodic tasks. Celery
+# is the deployment schema the project favours, see
+# https://github.com/AntaresSimulatorTeam/AntaREST/pull/3360.
+#
+# Never run both at once: two watchers would scan the workspaces twice.
+
+[Unit]
+Description=Antares-Web maintenance worker (celery)
+Requires=postgresql.service redis.service
+After=postgresql.service redis.service
+PartOf={{ antarest_service_name }}.target
+
+[Container]
+ContainerName=antarest-celery-worker
+Image={{ antarest_image }}
+Network={{ antarest_service_name }}.network
+User={{ antares_uid }}:{{ antares_gid }}
+# The broker and the result backend are derived by the application from the
+# `redis` section of config.prod.yaml, on database 1 (the event bus uses 0), so
+# there is nothing to point at a broker here.
+#
+# `solo` is not a conservative default, it is the correct one here: the worker
+# builds its SQLAlchemy engine in the worker_init signal, i.e. before celery
+# would fork its children in the `prefork` pool, and forked processes would then
+# share the same database sockets. The maintenance tasks are a handful of
+# periodic jobs, none of which needs parallelism.
+Environment=CELERY_POOL={{ antarest_celery_pool }}
+Environment=CELERY_CONCURRENCY={{ antarest_celery_concurrency }}
+{% for volume in antarest_shared_volumes %}
+Volume={{ volume }}
+{% endfor %}
+Exec=celery-worker
+
+[Service]
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy={{ antarest_service_name }}.target
