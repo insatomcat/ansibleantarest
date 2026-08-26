@@ -1,0 +1,154 @@
+---
+# ===========================================================================
+#  Example inventory: one VM running Antares-Web, no Slurm cluster.
+#
+#  Build everything on the machine itself (simplest, needs Internet and a few
+#  GB of RAM there):
+#
+#      ansible-playbook -i inventory/antares-web.example.yml site.yml -K
+#
+#  Or deploy artefacts already produced by build.yml, which is what makes a
+#  destroy-and-replay loop bearable:
+#
+#      ansible-playbook -i inventory/antares-web.example.yml site.yml \
+#          -e antarest_image_source=archive -K
+#
+#  The interface then answers on http://<the machine>/ with admin / admin,
+#  which is the first thing to change (see antarest_admin_password below).
+#
+#  The machine needs nothing installed beyond an SSH server, Python 3 and an
+#  account with sudo. The play installs podman, creates the antares account,
+#  hardens sshd, clones AntaREST, builds or loads the image, renders the
+#  configuration and starts the stack as systemd units.
+#
+#  -K asks for the sudo password. Drop it if the account has NOPASSWD, or set
+#  ansible_become_password below (better: in an ansible-vault file).
+#
+#  The run prints three warnings, "Could not match supplied host pattern" for
+#  slurm, slurm_frontend and slurm_compute. That is site.yml looking for groups
+#  this inventory deliberately does not define; the cluster plays are skipped
+#  and nothing is wrong.
+#
+#  Note on precedence: everything written under a *host* overrides
+#  group_vars/all.yml, while a `vars:` block on a group does not (playbook
+#  group_vars outrank inventory group vars). So per-deployment settings belong
+#  where they are below, on the host. Anything shared by several machines goes
+#  in group_vars/all.yml instead.
+# ===========================================================================
+
+all:
+  children:
+
+    # The only group site.yml needs for a web-only deployment. Leaving the
+    # slurm groups out is half of what disables the cluster; slurm_enabled
+    # below is the other half, since it also decides which launchers the
+    # application is configured with.
+    antares_web:
+      hosts:
+
+        # Any name; it is what appears in the Ansible output.
+        antares-web:
+
+          # ---------------------------------------------------------------
+          #  Connection
+          # ---------------------------------------------------------------
+          ansible_host: 203.0.113.20
+          ansible_user: ubuntu           # or admin, or debian
+          # ansible_port: 22
+          # ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+          # ansible_become_password: "..."   # only if sudo asks for one
+
+          # ---------------------------------------------------------------
+          #  No cluster: studies run with the local solver, on this machine.
+          # ---------------------------------------------------------------
+          slurm_enabled: false
+
+          # ---------------------------------------------------------------
+          #  Secrets. Change all three before anything real runs on this.
+          #  The hardening role reports them while they hold these values, and
+          #  refuses to deploy if hardening_fail_on_default_secrets is on.
+          #
+          #  antarest_db_password is read only when the PostgreSQL data
+          #  directory is initialised: changing it later means clearing
+          #  /var/antares-web/data/db.
+          # ---------------------------------------------------------------
+          antarest_jwt_key: "secretkeytochange"
+          antarest_admin_password: "admin"
+          antarest_db_password: "somepass"
+          # hardening_fail_on_default_secrets: true
+
+          # ---------------------------------------------------------------
+          #  Version and where the image comes from
+          #
+          #  build   : the machine clones and builds. Self-contained, wants
+          #            Internet and about 4 GB of heap for the front-end.
+          #  archive : the machine loads what build.yml produced in
+          #            ./artifacts on the controller. Usually passed on the
+          #            command line rather than pinned here.
+          # ---------------------------------------------------------------
+          antarest_version: "v2.33.0"
+          antarest_image_source: build
+
+          # UID/GID of the antares account, baked into the image. Must be free
+          # on the machine; the play stops rather than reuse an existing one.
+          antares_uid: 9000
+          antares_gid: 9000
+
+          # ---------------------------------------------------------------
+          #  Interface
+          # ---------------------------------------------------------------
+          antarest_http_port: 80
+          # antarest_https_port: 443
+
+          # Gunicorn workers in the backend container. The upstream default is
+          # (2 * cores) + 1, which on a large machine means dozens of processes
+          # each loading the whole application.
+          # antarest_gunicorn_workers: 4
+
+          # A database web UI next to Antares-Web, bound on 127.0.0.1:8080 and
+          # reached with `ssh -L 8080:127.0.0.1:8080 <this machine>`.
+          # antarest_enable_adminer: false
+
+          # ---------------------------------------------------------------
+          #  TLS. Off here, so the interface answers on plain http.
+          #
+          #  letsencrypt needs the domain to resolve to this machine and port
+          #  80 reachable from the internet: the stack's own nginx answers the
+          #  http-01 challenge, and certbot.timer renews without downtime.
+          #  selfsigned encrypts and makes every browser say so; manual takes
+          #  a certificate you copied yourself.
+          # ---------------------------------------------------------------
+          antarest_tls_enabled: false
+          # antarest_tls_domain: antares.example.org
+          # antarest_tls_provider: letsencrypt     # or selfsigned, or manual
+          # antarest_tls_email: ops@example.org
+          # antarest_tls_staging: true             # while debugging the ACME flow
+
+          # ---------------------------------------------------------------
+          #  Hardening. All on except the firewall, which duplicates what a
+          #  cloud security group already does. Turn it on for a machine with
+          #  nothing in front of it: it opens the SSH port sshd actually
+          #  listens on, plus the interface ports above, and drops the rest.
+          # ---------------------------------------------------------------
+          hardening_enabled: true
+          hardening_firewall_enabled: false
+          # hardening_fail2ban_enabled: true
+          # hardening_ssh_enabled: true
+          # hardening_unattended_upgrades: true
+
+          # ---------------------------------------------------------------
+          #  Background maintenance tasks (celery beat + celery worker)
+          #
+          #  The collectors start in dry run: they log what they would delete
+          #  and delete nothing. Read a few cycles in
+          #  `journalctl -u antarest-celery-worker` before switching one off.
+          #  The auto archiver is the one to be careful with, it moves studies
+          #  untouched for 60 days into the archive directory.
+          # ---------------------------------------------------------------
+          # antarest_matrix_gc_dry_run: true
+          # antarest_blob_gc_dry_run: true
+          # antarest_variable_view_gc_dry_run: true
+          # antarest_auto_archive_dry_run: true
+
+          # The solver list (antares_solvers, antares_solver_os) lives in
+          # group_vars/all.yml, shared with build.yml.
