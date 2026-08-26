@@ -46,6 +46,15 @@
     name: postgresql.service
     state: started
 
+# postgresql.service pulls the network up, which is when podman1 appears.
+# firewalld has to be told about that bridge before anything on the network
+# tries to resolve `postgresql` (the next two tasks).
+- name: Let firewalld accept DNS on the podman bridge
+  ansible.builtin.include_role:
+    name: podman
+    tasks_from: firewalld.yml
+  when: ansible_facts['os_family'] == 'RedHat'
+
 # postgresql publishes no port on the host, it is only reachable on the podman
 # network, so readiness has to be asked from inside the container.
 - name: Wait for PostgreSQL to accept connections

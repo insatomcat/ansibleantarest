@@ -91,6 +91,12 @@
     state: started
     daemon_reload: true
 
+- name: Let firewalld accept DNS on the podman bridge
+  ansible.builtin.include_role:
+    name: podman
+    tasks_from: firewalld.yml
+  when: ansible_facts['os_family'] == 'RedHat'
+
 - name: Restart the accounting database after a change
   ansible.builtin.systemd:
     name: slurmdb.target

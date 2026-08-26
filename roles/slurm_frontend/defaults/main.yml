@@ -4,13 +4,13 @@
 slurm_controller_packages: "{{ _slurm_controller_packages_by_repo[slurm_repo] }}"
 _slurm_controller_packages_by_repo:
   distro: >-
-    {{ ['slurmctld'] if ansible_os_family == 'Debian' else ['slurm-slurmctld'] }}
+    {{ ['slurmctld'] if ansible_facts['os_family'] == 'Debian' else ['slurm-slurmctld'] }}
   openhpc:
     - slurm-slurmctld-ohpc
 
 slurmdbd_packages: "{{ _slurmdbd_packages_by_repo[slurm_repo] }}"
 _slurmdbd_packages_by_repo:
   distro: >-
-    {{ ['slurmdbd'] if ansible_os_family == 'Debian' else ['slurm-slurmdbd'] }}
+    {{ ['slurmdbd'] if ansible_facts['os_family'] == 'Debian' else ['slurm-slurmdbd'] }}
   openhpc:
     - slurm-slurmdbd-ohpc

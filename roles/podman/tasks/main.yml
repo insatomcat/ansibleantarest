@@ -94,3 +94,11 @@
       {{ inventory_hostname }}, so the quadlet units would never be turned into
       services. It ships with the podman package; check the install above.
     quiet: true
+
+# aardvark-dns and PublishPort both need firewalld to treat the podman bridge
+# as trusted. The nftables table does that with `iifname "podman*"`. Here the
+# interfaces may not exist yet; migrate.yml and slurmdbd.yml call the same
+# tasks again once the network is up.
+- name: Allow container traffic through firewalld
+  ansible.builtin.include_tasks: firewalld.yml
+  when: ansible_facts['os_family'] == 'RedHat'

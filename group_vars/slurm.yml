@@ -3,18 +3,18 @@
 # Override per host in the inventory when the fact points at the wrong
 # interface.
 slurm_node_name: "{{ inventory_hostname.split('.')[0] }}"
-slurm_node_ip: "{{ ansible_default_ipv4.address | default(ansible_host) }}"
+slurm_node_ip: "{{ ansible_facts['default_ipv4']['address'] | default(ansible_host) }}"
 
 # Hardware description pushed into slurm.conf. Auto-detected from facts;
 # override per host if the facts are wrong (e.g. hyperthreading disabled in
 # the BIOS but still advertised).
-slurm_node_cpus: "{{ ansible_processor_vcpus }}"
-slurm_node_sockets: "{{ ansible_processor_count }}"
-slurm_node_cores_per_socket: "{{ ansible_processor_cores }}"
+slurm_node_cpus: "{{ ansible_facts['processor_vcpus'] }}"
+slurm_node_sockets: "{{ ansible_facts['processor_count'] }}"
+slurm_node_cores_per_socket: "{{ ansible_facts['processor_cores'] }}"
 slurm_node_threads_per_core: >-
-  {{ [1, (ansible_processor_vcpus | int)
-         // ([1, (ansible_processor_count | int) * (ansible_processor_cores | int)] | max)] | max }}
+  {{ [1, (ansible_facts['processor_vcpus'] | int)
+         // ([1, (ansible_facts['processor_count'] | int) * (ansible_facts['processor_cores'] | int)] | max)] | max }}
 
 # Slurm marks a node invalid when RealMemory is higher than what the node
 # really has, so keep a margin for the kernel.
-slurm_node_real_memory: "{{ (ansible_memtotal_mb | int * 0.95) | int }}"
+slurm_node_real_memory: "{{ (ansible_facts['memtotal_mb'] | int * 0.95) | int }}"
