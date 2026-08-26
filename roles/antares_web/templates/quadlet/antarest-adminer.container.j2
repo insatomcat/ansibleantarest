@@ -19,9 +19,5 @@ Network={{ antarest_service_name }}.network
 PublishPort=127.0.0.1:8080:8080
 Exec=php -S 0.0.0.0:8080 -t /var/www/html
 
-[Service]
-Restart=always
-RestartSec=5
-
 [Install]
 WantedBy={{ antarest_service_name }}.target
