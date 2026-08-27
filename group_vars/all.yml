@@ -431,11 +431,17 @@ slurm_frontend_ip: >-
 # Number of cores offered in the Antares-Web launch dialog for Slurm jobs.
 # The maximum is capped to the smallest compute node, otherwise jobs asking
 # for more cores than any node owns stay pending forever.
+#
+# A compute node whose facts are not around contributes nothing rather than
+# taking the play down: a --limit run on the web machine with an expired cache
+# leaves hostvars[node].ansible_facts empty. The default of `map(attribute=)`
+# is only substituted when it is truthy, hence 0 and the reject rather than
+# None: with None the undefined reaches `min` and the render fails.
 _slurm_compute_vcpus: >-
   {{ (groups['slurm_compute'] | default([]))
      | map('extract', hostvars)
-     | map(attribute='ansible_facts.processor_vcpus', default=None)
-     | select('integer') | list }}
+     | map(attribute='ansible_facts.processor_vcpus', default=0)
+     | select('integer') | reject('eq', 0) | list }}
 slurm_launcher_nb_cores_min: 1
 slurm_launcher_nb_cores_max: "{{ (_slurm_compute_vcpus | min) if (_slurm_compute_vcpus | length) > 0 else 2 }}"
 slurm_launcher_nb_cores_default: "{{ [2, slurm_launcher_nb_cores_max | int] | min }}"
