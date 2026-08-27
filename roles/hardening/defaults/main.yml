@@ -80,31 +80,17 @@ hardening_firewall_log_drops: false
 #  firewalld (RedHat family)
 #
 #  The RHEL rebuilds boot with firewalld enabled and a default zone that drops
-#  everything but SSH, so a deployment that ignored it would come up with an
-#  Antares-Web nobody can reach and a cluster whose NFS mount times out.
-#
-#  With hardening_firewall_enabled on, firewalld is taken out of the way and
-#  the nftables table above is the whole policy: two filters that both have to
-#  say yes is one place too many for a rule to go missing. With it off,
-#  firewalld keeps the machine and this opens in it what the nftables table
-#  would have opened.
+#  everything but SSH. Debian and Ubuntu do not. The default
+#  `hardening_firewall_enabled: false` is "no host firewall, the cloud
+#  security group is enough", so firewalld is stopped, disabled and masked
+#  the same way it is when our nftables table is on: two filters that have
+#  to agree is one place too many for a rule to go missing, and leaving
+#  firewalld up while claiming there is no firewall is how PublishPort and
+#  aardvark-dns died on Oracle Linux 9.
 #
 #  Set to false to be left alone with whatever firewalld is doing.
 # ---------------------------------------------------------------------------
 hardening_manage_firewalld: true
-
-# Zone the other machines of the inventory are added to when firewalld is the
-# one filtering. `trusted` accepts everything from those addresses, which is
-# what NFS, Slurm and the submission path need and what the nftables ruleset
-# grants them too.
-hardening_firewalld_peer_zone: trusted
-
-# Zone the public interface lives in. Empty: look it up with
-# `firewall-cmd --get-zone-of-interface` on the default IPv4 NIC, and fall
-# back to firewalld's default zone. Ports and masquerade have to land in that
-# zone, not an assumed `public`: an Oracle Linux cloud image often puts the
-# VNIC in a different one, and a rule added to the wrong zone is a closed port.
-hardening_firewalld_zone: ""
 
 # ---------------------------------------------------------------------------
 #  fail2ban

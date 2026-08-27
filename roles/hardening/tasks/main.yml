@@ -15,7 +15,9 @@
 # After our own ruleset rather than before, on purpose: when this is the task
 # that takes firewalld down, the nftables table is already loaded, so the
 # machine goes from one filtering policy to the other instead of spending the
-# length of the previous task with none.
+# length of the previous task with none. Also runs when the nftables table
+# is off: the default is "no host firewall", and on a rebuild that means
+# firewalld has to go too.
 - name: Settle what to do with firewalld
   ansible.builtin.include_tasks: firewalld.yml
   when:

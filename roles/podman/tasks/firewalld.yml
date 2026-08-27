@@ -1,6 +1,7 @@
 ---
 # Counterpart of `iifname "podman*"` in the nftables table, for when firewalld
-# is the one filtering (the default: hardening_firewall_enabled is off).
+# was left running (`hardening_manage_firewalld: false`). The default path
+# masks firewalld, and these tasks then no-op on `is-active`.
 #
 # Two things break without this, both of which look like "the container is up
 # and nothing can reach it":
