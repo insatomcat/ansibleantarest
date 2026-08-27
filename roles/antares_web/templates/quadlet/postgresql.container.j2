@@ -9,6 +9,9 @@
 [Unit]
 Description=Antares-Web PostgreSQL
 PartOf={{ antarest_service_name }}.target
+# Start budget for the Restart= below: five attempts, then the unit gives up.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 ContainerName=postgresql
@@ -20,6 +23,12 @@ Environment=POSTGRES_PASSWORD={{ antarest_db_password }}
 Environment=PGDATA=/var/lib/postgresql/data/pgdata
 Volume={{ antarest_data_dir }}/db:/var/lib/postgresql/data
 Exec=postgres -c log_statement=all -c log_destination=stderr
+
+[Service]
+# on-failure, not always: a container that keeps dying exhausts the budget in
+# [Unit] and stays `failed` instead of looping out of sight. See the README.
+Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy={{ antarest_service_name }}.target

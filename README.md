@@ -263,6 +263,10 @@ Configuration and data live outside the git checkout: changing `antarest_version
 
 There is no Docker daemon or compose file. Each container is defined by a quadlet unit in `/etc/containers/systemd`, which `podman-system-generator` converts to systemd services at each `daemon-reload`. systemd provides scheduling, restart behavior and logs.
 
+**Restart policy.** Every container unit carries `Restart=on-failure` with `RestartSec=10`, and a budget of `StartLimitBurst=5` over `StartLimitIntervalSec=300` in its `[Unit]` section. Quadlet copies both sections into the generated service verbatim, so this is plain systemd. `on-failure` rather than `always` on purpose: a container that keeps dying exhausts the budget in under a minute and the unit stays `failed`, where `systemctl --failed` shows it, instead of restarting forever with nobody the wiser.
+
+The retries are there for the transient case, and the boot is one. `Requires=`/`After=postgresql.service` is honoured by systemd, but readiness for a container unit comes from conmon: the unit is "started" when the container process is up, not when postgres accepts connections on 5432. `antarest` can therefore start too early after a host reboot, fail, and be restarted into a working stack ten seconds later. (Making `After=` mean what it looks like would take a `HealthCmd=` on postgresql plus `Notify=healthy`, which is podman 5.0 and later: EL 9 has it, Ubuntu 24.04 ships 4.9. Family-dependent units are what the rest of this playbook avoids, hence the retry.)
+
 Podman runs rootful: this matters because rootless podman remaps container UIDs via `/etc/subuid`. A container running as `antares_uid` would not produce host files owned by `antares_uid` when rootless, breaking UID coherence with the NFS `/home`.
 
 The stack is grouped by a `.target`, replacing `compose up/down`:

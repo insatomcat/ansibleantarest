@@ -12,6 +12,9 @@ Description=Antares-Web nginx
 Requires=antarest.service
 After=antarest.service
 PartOf={{ antarest_service_name }}.target
+# Start budget for the Restart= below: five attempts, then the unit gives up.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 ContainerName={{ antarest_nginx_container }}
@@ -29,6 +32,12 @@ Volume={{ volume }}
 # already podman's default here, but the jail stops seeing anything at all if
 # that default ever moves, so it is pinned rather than assumed.
 LogDriver=journald
+
+[Service]
+# on-failure, not always: a container that keeps dying exhausts the budget in
+# [Unit] and stays `failed` instead of looping out of sight. See the README.
+Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy={{ antarest_service_name }}.target
