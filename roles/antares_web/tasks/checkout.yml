@@ -53,11 +53,24 @@
 # spec covering it, and a hardened policy commonly grants NOPASSWD to root only
 # (`admin ALL=NOPASSWD:EXEC: ALL`), which makes sudo to any other user prompt for
 # a password and the play fail. Cloning as root works everywhere.
+#
+# chown rather than the file module with recurse: true, which does not shell
+# out to chown at all. It walks the tree in Python and stats, chowns and
+# re-stats every path one at a time, which measured 11.3s on the 3200-odd
+# paths of a fresh checkout, some 3.5ms each. That is the cheap case: with
+# antarest_image_source left at `build`, the target keeps webapp/node_modules
+# from the previous build, so the walk of an upgrade run also covers several
+# tens of thousands of files to reassert an ownership almost all of them
+# already have. chown does the same system calls in C, in under a second.
+#
+# Nothing is lost by it: the task is all-or-nothing and already gated on the
+# checkout having moved, so `file` could not report anything finer either. It
+# is skipped under --check, where a checkout that did not happen has nothing
+# to chown anyway.
 - name: Make sure the checkout belongs to the antares user
-  ansible.builtin.file:
-    path: "{{ antarest_dir }}"
-    state: directory
-    owner: "{{ antarest_checkout_owner }}"
-    group: "{{ antarest_checkout_group }}"
-    recurse: true
+  ansible.builtin.command:
+    cmd: >-
+      chown -R {{ antarest_checkout_owner }}:{{ antarest_checkout_group }}
+      {{ antarest_dir }}
   when: antarest_checkout.changed
+  changed_when: true
