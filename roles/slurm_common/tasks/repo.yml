@@ -9,6 +9,28 @@
 # and the slurm account exactly where every other distribution puts them. Only
 # the package names change, and those live in defaults/main.yml.
 
+# OpenHPC 3 publishes an EL_9 tree and nothing above it, so on an EL 10 node
+# the release rpm below would install a repository built for the previous major
+# and every slurm-ohpc package would then be missing or unresolvable. Said here,
+# where the reason is, rather than fifteen tasks later on "No package slurm-ohpc
+# available". The test is on the shipped default only: an operator who points
+# slurm_openhpc_release at another tree is taken at their word.
+- name: Check OpenHPC publishes packages for this release
+  ansible.builtin.assert:
+    that:
+      - slurm_openhpc_release is not search('/EL_9/')
+        or ansible_facts['distribution_major_version'] == '9'
+    fail_msg: >-
+      {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}
+      {{ ansible_facts['distribution_version'] }} and slurm_openhpc_release is
+      still the EL 9 one ({{ slurm_openhpc_release }}). OpenHPC 3 has no EL 10
+      tree, so there is nothing to install Slurm from on this machine. Keep the
+      Slurm nodes on EL 9, point slurm_openhpc_release at an EL 10 release rpm
+      once OpenHPC publishes one, or set slurm_repo to `distro` and install
+      Slurm yourself. The antares_web machine is not concerned: it reaches the
+      cluster over SSH and runs on either major.
+    quiet: true
+
 - name: Install the OpenHPC release package
   ansible.builtin.dnf:
     name: "{{ slurm_openhpc_release }}"

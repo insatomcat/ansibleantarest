@@ -91,15 +91,20 @@ supported_distros:      # group_vars/all.yml
   - "Ubuntu 22"
   - "Ubuntu 24"
   - "OracleLinux 9"
+  - "OracleLinux 10"
   - "RedHat 9"
+  - "RedHat 10"
   - "Rocky 9"
+  - "Rocky 10"
   - "AlmaLinux 9"
+  - "AlmaLinux 10"
   - "CentOS 9"
+  - "CentOS 10"
 ```
 
 The playbook aborts on unsupported distros and prints the variable to extend. A rebuild of a supported major that is not in the list is usually fine to add. Set `distro_check_enabled: false` to disable the check entirely.
 
-Podman comes from the distribution on both families and is recent enough everywhere: quadlet has been part of podman since 4.4, Debian 13 ships 5.x, Ubuntu 24.04 ships 4.9, and EL 9 has been on 4.4 or later since 9.2. The playbook checks the version and stops rather than writing units nothing would generate.
+Podman comes from the distribution on both families and is recent enough everywhere: quadlet has been part of podman since 4.4, Debian 13 ships 5.x, Ubuntu 24.04 ships 4.9, EL 9 has been on 4.4 or later since 9.2 and EL 10 ships 5.x. The playbook checks the version and stops rather than writing units nothing would generate.
 
 Important cluster note: use one distribution per cluster. Packaged Slurm versions differ (23.11 on Ubuntu 24.04, 24.11 on Debian 13, whatever OpenHPC currently ships on EL 9) and the daemons `slurmctld` / `slurmd` / `slurmdbd` interoperate only across certain major versions. The generated `slurm.conf` works for all of them, but do not mix a front-end on Debian 13 with compute nodes on Oracle Linux 9 in the same cluster. The `antares_web` machine is unaffected: it talks to the Slurm frontend only via SSH, so a Debian web server driving an Oracle Linux cluster is fine.
 
@@ -111,9 +116,9 @@ Everything below is done by the playbook. It is listed because it changes the ma
 
 | Topic | What happens |
 |---|---|
-| **Repositories** | The `common` role installs `dnf-plugins-core`, enables **CRB** (`ol9_codeready_builder` on Oracle Linux, `crb` on the other rebuilds) and **EPEL** (`ol9_developer_EPEL` on Oracle Linux, which the release package ships disabled, `epel` on the other rebuilds). Both are needed: `htop`, `fail2ban` and `certbot` come from EPEL, which is built against CRB. |
-| **Slurm** | No EL 9 repository ships Slurm, neither the base repositories nor EPEL. It comes from **OpenHPC 3** instead (`slurm_repo: openhpc`, release rpm in `slurm_openhpc_release`). Package names carry an `-ohpc` suffix; `/etc/slurm`, the systemd units and the `slurm` account are where they are everywhere else. Set `slurm_repo: distro` if you install Slurm yourself. |
-| **Solver binaries** | The Ubuntu 22.04 build of Antares Simulator is linked against glibc 2.35 and does not start on EL 9, which has 2.34. `antares_solver_os` therefore follows the family and picks the project's **Oracle Linux 8** build there. |
+| **Repositories** | The `common` role installs `dnf-plugins-core` (EL 10 is still dnf 4, 4.20 on Oracle Linux 10.1), enables **CRB** (`ol9_codeready_builder` / `ol10_codeready_builder` on Oracle Linux, `crb` on the other rebuilds) and **EPEL** (which Oracle's release package ships disabled, `epel` on the other rebuilds). Both are needed: `htop`, `fail2ban` and `certbot` come from EPEL, which is built against CRB. `common_epel_repo` is a pattern matched against `dnf repolist --all` rather than an id, because Oracle's carries the update level from EL 10 on (`ol9_developer_EPEL`, but `ol10_u1_developer_EPEL` on Oracle Linux 10.1). The run stops if it matches nothing: enabling a repository that does not exist is not an error for dnf, and the packages would go missing much later. |
+| **Slurm** | No EL repository ships Slurm, neither the base repositories nor EPEL. It comes from **OpenHPC 3** instead (`slurm_repo: openhpc`, release rpm in `slurm_openhpc_release`). Package names carry an `-ohpc` suffix; `/etc/slurm`, the systemd units and the `slurm` account are where they are everywhere else. Set `slurm_repo: distro` if you install Slurm yourself. **EL 10 has no OpenHPC tree**: OpenHPC 3 publishes for EL_9 and nothing above, so a Slurm node on EL 10 is refused by name rather than left to fail on a missing package. Keep the cluster on EL 9; the `antares_web` machine is free to run either. |
+| **Solver binaries** | The Ubuntu 22.04 build of Antares Simulator is linked against glibc 2.35 and does not start on EL 9, which has 2.34. `antares_solver_os` therefore follows the family and picks the project's **Oracle Linux 8** build there, which runs on EL 9 and EL 10 alike. |
 | **SELinux** | Left enforcing. Container bind mounts carry the `z` relabelling flag (`container_volume_opts`), the booleans `nfs_export_all_rw` and `use_nfs_home_dirs` are set on the NFS server and the clients, and the Let's Encrypt tree gets a `semanage fcontext` entry so that a renewal does not silently produce a certificate the nginx container cannot read. |
 | **firewalld** | Enabled out of the box on the RHEL rebuilds, SSH only. The default is no host firewall (the cloud security group is enough), so the role masks it. Turn `hardening_firewall_enabled` on for the nftables table instead. Set `hardening_manage_firewalld: false` to leave firewalld alone; the podman role then puts the `podman*` bridges in `trusted`, without which aardvark-dns and `PublishPort` are dropped. That covers what the containers publish and nothing else: the host services the machines use between themselves (NFS 2049, Slurm 6817-6819) are then yours to open in firewalld. |
 | **Unattended updates** | `dnf-automatic` with `upgrade_type = security` instead of `unattended-upgrades`, with the same policy: security updates only, no automatic reboot. |
@@ -501,5 +506,6 @@ Same idea for MariaDB on the Slurm frontend (use `mariadb-dump` and the `slurmdb
 - The Antares-Web login jail counts the 401s nginx logs. A brute force that spreads over many addresses, or one aimed at an endpoint other than the login, is not covered.
 - Migration from a Docker-based version of this playbook: the `slurm_frontend` role stops and removes the old `slurmdb.service` unit and its `docker-compose.yml` but does not touch the docker volume `slurmdb_data`: it contains accounting history. Reusing a live DB requires a `mariadb-dump` from the old volume and restoration into the podman volume `slurmdb-data`. On the web server, data under `/var/antares-web/data` are bind mounts and are reused as-is.
 - The NNI label patch modifies source before the build. The checkout is reset each run (`git force`), so the patch is reapplied every time; a build stamp (`deploy/.frontend-build-stamp`) prevents rebuilding the frontend if nothing changed. Changing `antarest_login_username_label` triggers a rebuild.
-- RHEL-compatible support targets the 9 series. Nothing here is specific to Oracle Linux beyond the names of the CRB and EPEL packages, so Rocky, Alma, CentOS Stream and RHEL itself follow the same path, but Oracle Linux 9 is the one the defaults are written for. EL 8 is not covered: its podman is too old for quadlet.
-- Slurm on EL 9 comes from OpenHPC, a third-party repository. It is the maintained answer there and what the HPC world runs, but it is one more upstream to follow: a major OpenHPC bump can move Slurm by several versions at once, which the "one distribution per cluster" rule above then applies to.
+- RHEL-compatible support covers the 9 and the 10 series. Nothing here is specific to Oracle Linux beyond the names of the CRB and EPEL packages, so Rocky, Alma, CentOS Stream and RHEL itself follow the same path, but Oracle Linux is the one the defaults are written for. EL 8 is not covered: its podman is too old for quadlet.
+- EL 10 runs the `antares_web` machine, not a Slurm node: OpenHPC 3 has no EL 10 tree, and the `slurm_common` role stops rather than installing an EL 9 repository on it. A cluster of EL 9 nodes driven by an EL 10 web server is a supported shape, an EL 10 cluster is not.
+- Slurm on EL comes from OpenHPC, a third-party repository. It is the maintained answer there and what the HPC world runs, but it is one more upstream to follow: a major OpenHPC bump can move Slurm by several versions at once, which the "one distribution per cluster" rule above then applies to.

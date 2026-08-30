@@ -57,10 +57,23 @@ _common_epel_release_by_distro:
   OracleLinux: "oracle-epel-release-el{{ ansible_facts['distribution_major_version'] }}"
   RedHat: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-{{ ansible_facts['distribution_major_version'] }}.noarch.rpm"
 
-# The repository that package declares. Oracle ships it disabled
-# (`ol9_developer_EPEL`); Fedora's epel-release enables `epel` on its own, and
-# the enable task is then a no-op. Set to an empty string to leave the
-# repositories alone.
+# The repository that package declares, as a *pattern* rather than an id: it is
+# matched against `dnf repolist --all` and the machine's own spelling is what
+# gets enabled, see tasks/packages.yml.
+#
+# A pattern because Oracle's id is not derivable from the release. On EL 9 it is
+# `ol9_developer_EPEL`; on EL 10 it carries the update level as well, and an
+# Oracle Linux 10.1 machine calls it `ol10_u1_developer_EPEL`. That level
+# follows what the oracle-epel-release package currently ships, not what the
+# machine is running, so writing it out here would go stale on the update that
+# renames it, in the silent direction: enabling a repository that does not
+# exist is not an error, it is a play that installs no htop, no fail2ban and no
+# certbot and only says so much later.
+#
+# Fedora's epel-release calls it `epel` on every release, and enables it
+# itself, so there the enable task is a no-op. An exact id is a valid pattern,
+# which is what an inventory overriding this should write. Set to an empty
+# string to leave the repositories alone.
 common_epel_repo: "{{ _common_epel_repo_by_distro[ansible_facts['distribution']] | default('epel') }}"
 _common_epel_repo_by_distro:
-  OracleLinux: "ol{{ ansible_facts['distribution_major_version'] }}_developer_EPEL"
+  OracleLinux: "ol{{ ansible_facts['distribution_major_version'] }}(?:_u[0-9]+)?_developer_EPEL"
