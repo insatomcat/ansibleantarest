@@ -41,6 +41,16 @@
     - antarest_pg_disk_major | length > 0
     - antarest_pg_image_major | length > 0
 
+# A container that died five times in a row exhausted the start budget the unit
+# declares, and systemd then refuses to start it again for as long as
+# StartLimitIntervalSec runs, with "start request repeated too quickly". The run
+# that fixes the cause would fail here, on the previous run's verdict, and say
+# nothing about what is actually wrong. reset-failed clears that; it exits 0 on
+# a unit that never failed, so it is not conditional on anything.
+- name: Clear a previous failure of the database unit
+  ansible.builtin.command: systemctl reset-failed postgresql.service
+  changed_when: false
+
 - name: Start the database before migrating
   ansible.builtin.systemd:
     name: postgresql.service
