@@ -1,0 +1,113 @@
+---
+# ===========================================================================
+#  Target half of the CI, used by the `deploy` matrix of
+#  .github/workflows/ci.yml.
+#
+#  The GitHub runner is the controller only. The `antares_web` machine is a
+#  throwaway virtual machine booted on the runner with QEMU/KVM from the
+#  cloud image of the distribution under test - Debian 13, Ubuntu 26.04,
+#  Oracle Linux 9 or 10, one job each. The artefacts built by the `build`
+#  job land in ./artifacts on the controller and site.yml ships them to the
+#  machine with `-e antarest_image_source=archive`.
+#
+#  What this buys over deploying on the runner itself, which is what CI did
+#  before: SELinux is enforcing, firewalld is installed and running, the
+#  kernel is the distribution's own (UEK on Oracle Linux), systemd owns
+#  PID 1 and podman runs on the target's own version. Those are exactly the
+#  paths that cannot be exercised from an Ubuntu runner, and they are where
+#  the EL-specific tasks of this playbook live.
+#
+#  The machine is reached over the port QEMU forwards from the host, and
+#  `ci-vm` is an /etc/hosts alias for 127.0.0.1 written by the workflow. The
+#  alias is deliberately not the literal address: ansible.posix.synchronize,
+#  which ships the archives, decides whether rsync needs SSH by testing the
+#  destination against ansible's LOCALHOST set (127.0.0.1, localhost, ::1).
+#  Written as the address it would conclude that both ends are the same
+#  machine, run a plain local rsync and drop the
+#  --rsync-path='sudo -u root rsync' that elevates on the far side.
+#
+#  The machine is destroyed with the job, so the play may harden its sshd,
+#  install fail2ban and enable unattended upgrades exactly as it would on a
+#  real VM. Nothing here weakens the deployment to make it fit CI.
+#
+#  Note on precedence, the same one the example inventories carry: settings
+#  written under a *host* override group_vars/all.yml, a `vars:` block on a
+#  group does not. Everything below therefore sits on the host.
+# ===========================================================================
+
+all:
+  hosts:
+
+    ci-vm:
+
+      # ---------------------------------------------------------------
+      #  Connection. The account and the key come from the cloud-init
+      #  seed the workflow builds; the key is the runner's own, generated
+      #  for the job. host_key_checking is already off in ansible.cfg,
+      #  which matters here: the host key is new on every run.
+      # ---------------------------------------------------------------
+      ansible_host: ci-vm
+      ansible_port: 2222
+      ansible_user: ansible
+      ansible_ssh_private_key_file: ~/.ssh/id_ed25519_ci
+
+      # ---------------------------------------------------------------
+      #  Ubuntu 26.04 is not in the shipped list: it is claimed for CI
+      #  only, which is what the preflight failure message tells you to
+      #  do, and it keeps the claim scoped here. The rest is the shipped
+      #  list, repeated because a host variable replaces it wholesale.
+      # ---------------------------------------------------------------
+      supported_distros:
+        - "Debian 12"
+        - "Debian 13"
+        - "Ubuntu 22"
+        - "Ubuntu 24"
+        - "OracleLinux 9"
+        - "OracleLinux 10"
+        - "RedHat 9"
+        - "RedHat 10"
+        - "Rocky 9"
+        - "Rocky 10"
+        - "AlmaLinux 9"
+        - "AlmaLinux 10"
+        - "CentOS 9"
+        - "CentOS 10"
+        - "Ubuntu 26"
+
+      # ---------------------------------------------------------------
+      #  One machine, no cluster: the studies would run with the local
+      #  launcher. The slurm groups are absent from this inventory, which
+      #  is the other half of the switch.
+      # ---------------------------------------------------------------
+      slurm_enabled: false
+
+      # ---------------------------------------------------------------
+      #  Not the shipped defaults, so the secrets check of the hardening
+      #  role has nothing to report and that path is exercised too. These
+      #  are public by construction: the machine is destroyed with the
+      #  job and nothing is ever reachable from outside the runner.
+      # ---------------------------------------------------------------
+      antarest_jwt_key: "ci-jwt-not-a-secret"
+      antarest_admin_password: "ci-admin-not-a-secret"
+      antarest_db_password: "ci-db-not-a-secret"
+
+      # ---------------------------------------------------------------
+      #  Left at the shipped default, which is what most deployments run,
+      #  so CI tests the configuration people actually get.
+      #
+      #  Turning it on is now a real test rather than a risk to the
+      #  runner: the machine is a VM whose SSH is a forwarded port, so a
+      #  ruleset that locks it out fails the job instead of killing the
+      #  agent. It filters the input hook only, trusts lo and the podman
+      #  bridges, and opens the SSH ports it reads from `sshd -T`. Both
+      #  the SSH the controller uses and the HTTP check on the forwarded
+      #  port arrive from QEMU's user-mode gateway on the machine's own
+      #  interface, so they go through the ruleset like real traffic.
+      # ---------------------------------------------------------------
+      hardening_firewall_enabled: false
+
+  children:
+
+    antares_web:
+      hosts:
+        ci-vm:
