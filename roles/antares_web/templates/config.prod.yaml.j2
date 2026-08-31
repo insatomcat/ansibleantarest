@@ -28,6 +28,18 @@ storage:
   # containers do not run as root.
   blobstore: /blobstore
 
+  # The same trap, one release later and worse: since 2.34 the loader creates
+  # storage.output.out_of_study.storage_dir while parsing the file, default
+  # included, and the default is the relative ./outputs. Every process reading
+  # this file dies with
+  # `PermissionError: [Errno 13] Permission denied: 'outputs'` before it starts,
+  # the schema migration included. Written absolute, onto a mount that exists.
+  # This deployment leaves default_storage_type alone, so the directory itself
+  # stays empty: outputs are written in the study tree.
+  output:
+    out_of_study:
+      storage_dir: /outputs
+
   # -------------------------------------------------------------------------
   # Background maintenance tasks
   #

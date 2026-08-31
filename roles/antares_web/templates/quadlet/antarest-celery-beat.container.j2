@@ -22,6 +22,10 @@ Image={{ antarest_image }}
 Network={{ antarest_service_name }}.network
 User={{ antares_uid }}:{{ antares_gid }}
 Volume={{ antarest_deploy_dir }}/config.prod.yaml:/resources/application.yaml:ro{{ container_volume_opts | trim }}
+# The beat reads the configuration and nothing else, but reading it is enough
+# to need this one: since 2.34 the loader creates the out-of-study output
+# directory as it parses, so a beat without the mount dies on start.
+Volume={{ antarest_data_dir }}/outputs:/outputs:rw{{ container_volume_opts | trim }}
 Volume={{ antarest_data_dir }}/celerybeat:{{ antarest_celerybeat_dir }}:rw{{ container_volume_opts | trim }}
 # Two podman flags instead of a plain Exec=, for one reason: celery beat keeps
 # the last run time of every task in a shelve file whose default name,
