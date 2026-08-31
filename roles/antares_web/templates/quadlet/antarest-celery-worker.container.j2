@@ -2,13 +2,14 @@
 #
 # Executes the maintenance tasks that antarest-celery-beat schedules: the
 # watcher scan, the matrix / blob / variable-view collectors, the auto
-# archiver, the task GC and the two disk usage reports. Same image as the
-# backend, started with the `celery-worker` argument of scripts/start.sh.
+# archiver, the task GC, the two disk usage reports and the launcher load
+# cache. Same image as the backend, started with the `celery-worker` argument
+# of scripts/start.sh.
 #
 # This container and the beat next to it replace the `watcher` and `matrix_gc`
 # ones the upstream compose file still declares. Those two are IService
 # singletons, described upstream as the fallback for non-Celery environments
-# (the desktop build), and they cover two of the eight periodic tasks. Celery
+# (the desktop build), and they cover two of the nine periodic tasks. Celery
 # is the deployment schema the project favours, see
 # https://github.com/AntaresSimulatorTeam/AntaREST/pull/3360.
 #
@@ -39,7 +40,7 @@ User={{ antares_uid }}:{{ antares_gid }}
 # periodic jobs, none of which needs parallelism.
 Environment=CELERY_POOL={{ antarest_celery_pool }}
 Environment=CELERY_CONCURRENCY={{ antarest_celery_concurrency }}
-{% for volume in antarest_shared_volumes %}
+{% for volume in antarest_worker_volumes %}
 Volume={{ volume }}
 {% endfor %}
 Exec=celery-worker

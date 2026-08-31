@@ -4,7 +4,7 @@
 # patch before building the web application.
 #
 # The file moved between releases (webapp/src/components/wrappers/
-# LoginWrapper.tsx up to 2.19, webapp/src/routes/login/index.tsx in 2.33), so
+# LoginWrapper.tsx up to 2.19, webapp/src/routes/login/index.tsx from 2.33), so
 # it is looked up by content rather than by path. An empty result simply means
 # upstream got rid of the label, and the patch turns into a no-op.
 - name: Locate the login form carrying the "NNI" label
