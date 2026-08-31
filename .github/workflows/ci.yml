@@ -9,8 +9,8 @@
 #
 #  The runner stays Ubuntu 26.04 and is only the controller and the builder.
 #  Every deployment happens inside a QEMU/KVM machine booted from the cloud
-#  image of the distribution under test, which is what makes Oracle Linux 9
-#  and 10 testable here at all: nested virtualisation is available on the
+#  image of the distribution under test, which is what makes the EL side
+#  testable here at all: nested virtualisation is available on the
 #  GitHub-hosted Linux x64 runners, so /dev/kvm is real and the guest runs at
 #  native speed.
 #
@@ -19,8 +19,16 @@
 #  the target, and the artefacts actually travelling over the network to a
 #  machine that is not the controller.
 #
-#  Adding a distribution is one entry in the `targets` job below, provided
-#  its cloud image reads a NoCloud seed - every image listed there does.
+#  Adding a distribution is one entry in the `targets` job below plus one
+#  option in the `only` input, provided its cloud image reads a NoCloud seed
+#  and boots on legacy BIOS - every image listed there does.
+#
+#  The images are downloaded on every run and not cached. Measured on the
+#  first green run: between 5 and 8 seconds each, 110 to 165 MB/s from all
+#  three mirrors. An actions/cache round trip does not beat that, and six
+#  base images would take half of the 10 GB a repository gets. The archives
+#  the deploy jobs consume are a different matter and do travel through the
+#  artefact store, once for all of them.
 #
 #  ubuntu-26.04 is a beta runner image. If it starts misbehaving, run the
 #  workflow by hand and pick ubuntu-24.04 in the dropdown; nothing else has
@@ -53,6 +61,8 @@ on:
           - ubuntu26
           - ol9
           - ol10
+          - centos9
+          - centos10
 
 # A full run takes tens of minutes; a new push makes the one in flight
 # pointless.
@@ -143,6 +153,16 @@ jobs:
               "name":  "ol10",
               "label": "Oracle Linux 10",
               "image": "https://yum.oracle.com/templates/OracleLinux/OL10/u1/x86_64/OL10U1_x86_64-kvm-b291.qcow2"
+            },
+            {
+              "name":  "centos9",
+              "label": "CentOS Stream 9",
+              "image": "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+            },
+            {
+              "name":  "centos10",
+              "label": "CentOS Stream 10",
+              "image": "https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-latest.x86_64.qcow2"
             }
           ]
           JSON
