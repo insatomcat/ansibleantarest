@@ -1,0 +1,120 @@
+---
+# ===========================================================================
+#  Cluster half of the CI, used by the `cluster` job of
+#  .github/workflows/ci.yml.
+#
+#  Five throwaway machines on one GitHub runner, which is the shape the
+#  reference procedure describes and the shape inventory/hosts.yml documents:
+#
+#      antares-web   192.168.77.11   the web application, podman, nginx
+#      slurm-front   192.168.77.12   slurmctld, slurmdbd, NFS server
+#      slurm-node-1  192.168.77.13   slurmd
+#      slurm-node-2  192.168.77.14   slurmd
+#      slurm-node-3  192.168.77.15   slurmd
+#
+#  They are QEMU/KVM guests on a bridge the workflow builds on the runner,
+#  each with its own kernel, its own systemd and its own address. That is
+#  what makes this a cluster test rather than a syntax test: the machines
+#  talk NFS, munge and Slurm to each other over a real network, and the
+#  runner sits on that network at 192.168.77.1 - a machine which is *not*
+#  in the inventory, therefore not in the trusted set of the firewall, and
+#  therefore the outside world as far as every ruleset here is concerned.
+#
+#  The inventory names are the guest host names, and that is not cosmetic:
+#  slurmd matches the machine's own `hostname -s` against the NodeName
+#  lines of slurm.conf, which are generated from these names.
+#
+#  Note on precedence, the same one the other inventories carry: settings
+#  written under a *host* override group_vars/all.yml, a `vars:` block on a
+#  group does not. Everything shared therefore sits on the hosts, through
+#  the YAML anchor below rather than copied five times.
+# ===========================================================================
+
+all:
+  hosts:
+
+    antares-web:
+
+      # ---------------------------------------------------------------
+      #  Everything the five machines have in common. A plain YAML merge
+      #  key: the values land as host variables, which is the only level
+      #  that outranks group_vars/all.yml.
+      # ---------------------------------------------------------------
+      <<: &ci_cluster_common
+
+        # Connection. The account and the key come from the cloud-init
+        # seed the workflow builds; the key is the runner's own, generated
+        # for the job. host_key_checking is already off in ansible.cfg,
+        # which matters here: the host keys are new on every run.
+        ansible_user: ansible
+        ansible_ssh_private_key_file: ~/.ssh/id_ed25519_ci
+
+        # On, and the point of the job. The five machines end up with
+        # three different rulesets - the web interface is published on one
+        # of them and on none of the others, NFS and slurmctld answer on
+        # the front-end alone, slurmd on the compute nodes alone - and
+        # verify.yml checks each of them from the runner, which no ruleset
+        # here trusts, and from the peers, which they all do.
+        hardening_firewall_enabled: true
+
+        # Not the shipped defaults, so the secrets check of the hardening
+        # role has nothing to report and that path is exercised too. These
+        # are public by construction: the machines are destroyed with the
+        # job and the network they sit on exists only inside the runner.
+        antarest_jwt_key: "ci-jwt-not-a-secret"
+        antarest_admin_password: "ci-admin-not-a-secret"
+        antarest_db_password: "ci-db-not-a-secret"
+        slurmdbd_db_password: "ci-slurmdb-not-a-secret"
+
+      # slurm_enabled is left alone: group_vars/all.yml already defaults it
+      # to true, which is what this inventory is for. supported_distros is
+      # left alone too, for as long as the cluster targets of the workflow
+      # are distributions the repository already claims - unlike the
+      # runner itself, see inventory/ci-build.yml.
+
+      ansible_host: 192.168.77.11
+
+      # Four gunicorn workers of the default formula in a machine this
+      # size would each load the whole application. Two is enough to still
+      # exercise the preforked path Redis is needed for.
+      antarest_gunicorn_workers: 2
+
+    slurm-front:
+      <<: *ci_cluster_common
+      ansible_host: 192.168.77.12
+
+      # The shipped 1G is sized for a real front-end; MariaDB would refuse
+      # to start with it inside a 2.5 GB machine sharing its memory with
+      # slurmctld, slurmdbd and nfsd.
+      slurmdbd_innodb_buffer_pool_size: "128M"
+
+    slurm-node-1:
+      <<: *ci_cluster_common
+      ansible_host: 192.168.77.13
+
+    slurm-node-2:
+      <<: *ci_cluster_common
+      ansible_host: 192.168.77.14
+
+    slurm-node-3:
+      <<: *ci_cluster_common
+      ansible_host: 192.168.77.15
+
+  children:
+
+    antares_web:
+      hosts:
+        antares-web:
+
+    slurm:
+      children:
+
+        slurm_frontend:
+          hosts:
+            slurm-front:
+
+        slurm_compute:
+          hosts:
+            slurm-node-1:
+            slurm-node-2:
+            slurm-node-3:

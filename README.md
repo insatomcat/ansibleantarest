@@ -449,6 +449,22 @@ ansible-playbook site.yml -e antarest_force_rebuild=true   # full rebuild
 
 `slurm.conf` is generated from facts of all compute nodes: avoid using `--limit` on a subset of `slurm_compute` unless you have fixed `slurm_node_*` variables in the inventory.
 
+## Checking a deployment
+
+`site.yml` asserts a lot while it runs, but only about the machine it is working on. What it cannot check is what exists once every machine is done, and what a machine looks like from somewhere that is not itself. That is `verify.yml`:
+
+```bash
+ansible-playbook verify.yml
+ansible-playbook verify.yml --tags firewall      # only the rulesets
+```
+
+It changes nothing beyond one marker file in the shared `/home`, which the last play removes, so it is safe against a production deployment. Two halves, each skipped where it does not apply (`slurm_enabled`, `hardening_firewall_enabled`):
+
+- **The cluster.** `slurmctld` is alive and sees every compute node of the inventory in a healthy state, the cluster is registered in the accounting database, the compute nodes really mount the front-end's `/home` (a marker written on one side and read on the other) and can execute the solvers installed in it, and a job submitted exactly the way the backend submits one - over SSH, with the key generated on the web machine, to the `antares` account of the front-end - runs on a compute node.
+- **The firewall.** The three rulesets a deployment produces, checked from both sides. Each port that matters is looked at twice: a daemon is really listening on it, and the controller still cannot reach it while the machines that need it can. **Run this from a machine that is not in the inventory**, which the controller normally is not: a machine of the deployment is in every ruleset's trusted set, and from there every "the world cannot reach this" check is a tautology.
+
+The same playbook runs in CI, on five virtual machines booted on one GitHub runner: see the `cluster` job of `.github/workflows/ci.yml` and `inventory/ci-cluster.yml`.
+
 ## Differences from the PDF
 
 The reference procedure dates from September 2025; several upstream changes have been made since then.

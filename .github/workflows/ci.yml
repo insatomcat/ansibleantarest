@@ -6,6 +6,8 @@
 #      syntax   -> the playbooks parse
 #      build    -> build.yml on the runner itself, artefacts uploaded
 #      deploy   -> one job per target: boot a VM, site.yml, curl, idempotence
+#      cluster  -> one job per target: boot five VMs on a bridge, site.yml,
+#                  verify.yml, idempotence
 #
 #  The runner stays Ubuntu 26.04 and is only the controller and the builder.
 #  Every deployment happens inside a QEMU/KVM machine booted from the cloud
@@ -19,9 +21,19 @@
 #  the target, and the artefacts actually travelling over the network to a
 #  machine that is not the controller.
 #
+#  The `deploy` job is Antares-Web on its own, with the studies running on
+#  the machine itself. The `cluster` job is the other shape the playbook
+#  supports and the one the reference procedure describes: five machines on
+#  a network of their own, the web server, the Slurm front-end and three
+#  compute nodes. That is what makes NFS, munge, the job submission over SSH
+#  and - the reason this job exists at all - three different firewall
+#  rulesets testable, since a ruleset is only meaningful when there is
+#  someone else on the wire. See inventory/ci-cluster.yml and verify.yml.
+#
 #  Adding a distribution is one entry in the `targets` job below plus one
 #  option in the `only` input, provided its cloud image reads a NoCloud seed
-#  and boots on legacy BIOS - every image listed there does.
+#  and boots on legacy BIOS - every image listed there does. Adding it to the
+#  cluster suite as well is the `cluster: true` flag on the same entry.
 #
 #  The images are downloaded on every run and not cached. Measured on the
 #  first green run: between 5 and 8 seconds each, 110 to 165 MB/s from all
@@ -61,6 +73,14 @@ on:
           - ol10
           - centos9
           - centos10
+      suite:
+        description: Which deployments to run
+        type: choice
+        default: all
+        options:
+          - all
+          - single
+          - cluster
 
 # A full run takes tens of minutes; a new push makes the one in flight
 # pointless.
@@ -106,6 +126,8 @@ jobs:
         run: |
           ansible-playbook --syntax-check -i inventory/ci-build.yml build.yml
           ansible-playbook --syntax-check -i inventory/ci-vm.yml site.yml
+          ansible-playbook --syntax-check -i inventory/ci-cluster.yml site.yml
+          ansible-playbook --syntax-check -i inventory/ci-cluster.yml verify.yml
 
   # ---------------------------------------------------------------------
   #  The list of machines to deploy on, as data rather than as a matrix
@@ -118,14 +140,23 @@ jobs:
   #  Ubuntu publish a `latest` that moves, which is what keeps them current.
   #  Both are deliberate: the EL side is where this playbook does the most
   #  distribution-specific work and a moving target there would be noise.
+  #
+  #  `cluster` picks the targets the five-machine job runs on, which is a
+  #  subset: a cluster job is five virtual machines instead of one, and the
+  #  cluster roles are also where the distributions differ most (no EL 10 at
+  #  all, since OpenHPC 3 publishes no EL 10 tree). Debian 13 first because
+  #  it is the closest thing to the reference procedure.
   # ---------------------------------------------------------------------
   targets:
     name: targets
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
+      cluster_matrix: ${{ steps.pick.outputs.cluster_matrix }}
+      suite: ${{ steps.pick.outputs.suite }}
     env:
       ONLY: ${{ inputs.only }}
+      SUITE: ${{ inputs.suite }}
     steps:
       - id: pick
         run: |
@@ -135,7 +166,8 @@ jobs:
             {
               "name":  "debian13",
               "label": "Debian 13",
-              "image": "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2"
+              "image": "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2",
+              "cluster": true
             },
             {
               "name":  "ubuntu26",
@@ -171,8 +203,26 @@ jobs:
             matrix=$(jq -c --arg n "$only" '[.[] | select(.name == $n)]' /tmp/targets.json)
             [ "$matrix" != '[]' ] || { echo "::error::no target named $only"; exit 1; }
           fi
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          jq -r '.[].label' <<<"$matrix"
+          cluster_matrix=$(jq -c '[.[] | select(.cluster)]' <<<"$matrix")
+
+          # ---------------------------------------------------------------
+          #  TEMPORARY, and the one line to revert before merging into main:
+          #  while the cluster job is being written, a pull request run does
+          #  the cluster and not the six single-machine deployments, which
+          #  are already known to pass and would only pay for six runners.
+          #  Put `all` back to restore the full suite; a manual run can
+          #  already pick either through the `suite` input.
+          # ---------------------------------------------------------------
+          suite="${SUITE:-cluster}"
+
+          {
+            echo "matrix=$matrix"
+            echo "cluster_matrix=$cluster_matrix"
+            echo "suite=$suite"
+          } >> "$GITHUB_OUTPUT"
+          echo "suite: $suite"
+          echo "single-machine targets:"; jq -r '.[].label' <<<"$matrix"
+          echo "cluster targets:";        jq -r '.[].label' <<<"$cluster_matrix"
 
   # ---------------------------------------------------------------------
   #  One build for every target. The image and the web application are
@@ -266,6 +316,7 @@ jobs:
   deploy:
     name: ${{ matrix.target.label }}
     needs: [targets, build]
+    if: ${{ needs.targets.outputs.suite != 'cluster' }}
     runs-on: ${{ inputs.runner || 'ubuntu-26.04' }}
     timeout-minutes: 90
     strategy:
@@ -511,5 +562,353 @@ jobs:
                       antarest-celery-worker antares-nginx; do
             echo "===== $unit.service"
             vm "sudo journalctl -u $unit.service --no-pager -n 100"
+          done
+          exit 0
+
+  # ---------------------------------------------------------------------
+  #  The other shape: five machines instead of one.
+  #
+  #      antares-web   192.168.77.11   the web application
+  #      slurm-front   192.168.77.12   slurmctld, slurmdbd, NFS server
+  #      slurm-node-1  192.168.77.13   slurmd
+  #      slurm-node-2  192.168.77.14   slurmd
+  #      slurm-node-3  192.168.77.15   slurmd
+  #
+  #  They sit on a bridge built on the runner, which gives them what the
+  #  single-machine job deliberately does not have: each other. NFS, munge,
+  #  the Slurm daemons and the SSH submission path all cross a real network
+  #  here, and so does every firewall rule, since the runner itself is on
+  #  that network at 192.168.77.1 without being in the inventory - it is
+  #  the internet as far as the rulesets are concerned.
+  #
+  #  Sizing, on a runner with 4 cores and 16 GB: 5 GB for the web machine,
+  #  which runs the whole podman stack, 2.5 GB for the front-end, which runs
+  #  MariaDB next to the daemons, and 1.25 GB for a compute node, which runs
+  #  slurmd and nothing else. That is 11.5 GB of the 16, and the swap file
+  #  below is there for the spikes rather than for the steady state. Drop a
+  #  compute node from the table if this ever stops fitting: three is what
+  #  makes an `srun -N3` meaningful, not a number the playbook depends on.
+  # ---------------------------------------------------------------------
+  cluster:
+    name: cluster on ${{ matrix.target.label }}
+    needs: [targets, build]
+    if: ${{ needs.targets.outputs.suite != 'single' && needs.targets.outputs.cluster_matrix != '[]' }}
+    runs-on: ${{ inputs.runner || 'ubuntu-26.04' }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.cluster_matrix) }}
+    env:
+      # The cluster network. /24 on a bridge that exists only inside the
+      # runner, with the runner itself on .1 as the gateway.
+      NET: 192.168.77
+      BRIDGE: br-antares
+    steps:
+
+      - uses: actions/checkout@v5
+
+      - name: Download the artefacts
+        uses: actions/download-artifact@v8
+        with:
+          name: artifacts
+          path: artifacts/
+
+      - name: Install Ansible
+        run: |
+          set -euxo pipefail
+          export PIPX_HOME="$HOME/.local/pipx"
+          export PIPX_BIN_DIR="$HOME/.local/bin"
+          pipx install --force ansible-core
+          echo "$PIPX_BIN_DIR" >> "$GITHUB_PATH"
+          export PATH="$PIPX_BIN_DIR:$PATH"
+          ansible --version
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Install QEMU and check what this runner has to offer
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+               qemu-system-x86 qemu-utils cloud-image-utils dnsmasq-base \
+               iproute2 rsync
+          # Five machines is enough that the numbers are worth having in the
+          # log of every run rather than in a comment that can go stale.
+          nproc; free -m; df -h / /mnt
+          # See the deploy job: usermod would need a new login session and the
+          # udev rule everyone copies is a race. chmod happens when it is
+          # called.
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::no /dev/kvm on this runner, the whole workflow depends on nested virtualisation"
+            exit 1
+          fi
+          sudo chmod 0666 /dev/kvm
+          test -w /dev/kvm
+
+      # -------------------------------------------------------------
+      #  The network the five machines live on.
+      #
+      #  A bridge with the runner on .1, one tap per machine, masquerading
+      #  so that apt and dnf reach their mirrors, and dnsmasq for the
+      #  leases and for DNS. Deliberately not QEMU's user-mode stack, which
+      #  the single-machine job uses: it gives every machine the same
+      #  10.0.2.15 and no way to reach a neighbour, and this job is about
+      #  the neighbours.
+      #
+      #  The addresses are handed out by MAC rather than written into the
+      #  images: every cloud image DHCPs on its first interface out of the
+      #  box, whereas a static NoCloud network-config has to go through
+      #  whichever renderer that particular distribution ships.
+      # -------------------------------------------------------------
+      - name: Build the cluster network
+        run: |
+          set -euxo pipefail
+
+          sudo mkdir -p /mnt/vm
+          sudo chown "$(id -u):$(id -g)" /mnt/vm
+
+          # name          last octet  MB     vcpus  disk
+          cat > /mnt/vm/machines <<'EOF'
+          antares-web   11          5120   2      40G
+          slurm-front   12          2560   2      20G
+          slurm-node-1  13          1280   2      12G
+          slurm-node-2  14          1280   2      12G
+          slurm-node-3  15          1280   2      12G
+          EOF
+
+          # Memory the machines will not all want at the same time, on a
+          # disk that has 60 GB free. Cheaper than sizing every machine for
+          # its worst minute.
+          sudo fallocate -l 8G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+
+          sudo ip link add "$BRIDGE" type bridge
+          sudo ip addr add "$NET.1/24" dev "$BRIDGE"
+          sudo ip link set "$BRIDGE" up
+
+          # Docker is installed on the runner and sets the FORWARD policy to
+          # DROP. These two rules go in front of everything it wrote, and
+          # they also cover the bridged traffic between two machines, which
+          # traverses FORWARD as well once br_netfilter is loaded - which
+          # docker does.
+          sudo sysctl -w net.ipv4.ip_forward=1
+          sudo iptables -I FORWARD -i "$BRIDGE" -j ACCEPT
+          sudo iptables -I FORWARD -o "$BRIDGE" -j ACCEPT
+          sudo iptables -t nat -A POSTROUTING -s "$NET.0/24" ! -o "$BRIDGE" -j MASQUERADE
+
+          # One fixed lease per machine, and the same names in the runner's
+          # own /etc/hosts so that the log, the inventory and the ssh helper
+          # all speak of `slurm-node-2` rather than of an address.
+          leases=""
+          while read -r name octet _ _ _; do
+            [ -n "$name" ] || continue
+            leases="$leases --dhcp-host=52:54:00:77:00:$(printf '%02x' "$octet"),$NET.$octet,$name"
+            echo "$NET.$octet $name" | sudo tee -a /etc/hosts
+          done < /mnt/vm/machines
+
+          # No --no-resolv: the upstream is whatever resolves for the runner,
+          # which is the one resolver known to work here. The two public ones
+          # are a fallback, not a preference.
+          # shellcheck disable=SC2086
+          sudo dnsmasq \
+            --interface="$BRIDGE" --bind-interfaces --except-interface=lo \
+            --dhcp-range="$NET.200,$NET.220,1h" --dhcp-authoritative \
+            --dhcp-option=option:router,"$NET.1" \
+            --dhcp-option=option:dns-server,"$NET.1" \
+            --server=1.1.1.1 --server=8.8.8.8 \
+            --log-facility=/mnt/vm/dnsmasq.log --log-dhcp \
+            --pid-file=/mnt/vm/dnsmasq.pid \
+            $leases
+
+          ip addr show "$BRIDGE"
+          sudo iptables -S FORWARD | head -n 5
+
+      # -------------------------------------------------------------
+      #  Boot the five machines.
+      #
+      #  One download of the cloud image, five copy-on-write overlays on
+      #  top of it. cache=unsafe because everything here dies with the job.
+      # -------------------------------------------------------------
+      - name: Boot the ${{ matrix.target.label }} cluster
+        env:
+          IMAGE: ${{ matrix.target.image }}
+        run: |
+          set -euxo pipefail
+
+          curl -fSL --retry 3 --retry-delay 5 -o /mnt/vm/base.img "$IMAGE"
+          # Ubuntu ships qcow2 under a .img name, so ask rather than assume.
+          fmt=$(qemu-img info --output=json /mnt/vm/base.img | jq -r .format)
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519_ci
+          pubkey=$(cat ~/.ssh/id_ed25519_ci.pub)
+
+          # Every later step shells into the machines, so the connection is
+          # written down once: `vm slurm-node-2 sinfo`.
+          mkdir -p ~/.local/bin
+          cat > ~/.local/bin/vm <<EOF
+          #!/bin/sh
+          host=\$1
+          shift
+          exec ssh -i $HOME/.ssh/id_ed25519_ci \
+                   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                   -o LogLevel=ERROR -o ConnectTimeout=10 "ansible@\$host" "\$@"
+          EOF
+          chmod +x ~/.local/bin/vm
+
+          idx=0
+          while read -r name octet mem cpus disk; do
+            [ -n "$name" ] || continue
+
+            qemu-img create -f qcow2 -F "$fmt" -b /mnt/vm/base.img \
+                            "/mnt/vm/$name.qcow2" "$disk"
+
+            # The tap is created here rather than by QEMU so that QEMU does
+            # not have to run as root to open /dev/net/tun. Names are tapN:
+            # an interface name is 15 characters at most, which `tap-` plus
+            # a machine name is not.
+            sudo ip tuntap add dev "tap$idx" mode tap user "$(id -un)"
+            sudo ip link set "tap$idx" master "$BRIDGE" up
+
+            # The only account these machines get is the one Ansible
+            # connects with. No package_update: the deployment installs what
+            # it needs, and a distribution upgrade on first boot would only
+            # add minutes and a dpkg lock to fight.
+            cat > "/mnt/vm/$name-user-data" <<EOF
+          #cloud-config
+          ssh_pwauth: false
+          package_update: false
+          package_upgrade: false
+          users:
+            - name: ansible
+              shell: /bin/bash
+              sudo: "ALL=(ALL) NOPASSWD:ALL"
+              ssh_authorized_keys:
+                - $pubkey
+          EOF
+            # local-hostname is not cosmetic: slurmd matches the machine's
+            # own `hostname -s` against the NodeName lines of slurm.conf,
+            # which are generated from the inventory names.
+            cat > "/mnt/vm/$name-meta-data" <<EOF
+          instance-id: $name
+          local-hostname: $name
+          EOF
+            cloud-localds "/mnt/vm/$name-seed.img" \
+                          "/mnt/vm/$name-user-data" "/mnt/vm/$name-meta-data"
+
+            qemu-system-x86_64 \
+              -machine q35,accel=kvm -cpu host -smp "$cpus" -m "$mem" \
+              -drive "file=/mnt/vm/$name.qcow2,if=virtio,format=qcow2,cache=unsafe,discard=unmap" \
+              -drive "file=/mnt/vm/$name-seed.img,if=virtio,format=raw,readonly=on" \
+              -netdev "tap,id=net0,ifname=tap$idx,script=no,downscript=no" \
+              -device "virtio-net-pci,netdev=net0,mac=52:54:00:77:00:$(printf '%02x' "$octet")" \
+              -device virtio-rng-pci \
+              -display none -daemonize \
+              -pidfile "/mnt/vm/$name.pid" \
+              -serial "file:/mnt/vm/$name-console.log"
+
+            idx=$((idx + 1))
+          done < /mnt/vm/machines
+
+          # Ten minutes for all five, which is generous: they boot in
+          # parallel and the first one usually answers in about forty
+          # seconds.
+          set +x
+          for name in $(awk '{print $1}' /mnt/vm/machines); do
+            booted=0
+            for _ in $(seq 1 120); do
+              if ~/.local/bin/vm "$name" 'sudo -n id' >/dev/null 2>&1; then
+                booted=1
+                break
+              fi
+              sleep 5
+            done
+            if [ "$booted" != 1 ]; then
+              echo "::error::$name never answered on SSH, console follows"
+              tail -n 200 "/mnt/vm/$name-console.log"
+              exit 1
+            fi
+            echo "$name is up"
+          done
+          set -x
+
+          # DNS through dnsmasq and a route out of the bridge are what every
+          # package install of the deployment depends on. Failing here says
+          # so plainly, rather than through apt three minutes later.
+          for name in $(awk '{print $1}' /mnt/vm/machines); do
+            if ! ~/.local/bin/vm "$name" 'getent hosts deb.debian.org > /dev/null'; then
+              echo "::error::$name cannot resolve a mirror, see the dnsmasq log"
+              tail -n 50 /mnt/vm/dnsmasq.log
+              exit 1
+            fi
+          done
+
+          ~/.local/bin/vm antares-web 'cat /etc/os-release; uname -r; ip -brief addr; free -m'
+
+      - name: Deploy the cluster from the artefacts
+        run: |
+          ansible-playbook -i inventory/ci-cluster.yml site.yml \
+            -e antarest_image_source=archive
+
+      # What site.yml cannot check on its own: the cluster as a whole, and
+      # what each of the three rulesets looks like from the outside. The
+      # runner is that outside - it is on the network and not in the
+      # inventory. See the header of verify.yml.
+      - name: Verify the cluster and the firewall
+        run: ansible-playbook -i inventory/ci-cluster.yml verify.yml
+
+      # Last on purpose: a failure here says the deployment converged but
+      # does not settle, which is worth knowing and worth fixing, but only
+      # after the steps above have said whether it works at all.
+      - name: Check the deploy is idempotent
+        run: |
+          set -euo pipefail
+          ansible-playbook -i inventory/ci-cluster.yml site.yml \
+            -e antarest_image_source=archive --diff | tee /tmp/second-run.log
+          # ANSIBLE_FORCE_COLOR paints the recap, so a host name in the log
+          # starts with an escape sequence rather than with the name itself.
+          sed -r 's/\x1b\[[0-9;]*m//g' /tmp/second-run.log > /tmp/second-run.txt
+          rc=0
+          for name in $(awk '{print $1}' /mnt/vm/machines); do
+            if ! grep -qE "^$name[[:space:]]+:.*[[:space:]]changed=0[[:space:]]" \
+                   /tmp/second-run.txt; then
+              echo "::error::the second run of site.yml reported changes on $name (${{ matrix.target.label }}), see the recap above"
+              rc=1
+            fi
+          done
+          exit $rc
+
+      # Nobody can SSH into a runner after the fact, let alone into five
+      # machines that die with it, so everything needed to understand a
+      # failure has to be in the log. The consoles come first: they are the
+      # only thing there is when the failure is the boot itself.
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          set +e
+          df -h / /mnt
+          free -m
+          for name in $(awk '{print $1}' /mnt/vm/machines 2>/dev/null); do
+            echo "===== $name serial console"
+            tail -n 100 "/mnt/vm/$name-console.log"
+          done
+          command -v vm > /dev/null || exit 0
+          for name in $(awk '{print $1}' /mnt/vm/machines 2>/dev/null); do
+            echo "===== $name"
+            vm "$name" 'hostname; systemctl --failed --no-pager; ss -lntp; sudo nft list table inet antares_fw'
+          done
+          echo "===== the cluster as slurmctld sees it"
+          vm slurm-front 'sinfo -N -l; scontrol ping; sudo tail -n 50 /var/log/slurm/slurmctld.log'
+          vm slurm-front 'sudo podman ps -a; sudo systemctl status --no-pager --full slurmctld slurmdbd'
+          vm slurm-node-1 'sudo systemctl status --no-pager --full slurmd; mount | grep home'
+          echo "===== the web machine"
+          vm antares-web 'sudo podman ps -a'
+          for unit in postgresql redis antarest antarest-celery-beat \
+                      antarest-celery-worker antares-nginx; do
+            echo "===== $unit.service"
+            vm antares-web "sudo journalctl -u $unit.service --no-pager -n 100"
           done
           exit 0
