@@ -50,13 +50,21 @@
 # 9000, which nothing publishes. A 200 here means Keycloak is up *and* the realm
 # the connector authenticates against was imported.
 #
-# Patient: the first start creates the schema and imports the realm.
+# Patient, and the budget is measured rather than guessed. The first start
+# runs the Quarkus augmentation, creates the ~90 tables of the Keycloak schema
+# through Liquibase, one transaction and one WAL fsync per changeset, and
+# imports the realm. On a 2 vCPU / 4 GB machine already carrying the rest of
+# the stack, that took 498 s (`started in 498.530s` in the container journal),
+# where the 300 s this used to allow had the play give up three minutes before
+# Keycloak finished, on a deployment that was perfectly healthy. Fifteen
+# minutes costs nothing when the machine is quick: the loop stops on the first
+# 200.
 - name: Wait for the realm to answer
   ansible.builtin.uri:
     url: >-
       http://127.0.0.1:{{ keycloak_port }}{{ keycloak_relative_path }}/realms/{{ keycloak_realm }}/.well-known/openid-configuration
     status_code: [200]
   register: keycloak_ready
-  retries: 60
+  retries: 180
   delay: 5
   until: keycloak_ready.status is defined and keycloak_ready.status == 200
