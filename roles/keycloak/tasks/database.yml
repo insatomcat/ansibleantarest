@@ -14,8 +14,11 @@
     name: postgresql.service
     state: started
 
+# Over TCP, for the reason spelled out in roles/antares_web/tasks/migrate.yml:
+# during the init phase of a fresh cluster the image answers on the unix socket
+# from a temporary server that listens on no port and is about to be shut down.
 - name: Wait for PostgreSQL to accept connections
-  ansible.builtin.command: "{{ container_cmd }} exec postgresql pg_isready -U postgres"
+  ansible.builtin.command: "{{ container_cmd }} exec postgresql pg_isready -h 127.0.0.1 -U postgres"
   register: keycloak_pg_ready
   until: keycloak_pg_ready.rc == 0
   retries: 30
