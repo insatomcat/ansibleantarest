@@ -42,13 +42,17 @@
     src: "{{ antares_artifacts_dir }}/"
     dest: "{{ antarest_base_dir }}/artifacts/"
     # rsync runs as root here (become turns into --rsync-path="sudo rsync"),
-    # so --archive would stamp the *controller's* ownership on the destination:
-    # the directory ends up owned by whatever UID the operator happens to have
-    # locally, the task above puts it back to root on the next run, and the two
-    # take turns reporting a change forever. Nothing reads these archives but
-    # root anyway.
+    # so --archive would stamp the *controller's* ownership and permissions on
+    # the destination: the directory ends up owned by whatever UID the operator
+    # happens to have locally and carrying whatever their umask produced, the
+    # task above puts both back on the next run, and the two take turns
+    # reporting a change forever. Seen with a controller whose umask is 002:
+    # the staging directory went 0775, 0755, 0775 on every run, and dragged the
+    # rsync itself into reporting a change with it. Nothing reads these
+    # archives but root anyway.
     owner: false
     group: false
+    perms: false
     rsync_opts:
       - "--include=*.tar.gz"
       - "--include=manifest.yml"
