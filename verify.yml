@@ -93,9 +93,10 @@
         quiet: true
 
     # From the controller rather than from the machine, on purpose: what a
-    # deployment is for is answering someone else. A published container port
-    # is a netfilter rule rather than a listening socket on the host, so this
-    # is also the only side from which nginx can be asked anything at all.
+    # deployment is for is answering someone else, and asking from here is
+    # what makes the answer cross the input chain of the firewall, the
+    # published port of the container and the proxy inside it, rather than a
+    # loopback that skips most of that.
     - name: Ask the backend for its health
       ansible.builtin.uri:
         url: "{{ verify_web_url }}/api/health"
@@ -372,23 +373,25 @@
   gather_facts: false
   tags: [verify, firewall]
   vars:
-    # Only the host daemons, and only the ones whose absence would make the
-    # probes below meaningless. Antares-Web is not in the list: its ports are
-    # published by containers, which on rootful podman is a netfilter rule
-    # rather than a socket on the host, so `ss` never sees them.
+    # The interface counts here even though it belongs to a container: a
+    # rootful podman publishes a port by holding the socket in conmon, so it
+    # is a listener on the host like any other. What it is not is a socket
+    # the firewall can filter - see the note on the private ports below.
     verify_expected_listeners: >-
-      {{ ([2049, 6817] + ([6819] if slurmdbd_enabled | bool else [])
-          if inventory_hostname in (groups['slurm_frontend'] | default([])) else [])
-         + ([6818] if inventory_hostname in (groups['slurm_compute'] | default([])) else []) }}
+      {{ ([antarest_http_port | int]
+          + ([antarest_https_port | int] if antarest_tls_enabled | default(false) | bool else [])
+          if inventory_hostname in (groups['antares_web'] | default([])) else [])
+         + (([2049, 6817] + ([6819] if slurmdbd_enabled | bool else []))
+            if slurm_enabled | bool and inventory_hostname in (groups['slurm_frontend'] | default([])) else [])
+         + ([6818]
+            if slurm_enabled | bool and inventory_hostname in (groups['slurm_compute'] | default([])) else []) }}
   tasks:
 
     - name: Read the listening sockets
       ansible.builtin.command: ss --listening --tcp --numeric
       register: verify_listening
       changed_when: false
-      when:
-        - slurm_enabled | bool
-        - verify_expected_listeners | length > 0
+      when: verify_expected_listeners | length > 0
 
     - name: Check every service this machine is supposed to offer is listening
       ansible.builtin.assert:
@@ -409,9 +412,7 @@
              | reject('match', '^(127\.|\[::1\])')
              | map('regex_replace', '^.*:', '') | map('int') | unique | list }}
         verify_missing_listeners: "{{ verify_expected_listeners | reject('in', verify_listening_ports) | list }}"
-      when:
-        - slurm_enabled | bool
-        - verify_expected_listeners | length > 0
+      when: verify_expected_listeners | length > 0
 
 - name: The world reaches nothing but SSH, and the interface on the web machine
   hosts: all
@@ -426,7 +427,10 @@
             + ([antarest_https_port | int] if antarest_tls_enabled | default(false) | bool else [])
             if inventory_hostname in (groups['antares_web'] | default([])) else []) }}
     # Everything a machine of this kind offers, or could be made to offer by
-    # accident, that the world has no business reaching. The interface ports
+    # accident, that the world has no business reaching. 5355 is systemd's
+    # LLMNR, which every machine here really does listen on, on every
+    # interface, and which nothing outside has any business reaching: it is
+    # the one entry in this list that is never vacuous. The interface ports
     # are in the list of every machine that is not the web server: nothing
     # serves them there, and a ruleset that opened them anyway is a bug worth
     # catching. So is a database published on 0.0.0.0 - the firewall does not
@@ -434,8 +438,9 @@
     # traverses the input hook, so the PublishPort of the unit is the only
     # thing standing between MariaDB and the network.
     verify_private_ports: >-
-      {{ ([antarest_http_port | int, antarest_https_port | int]
-          if inventory_hostname not in (groups['antares_web'] | default([])) else [5432, 6379])
+      {{ [5355]
+         + ([antarest_http_port | int, antarest_https_port | int]
+            if inventory_hostname not in (groups['antares_web'] | default([])) else [5432, 6379])
          + ([111, 2049, 6817, 3306] + ([6819] if slurmdbd_enabled | bool else [])
             if slurm_enabled | bool and inventory_hostname in (groups['slurm_frontend'] | default([])) else [])
          + ([111, 2049, 6818]
