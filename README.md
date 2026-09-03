@@ -463,7 +463,7 @@ It changes nothing beyond one marker file in the shared `/home`, which the last 
 - **The cluster.** `slurmctld` is alive and sees every compute node of the inventory in a healthy state, the cluster is registered in the accounting database, the compute nodes really mount the front-end's `/home` (a marker written on one side and read on the other) and can execute the solvers installed in it, and a job submitted exactly the way the backend submits one - over SSH, with the key generated on the web machine, to the `antares` account of the front-end - runs on a compute node.
 - **The firewall.** The three rulesets a deployment produces, checked from both sides. Each port that matters is looked at twice: a daemon is really listening on it, and the controller still cannot reach it while the machines that need it can. **Run this from a machine that is not in the inventory**, which the controller normally is not: a machine of the deployment is in every ruleset's trusted set, and from there every "the world cannot reach this" check is a tautology.
 
-The same playbook runs in CI, on five virtual machines booted on one GitHub runner: see the `cluster` job of `.github/workflows/ci.yml` and `inventory/ci-cluster.yml`.
+The same playbook runs in CI, on five virtual machines booted on one GitHub runner: see the `slurm` job of `.github/workflows/ci.yml` and `inventory/ci-cluster.yml`.
 
 ## Differences from the PDF
 
