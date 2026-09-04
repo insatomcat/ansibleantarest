@@ -5,6 +5,14 @@
 # Compose resolved both the service name and the container name; podman only
 # resolves the container name and the aliases, hence the alias below for
 # upstream's `postgres`.
+#
+# The alias goes through PodmanArgs rather than through the NetworkAlias key
+# it deserves, because NetworkAlias landed in podman 5 and Ubuntu 24.04 ships
+# podman 4.9. Everything else this playbook writes is within podman 4.4's
+# quadlet vocabulary, so this one line is the whole price of that release:
+# measured on 4.9.3 and on 5.4.2, the generator turns both spellings into the
+# same `--network-alias=postgres` on the podman run command line, and on a
+# 4.9.3 machine `postgres` and `postgresql` both resolve inside the network.
 
 [Unit]
 Description=Antares-Web PostgreSQL
@@ -17,7 +25,7 @@ StartLimitBurst=5
 ContainerName=postgresql
 Image={{ antarest_postgres_image }}
 Network={{ antarest_service_name }}.network
-NetworkAlias=postgres
+PodmanArgs=--network-alias=postgres
 User={{ antares_uid }}:{{ antares_gid }}
 Environment=POSTGRES_PASSWORD={{ antarest_db_password }}
 Environment=PGDATA=/var/lib/postgresql/data/pgdata

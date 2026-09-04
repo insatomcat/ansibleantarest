@@ -15,6 +15,14 @@
 # Quadlet is what runs the whole stack, and it landed in podman 4.4. Every
 # release in supported_distros is well past that, but a manually pinned or
 # backported podman could not be.
+#
+# 4.4 is a floor the units have to keep honouring, not just a number checked
+# here: quadlet gained keys after it, and a unit written with one of those
+# fails to generate on the oldest release supported rather than at the version
+# the key appeared in. Ubuntu 24.04 and its podman 4.9 are what keeps that
+# honest, which is why they are a target of the CI. See the note in
+# roles/antares_web/templates/quadlet/postgresql.container.j2, the one place
+# where the price has been paid so far.
 - name: Check podman is recent enough for quadlet
   ansible.builtin.assert:
     that:
