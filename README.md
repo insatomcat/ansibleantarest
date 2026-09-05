@@ -86,21 +86,22 @@ Two families are supported: Debian (Debian and Ubuntu, `apt`) and RedHat (Oracle
 
 ```yaml
 supported_distros:      # group_vars/all.yml
-  - "Debian 12"
   - "Debian 13"
-  - "Ubuntu 22"
   - "Ubuntu 24"
+  - "Ubuntu 26"
   - "OracleLinux 9"
   - "OracleLinux 10"
   - "RedHat 9"
   - "RedHat 10"
   - "Rocky 9"
   - "Rocky 10"
-  - "AlmaLinux 9"
-  - "AlmaLinux 10"
   - "CentOS 9"
   - "CentOS 10"
 ```
+
+That list is a claim, not a wish. Every line but one is deployed on every pull request by the CI, most of them twice over: one machine running Antares-Web on its own, and a five-machine cluster. CentOS Stream 9 is the exception on the second count, since it cannot carry a Slurm node, and RedHat is the exception on both: the CRB repository id and the `epel-release` URL are written for it, but it needs a subscription the CI has not got, so it is listed on the strength of its rebuilds rather than of a run.
+
+Two things are deliberately absent. **Debian 12 and Ubuntu 22.04**, which ship podman 4.3.1 and 3.4.4 where quadlet needs 4.4: the playbook would stop on them a few tasks after the distribution check, so claiming them would be worse than leaving them out. **AlmaLinux**, which nothing here has ever run on; it is the same code path as Rocky Linux, exercised twice per pull request, so adding `"AlmaLinux 9"` yourself is reasonable, it is just not something this repository asserts on your behalf.
 
 The playbook aborts on unsupported distros and prints the variable to extend. A rebuild of a supported major that is not in the list is usually fine to add. Set `distro_check_enabled: false` to disable the check entirely.
 
@@ -532,6 +533,6 @@ Same idea for MariaDB on the Slurm frontend (use `mariadb-dump` and the `slurmdb
 - The Antares-Web login jail counts the 401s nginx logs. A brute force that spreads over many addresses, or one aimed at an endpoint other than the login, is not covered.
 - Migration from a Docker-based version of this playbook: the `slurm_frontend` role stops and removes the old `slurmdb.service` unit and its `docker-compose.yml` but does not touch the docker volume `slurmdb_data`: it contains accounting history. Reusing a live DB requires a `mariadb-dump` from the old volume and restoration into the podman volume `slurmdb-data`. On the web server, data under `/var/antares-web/data` are bind mounts and are reused as-is.
 - The NNI label patch modifies source before the build. The checkout is reset each run (`git force`), so the patch is reapplied every time; a build stamp (`deploy/.frontend-build-stamp`) prevents rebuilding the frontend if nothing changed. Changing `antarest_login_username_label` triggers a rebuild.
-- RHEL-compatible support covers the 9 and the 10 series. Nothing here is specific to Oracle Linux beyond the names of the CRB and EPEL packages, so Rocky, Alma, CentOS Stream and RHEL itself follow the same path, but Oracle Linux is the one the defaults are written for. Rocky Linux is the rebuild that says whether that claim holds, and it is in CI for that reason: `rocky9` and `rocky10` deploy a machine and a five-machine cluster on every pull request. Measured on a Rocky Linux 9.6 machine playing every role at once: `crb` and `epel` matched by name, OpenHPC 3 installed through `dnf` rather than through the `--nodeps` path Oracle Linux 10 needs, Slurm 25.11.4, and a job submitted over SSH that ran. Alma and RHEL are not in CI, and are supported in the sense that nothing is written against them. EL 8 is not covered: its podman is too old for quadlet.
+- RHEL-compatible support covers the 9 and the 10 series. Nothing here is specific to Oracle Linux beyond the names of the CRB and EPEL packages, so the other rebuilds follow the same path, but Oracle Linux is the one the defaults are written for. Rocky Linux is the rebuild that says whether that claim holds, and it is in CI for that reason: `rocky9` and `rocky10` deploy a machine and a five-machine cluster on every pull request. Measured on a Rocky Linux 9.6 machine playing every role at once: `crb` and `epel` matched by name, OpenHPC 3 installed through `dnf` rather than through the `--nodeps` path Oracle Linux 10 needs, Slurm 25.11.4, and a job submitted over SSH that ran. RHEL itself is the one listed without ever having been run: it needs a subscription the CI has not got. EL 8 is not covered: its podman is too old for quadlet.
 - CentOS Stream 9 runs the `antares_web` machine, not a Slurm node: it provides `redhat-release 9.0` and always will, being what the next RHEL minor is built from rather than a rebuild of one, while the OpenHPC release package requires 9.1 or later. The `slurm_common` role stops with the reason. A cluster of EL 9 nodes driven by a CentOS Stream 9 web server is a supported shape; a cluster of Stream 9 is not. The 10 stream is not concerned: it provides `redhat-release 10.0`, OpenHPC 4 installs there, and its cluster runs in CI on every pull request like the others.
 - Slurm on EL comes from OpenHPC, a third-party repository. It is the maintained answer there and what the HPC world runs, but it is one more upstream to follow: a major OpenHPC bump can move Slurm by several versions at once, which the "one distribution per cluster" rule above then applies to. It moves in both directions: EL 9 is on OpenHPC 3 with Slurm 25.11 and EL 10 on OpenHPC 4 with Slurm 25.05, so the newer major carries the older Slurm.
