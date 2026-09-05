@@ -1,0 +1,87 @@
+---
+# ===========================================================================
+#  What the runner this job landed on actually is.
+#
+#  Everything this workflow is sized against was measured on a runner GitHub
+#  can change under us, and on a beta image at that: 2 cores and 7.9 GB is
+#  what the five machines of the `slurm` job are cut to fit in, and the
+#  memory columns of the target table were filled in against that number.
+#  When a job that was green starts dying with no visible cause - a machine
+#  that never answers on SSH, MariaDB that never finishes initialising, a
+#  step killed with no message - the first thing to compare between the last
+#  green run and this one is this block.
+#
+#  Nothing here may fail the job: it is a diagnostic, and a diagnostic that
+#  breaks the build is worse than no diagnostic. Hence no `set -e`, and a
+#  fallback on every value that comes out of a file or a command.
+# ===========================================================================
+
+name: Runner specifications
+description: >-
+  Print the CPU, memory, disks and virtualisation support of the runner this
+  job is executing on, in the log and in the run summary.
+
+runs:
+  using: composite
+  steps:
+    - name: Report what this runner is
+      shell: bash
+      run: |
+        set -uo pipefail
+
+        # /proc/cpuinfo has no `model name` outside x86; lscpu answers on
+        # every architecture and is only asked when the cheap way came up
+        # empty.
+        cpu_model=$(awk -F': ' '/^model name/ {print $2; exit}' /proc/cpuinfo)
+        [ -n "$cpu_model" ] || \
+          cpu_model=$(lscpu 2>/dev/null | awk -F': +' '/^Model name/ {print $2; exit}')
+        cpu_count=$(nproc 2>/dev/null)
+        # The cgroup quota is what actually applies when it is lower than the
+        # core count, which is how a runner can have four cores and the
+        # throughput of two.
+        cpu_quota=$(cat /sys/fs/cgroup/cpu.max 2>/dev/null)
+        mem_total=$(awk '/^MemTotal:/ {printf "%.1f GB", $2/1048576}' /proc/meminfo)
+        swap_total=$(awk '/^SwapTotal:/ {printf "%.1f GB", $2/1048576}' /proc/meminfo)
+        # vmx on Intel, svm on AMD. Absent means no nested virtualisation,
+        # which is the one thing every deploy job of this workflow needs.
+        virt=none
+        grep -qm1 -E '^flags.*\bvmx\b' /proc/cpuinfo && virt=vmx
+        grep -qm1 -E '^flags.*\bsvm\b' /proc/cpuinfo && virt=svm
+        kvm=absent
+        [ -e /dev/kvm ] && kvm=$(stat -c '%A %U:%G' /dev/kvm 2>/dev/null)
+
+        echo "===== runner"
+        echo "image      : ${ImageOS:-?} ${ImageVersion:-?} (${RUNNER_OS:-?} ${RUNNER_ARCH:-?})"
+        echo "labels     : ${RUNNER_NAME:-?}"
+        echo "kernel     : $(uname -srm)"
+        echo "cpu        : ${cpu_count:-?} x ${cpu_model:-?}"
+        echo "cpu.max    : ${cpu_quota:-not cgroup v2}"
+        echo "memory     : ${mem_total:-?}, swap ${swap_total:-?}"
+        echo "nested virt: ${virt}, /dev/kvm ${kvm}"
+
+        echo "===== memory"
+        free -m 2>/dev/null || true
+        echo "===== disks"
+        # /mnt is a separate temp disk on some runner sizes and a directory on
+        # / on others, which changes how much room the overlays really have.
+        df -h / /mnt 2>/dev/null || df -h /
+        echo "===== block devices"
+        lsblk 2>/dev/null || true
+
+        # The log is where the detail belongs; the summary page is where
+        # somebody comparing two runs will actually look first.
+        {
+          echo "### Runner: ${cpu_count:-?} cores, ${mem_total:-?}"
+          echo
+          echo "| | |"
+          echo "|---|---|"
+          echo "| image | \`${ImageOS:-?} ${ImageVersion:-?}\` |"
+          echo "| kernel | \`$(uname -sr)\` |"
+          echo "| cpu | ${cpu_count:-?} x ${cpu_model:-?} |"
+          echo "| memory | ${mem_total:-?} (swap ${swap_total:-?}) |"
+          echo "| nested virt | ${virt}, /dev/kvm ${kvm} |"
+          echo "| free on / | $(df -h --output=avail / 2>/dev/null | tail -n1 | tr -d ' ') |"
+          echo "| free on /mnt | $(df -h --output=avail /mnt 2>/dev/null | tail -n1 | tr -d ' ') |"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        exit 0
