@@ -12,8 +12,11 @@
 #  green run and this one is this block.
 #
 #  Nothing here may fail the job: it is a diagnostic, and a diagnostic that
-#  breaks the build is worse than no diagnostic. Hence no `set -e`, and a
-#  fallback on every value that comes out of a file or a command.
+#  breaks the build is worse than no diagnostic. Hence `set +e` and a fallback
+#  on every value that comes out of a file or a command. `set +e` rather than
+#  merely not setting it: `shell: bash` is run by the runner as
+#  `bash --noprofile --norc -e -o pipefail`, so errexit is on before the first
+#  line of this script, and every probe below is allowed to come back empty.
 # ===========================================================================
 
 name: Runner specifications
@@ -27,7 +30,7 @@ runs:
     - name: Report what this runner is
       shell: bash
       run: |
-        set -uo pipefail
+        set +e +o pipefail
 
         # /proc/cpuinfo has no `model name` outside x86; lscpu answers on
         # every architecture and is only asked when the cheap way came up
@@ -42,13 +45,21 @@ runs:
         cpu_quota=$(cat /sys/fs/cgroup/cpu.max 2>/dev/null)
         mem_total=$(awk '/^MemTotal:/ {printf "%.1f GB", $2/1048576}' /proc/meminfo)
         swap_total=$(awk '/^SwapTotal:/ {printf "%.1f GB", $2/1048576}' /proc/meminfo)
-        # vmx on Intel, svm on AMD. Absent means no nested virtualisation,
+        # vmx on Intel, svm on AMD. Neither means no nested virtualisation,
         # which is the one thing every deploy job of this workflow needs.
+        # Written as an if rather than as `grep && virt=vmx`: a machine has one
+        # of the two flags at most, so the other test always fails, and a
+        # failing `&&` list is exactly what errexit ends a script on.
         virt=none
-        grep -qm1 -E '^flags.*\bvmx\b' /proc/cpuinfo && virt=vmx
-        grep -qm1 -E '^flags.*\bsvm\b' /proc/cpuinfo && virt=svm
+        if grep -qm1 -E '^flags.*\bvmx\b' /proc/cpuinfo; then
+          virt=vmx
+        elif grep -qm1 -E '^flags.*\bsvm\b' /proc/cpuinfo; then
+          virt=svm
+        fi
         kvm=absent
-        [ -e /dev/kvm ] && kvm=$(stat -c '%A %U:%G' /dev/kvm 2>/dev/null)
+        if [ -e /dev/kvm ]; then
+          kvm=$(stat -c '%A %U:%G' /dev/kvm 2>/dev/null)
+        fi
 
         echo "===== runner"
         echo "image      : ${ImageOS:-?} ${ImageVersion:-?} (${RUNNER_OS:-?} ${RUNNER_ARCH:-?})"
@@ -69,7 +80,10 @@ runs:
         lsblk 2>/dev/null || true
 
         # The log is where the detail belongs; the summary page is where
-        # somebody comparing two runs will actually look first.
+        # somebody comparing two runs will actually look first. `n/a` rather
+        # than an empty cell when /mnt is not a mount point of its own.
+        avail_root=$(df -h --output=avail / 2>/dev/null | tail -n1 | tr -d ' ')
+        avail_mnt=$(df -h --output=avail /mnt 2>/dev/null | tail -n1 | tr -d ' ')
         {
           echo "### Runner: ${cpu_count:-?} cores, ${mem_total:-?}"
           echo
@@ -80,8 +94,8 @@ runs:
           echo "| cpu | ${cpu_count:-?} x ${cpu_model:-?} |"
           echo "| memory | ${mem_total:-?} (swap ${swap_total:-?}) |"
           echo "| nested virt | ${virt}, /dev/kvm ${kvm} |"
-          echo "| free on / | $(df -h --output=avail / 2>/dev/null | tail -n1 | tr -d ' ') |"
-          echo "| free on /mnt | $(df -h --output=avail /mnt 2>/dev/null | tail -n1 | tr -d ' ') |"
+          echo "| free on / | ${avail_root:-n/a} |"
+          echo "| free on /mnt | ${avail_mnt:-n/a} |"
         } >> "$GITHUB_STEP_SUMMARY"
 
         exit 0
