@@ -191,11 +191,14 @@ jobs:
   #  by roles/slurm_common/tasks/repo.yml and keeps the standalone job, which
   #  is the only shape the playbook supports for it.
   #
-  #  `web_mb`, `front_mb` and `node_mb` size the machines when the defaults
-  #  in the boot step do not fit. The EL images need more per machine and
-  #  give the web server less: measured on a five-machine cluster, an EL 9
-  #  compute node settles at 271 MB of its own and a Debian one at less,
-  #  while the EL web server never went past 1.4 GB.
+  #  `web_mb`, `front_mb` and `node_mb` are the floor each machine of the
+  #  cluster gets, for a target where the defaults in the boot step do not
+  #  fit. The EL images need more per machine and give the web server less:
+  #  measured on a five-machine cluster, an EL 9 compute node settles at
+  #  271 MB of its own and a Debian one at less, while the EL web server never
+  #  went past 1.4 GB. They are a minimum and not the allocation: what a
+  #  machine actually gets is computed from the memory of the runner the job
+  #  landed on, and only ever upwards from these.
   # ---------------------------------------------------------------------
   targets:
     name: targets
@@ -674,28 +677,34 @@ jobs:
   #  that network at 192.168.77.1 without being in the inventory - it is
   #  the internet as far as the rulesets are concerned.
   #
-  #  Sizing. A runner is 2 cores, 7.9 GB of memory and a single 72 GB disk
-  #  with 20 GB free once the preinstalled toolchains are counted, which is
-  #  the whole difficulty of this job: five machines have to fit in what one
-  #  of them gets in the deploy job. Measured, not assumed - the first step of
-  #  the job prints all three on every run, and the first attempt at this job asked
-  #  for 11.5 GB of guests, left the runner with 333 MB available and 600 MB
-  #  swapped out, and starved MariaDB out of finishing its initialisation.
+  #  Sizing. Five machines have to fit in what one of them gets in the deploy
+  #  job, on a runner whose size is not a constant: a public repository is
+  #  given 4 cores and 15.6 GB today, a private one 2 cores and 7.9 GB, which
+  #  is what the numbers below were measured on. So the allocation is computed
+  #  at boot time from what the runner actually has - see the sizing block in
+  #  the "Build the cluster network" step - and the table values are its
+  #  floor. Nothing here is assumed: the first step of the job prints the
+  #  runner, that step prints what it decided to hand out, and the first
+  #  attempt at this job asked for 11.5 GB of guests on the small runner, left
+  #  it with 333 MB available and 600 MB swapped out, and starved MariaDB out
+  #  of finishing its initialisation.
   #
-  #  So, on the Debian family: 3 GB for the web machine, which runs the whole
-  #  podman stack, 1.25 GB for the front-end, which runs MariaDB next to the
-  #  daemons, and 576 MB per compute node, which runs slurmd and nothing else.
-  #  6 GB of guests, plus half a gigabyte of swap inside each machine and a
-  #  swap file out here for the spikes. The EL images ask for more per machine
-  #  and are given less on the web server, see the target table. Drop a
-  #  compute node from that table if this ever stops fitting: three is what
-  #  makes a multi-node step meaningful, not a number the playbook depends on.
+  #  The floors, on the Debian family: 3 GB for the web machine, which runs
+  #  the whole podman stack, 1.25 GB for the front-end, which runs MariaDB
+  #  next to the daemons, and 576 MB per compute node, which runs slurmd and
+  #  nothing else. 6 GB of guests, plus half a gigabyte of swap inside each
+  #  machine and a swap file out here for the spikes. The EL images ask for
+  #  more per machine and are given less on the web server, see the target
+  #  table. Drop a compute node from that table if this ever stops fitting:
+  #  three is what makes a multi-node step meaningful, not a number the
+  #  playbook depends on.
   #
   #  Every guest ends up resident for its whole allocation, because a guest
   #  fills what it is given with page cache, so the sum of the column is what
-  #  the runner pays. Measured inside the machines of an EL 9 cluster: 1.4 GB
-  #  really used on the web server, 499 MB on the front-end, 271 MB on a
-  #  compute node.
+  #  the runner pays - which is why the allocation is capped rather than
+  #  simply given the whole budget. Measured inside the machines of an EL 9
+  #  cluster: 1.4 GB really used on the web server, 499 MB on the front-end,
+  #  271 MB on a compute node.
   # ---------------------------------------------------------------------
   slurm:
     name: slurm on ${{ matrix.target.label }}
@@ -792,24 +801,93 @@ jobs:
       # -------------------------------------------------------------
       - name: Build the cluster network
         env:
-          # The defaults are the Debian family's, measured; a target that
-          # needs other numbers carries them in the table of the targets job.
+          # The floor each machine gets, never the allocation: see the sizing
+          # block below. The defaults are the Debian family's, measured; a
+          # target that needs other numbers carries them in the table of the
+          # targets job.
           WEB_MB: ${{ matrix.target.web_mb || 3072 }}
           FRONT_MB: ${{ matrix.target.front_mb || 1280 }}
           NODE_MB: ${{ matrix.target.node_mb || 576 }}
+          # Where more memory stops buying anything, about four times what
+          # each machine was measured to really use.
+          WEB_CAP: 5120
+          FRONT_CAP: 2048
+          NODE_CAP: 1024
         run: |
           set -euxo pipefail
 
           sudo mkdir -p /mnt/vm
           sudo chown "$(id -u):$(id -g)" /mnt/vm
 
+          # -------------------------------------------------------------
+          #  How much memory the five machines get on this particular runner.
+          #
+          #  The numbers in the target table are what each distribution was
+          #  measured to need, on the 2-core 7.9 GB runner they were measured
+          #  on. Here they are the floor, not the allocation: a public
+          #  repository is now given 4 cores and 15.6 GB, and there is no
+          #  reason to keep squeezing five machines into what a smaller
+          #  machine had. Should this repository go private and land on the
+          #  small runner again, the budget comes out below the floors, the
+          #  scale is clamped to 1 and every machine gets exactly the table
+          #  value it gets today - which is the point of a floor rather than
+          #  a share.
+          #
+          #  The caps are where more memory stops buying anything. Measured
+          #  inside an EL 9 cluster, the web machine really uses 1.4 GB, the
+          #  front-end 499 MB and a compute node 271 MB, so roughly four
+          #  times the measurement is as far as this is worth taking. What is
+          #  not handed to a guest stays with the runner, which needs it for
+          #  ansible, five qemu processes and a gigabyte of artefacts.
+          #
+          #  Worth knowing when reading the numbers: a guest ends up resident
+          #  for its whole allocation, since it fills what it is given with
+          #  page cache, so the sum of the column is what the runner pays.
+          # -------------------------------------------------------------
+          set +x
+          total_mb=$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)
+          # A fifth for the runner itself, and never less than the 1.75 GB
+          # the small runner was left with once its five machines were out.
+          reserve_mb=$(( total_mb / 5 ))
+          [ "$reserve_mb" -ge 1792 ] || reserve_mb=1792
+          budget_mb=$(( total_mb - reserve_mb ))
+
+          floor_mb=$(( WEB_MB + FRONT_MB + 3 * NODE_MB ))
+          # Per mille rather than a fraction: this is shell arithmetic.
+          scale=$(( budget_mb * 1000 / floor_mb ))
+          if [ "$scale" -lt 1000 ]; then
+            echo "::warning::this runner has ${total_mb} MB, which is less than the ${floor_mb} MB the five machines were measured to need plus the ${reserve_mb} MB the runner keeps. Allocating the measured minimums and counting on swap, exactly as before."
+            scale=1000
+          fi
+
+          # floor, cap -> allocation, rounded down to a multiple of 128 MB
+          # and never below the floor it started from.
+          size() {
+            mb=$(( $1 * scale / 1000 ))
+            [ "$mb" -le "$2" ] || mb=$2
+            mb=$(( mb / 128 * 128 ))
+            [ "$mb" -ge "$1" ] || mb=$1
+            echo "$mb"
+          }
+          web_mb=$(size "$WEB_MB" "$WEB_CAP")
+          front_mb=$(size "$FRONT_MB" "$FRONT_CAP")
+          node_mb=$(size "$NODE_MB" "$NODE_CAP")
+          guests_mb=$(( web_mb + front_mb + 3 * node_mb ))
+
+          echo "runner    : ${total_mb} MB, ${reserve_mb} MB kept back, ${budget_mb} MB to hand out"
+          echo "floors    : web ${WEB_MB}, front ${FRONT_MB}, node ${NODE_MB} - ${floor_mb} MB together"
+          echo "caps      : web ${WEB_CAP}, front ${FRONT_CAP}, node ${NODE_CAP}"
+          echo "scale     : ${scale}/1000"
+          echo "allocated : web ${web_mb}, front ${front_mb}, node ${node_mb} - ${guests_mb} MB together"
+          set -x
+
           # name          last octet  MB           vcpus  disk (a minimum)
           cat > /mnt/vm/machines <<EOF
-          antares-web   11          $WEB_MB      2      40G
-          slurm-front   12          $FRONT_MB    2      20G
-          slurm-node-1  13          $NODE_MB     1      10G
-          slurm-node-2  14          $NODE_MB     1      10G
-          slurm-node-3  15          $NODE_MB     1      10G
+          antares-web   11          $web_mb      2      40G
+          slurm-front   12          $front_mb    2      20G
+          slurm-node-1  13          $node_mb     1      10G
+          slurm-node-2  14          $node_mb     1      10G
+          slurm-node-3  15          $node_mb     1      10G
           EOF
           cat /mnt/vm/machines
 
