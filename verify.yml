@@ -344,6 +344,40 @@
         label: "{{ item.item.0.version }}/{{ item.item.1 }}"
       when: slurm_enabled | bool and antares_xpansion_enabled | bool
 
+    # The stat above says the file is there, this says it runs. That is the
+    # question a package built for another distribution of the family fails,
+    # and asking it costs nothing: the launcher prints the version of the
+    # solver it bundles and exits. The answer is also what the entry claims,
+    # so the same command checks the table the launch script is generated
+    # from - a release whose bundled solver moved would otherwise be found
+    # out by a study, hours later.
+    - name: Ask each Xpansion launcher which solver it bundles
+      ansible.builtin.command:
+        cmd: >-
+          {{ slurm_xpansion_dir }}/{{ (item.archive
+             | default('antaresXpansion-' ~ item.version ~ '-' ~ (antares_xpansion_os | trim) ~ '.tar.gz'))
+             | regex_replace('\.tar\.gz$', '') }}/antares-xpansion-launcher --antares-version
+      register: verify_xpansion_version
+      changed_when: false
+      loop: "{{ antares_xpansions }}"
+      loop_control:
+        label: "{{ item.version }}"
+      when: slurm_enabled | bool and antares_xpansion_enabled | bool
+
+    - name: Check each of them bundles the solver its entry declares
+      ansible.builtin.assert:
+        that: item.stdout | trim == item.item.study_version
+        fail_msg: >-
+          Antares-Xpansion {{ item.item.version }} bundles the solver
+          {{ item.stdout | trim }} on {{ inventory_hostname }}, not
+          {{ item.item.study_version }} as antares_xpansions says. Studies of
+          that version would be sent to a solver that cannot read them.
+        quiet: true
+      loop: "{{ verify_xpansion_version.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item.version }}"
+      when: slurm_enabled | bool and antares_xpansion_enabled | bool
+
 # ---------------------------------------------------------------------------
 #  The submission path, end to end
 #
