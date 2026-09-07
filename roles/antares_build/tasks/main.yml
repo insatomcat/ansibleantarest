@@ -60,6 +60,22 @@
     label: "antares-{{ item.0.version }}-{{ item.1 }}"
   when: antares_build_fetch_solvers | bool
 
+# Same for Xpansion. The asset name is spelled out per entry when a release
+# breaks the pattern, so the name in the cache is the name the target looks
+# for and the OS list only applies to the ones that follow it.
+- name: Download the Antares-Xpansion tarballs
+  ansible.builtin.get_url:
+    url: "{{ antares_xpansion_base_url }}/v{{ item.0.version }}/{{ antares_xpansion_archive }}"
+    dest: "{{ antares_build_artifacts }}/{{ antares_xpansion_archive }}"
+    mode: "0644"
+  vars:
+    antares_xpansion_archive: >-
+      {{ item.0.archive | default('antaresXpansion-' ~ item.0.version ~ '-' ~ item.1 ~ '.tar.gz') }}
+  loop: "{{ antares_xpansions | product(antares_build_xpansion_os) | list }}"
+  loop_control:
+    label: "antaresXpansion-{{ item.0.version }}-{{ item.1 }}"
+  when: antares_build_fetch_xpansions | bool
+
 # Recorded for whoever has to answer "what is actually in these archives", which
 # is the question a fixed set of file names cannot answer on its own.
 - name: Write a manifest next to the archives

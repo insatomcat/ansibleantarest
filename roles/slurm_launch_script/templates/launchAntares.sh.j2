@@ -9,8 +9,11 @@
 # Derived from
 # https://github.com/AntaresSimulatorTeam/antares-launcher/blob/main/remote_scripts_templates/launchAntares_v1.1.2.sh
 # with the site specific bits filled in:
-#   - the solver table below is generated from the `antares_solvers` variable,
-#   - the `module load` lines are dropped (no environment modules here),
+#   - the solver and Xpansion tables below are generated from the
+#     `antares_solvers` and `antares_xpansions` variables,
+#   - the `module load` lines are dropped (no environment modules here); the
+#     Xpansion branch runs the C++ implementation, which needs none, rather
+#     than the R one the upstream template calls,
 #   - the scratch directory lives in the shared /home so that the front-end
 #     can collect the results.
 
@@ -20,27 +23,98 @@ JOB_TYPE=$3
 POST_PROCESSING=$4
 OTHER_OPTIONS=$5
 
+# What kind of job is this?
+# =========================
+#
+# antares-launcher sends the mode as the third argument, out of the four
+# values of its `Modes` enum (see
+# antareslauncher/remote_environnement/slurm_script_features.py). Every one of
+# them is answered here, the unsupported ones included: running an ordinary
+# simulation in their place is worse than refusing, because the study comes
+# back green for an investment optimisation that never ran.
+case "$JOB_TYPE" in
+    ANTARES|"")
+        RUN_MODE=antares
+        ;;
+    ANTARES_XPANSION_CPP)
+        RUN_MODE=xpansion
+        ;;
+    ANTARES_XPANSION_R)
+        echo "Xpansion in its R implementation is not supported on this cluster:" >&2
+        echo "it needs R, the R libraries and XpansionArgsRun.R, none of which is" >&2
+        echo "deployed here. Launch the study in the C++ mode instead." >&2
+        exit 1
+        ;;
+    ANTARES_XPANSION_TRAJECTORY)
+        echo "Xpansion trajectory mode, which runs several studies at once, is not" >&2
+        echo "supported on this cluster." >&2
+        exit 1
+        ;;
+    *)
+        echo "Unknown job type '$JOB_TYPE'." >&2
+        exit 1
+        ;;
+esac
+
 # Set Variables
 # =============
 #
 # antares-launcher passes the version as "major.minor" (e.g. "8.8"). Older
 # releases passed the compact form ("880"), so both are accepted here.
-case "$ANTARES_VERSION" in
+if [ "$RUN_MODE" = "antares" ]; then
+    case "$ANTARES_VERSION" in
 {% for s in antares_solvers %}
-    "{{ s.study_version }}"|"{{ s.study_version.split('.')[0] }}{{ s.study_version.split('.')[1] }}0"|"{{ s.version }}")
-        export ANTARES_SOLVER_BIN="{{ slurm_solvers_dir }}/antares-{{ s.version }}-{{ antares_solver_os }}/bin/{{ s.bin }}"
-        ;;
+        "{{ s.study_version }}"|"{{ s.study_version.split('.')[0] }}{{ s.study_version.split('.')[1] }}0"|"{{ s.version }}")
+            export ANTARES_SOLVER_BIN="{{ slurm_solvers_dir }}/antares-{{ s.version }}-{{ antares_solver_os }}/bin/{{ s.bin }}"
+            ;;
 {% endfor %}
-    *)
-        echo "Unsupported Antares version '$ANTARES_VERSION' on this cluster." >&2
-        echo "Available: {{ antares_solvers | map(attribute='study_version') | join(', ') }}" >&2
-        exit 1
-        ;;
-esac
+        *)
+            echo "Unsupported Antares version '$ANTARES_VERSION' on this cluster." >&2
+            echo "Available: {{ antares_solvers | map(attribute='study_version') | join(', ') }}" >&2
+            exit 1
+            ;;
+    esac
 
-if [ ! -x "$ANTARES_SOLVER_BIN" ]; then
-  echo "Solver binary $ANTARES_SOLVER_BIN is missing or not executable." >&2
-  exit 1
+    if [ ! -x "$ANTARES_SOLVER_BIN" ]; then
+        echo "Solver binary $ANTARES_SOLVER_BIN is missing or not executable." >&2
+        exit 1
+    fi
+else
+{% if antares_xpansion_enabled | bool %}
+    # An Xpansion release ships the antares-solver it was built against and
+    # runs the study with that one, so the version is matched against the
+    # package table rather than against the solvers installed next to it.
+    case "$ANTARES_VERSION" in
+{% for x in antares_xpansions %}
+{% set x_dir = (x.archive | default('antaresXpansion-' ~ x.version ~ '-' ~ (antares_xpansion_os | trim) ~ '.tar.gz')) | regex_replace('\.tar\.gz$', '') %}
+        "{{ x.study_version }}"|"{{ x.study_version.split('.')[0] }}{{ x.study_version.split('.')[1] }}0")
+            export XPANSION_LAUNCHER_BIN="{{ slurm_xpansion_dir }}/{{ x_dir }}/antares-xpansion-launcher"
+            ;;
+{% endfor %}
+        *)
+            echo "No Antares-Xpansion package for study version '$ANTARES_VERSION' on this cluster." >&2
+            echo "Available: {{ antares_xpansions | map(attribute='study_version') | join(', ') }}" >&2
+            exit 1
+            ;;
+    esac
+
+    if [ ! -x "$XPANSION_LAUNCHER_BIN" ]; then
+        echo "Xpansion launcher $XPANSION_LAUNCHER_BIN is missing or not executable." >&2
+        exit 1
+    fi
+
+{% if antares_xpansion_mpi_bin_dir | trim | length > 0 %}
+    # EL keeps its Open MPI out of the default paths.
+    export PATH="{{ antares_xpansion_mpi_bin_dir | trim }}:$PATH"
+{% endif %}
+{% if antares_xpansion_mpi_lib_dir | trim | length > 0 %}
+    export LD_LIBRARY_PATH="{{ antares_xpansion_mpi_lib_dir | trim }}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+{% endif %}
+{% else %}
+    echo "Antares-Xpansion is not deployed on this cluster." >&2
+    echo "Set antares_xpansion_enabled to true and re-run the playbook." >&2
+    exit 1
+{% endif %}
 fi
 
 # Set OMP_NUM_THREADS for the parallel parts
@@ -81,7 +155,8 @@ print_timed_message "START"
 print_message "JOB_TYPE = $JOB_TYPE"
 print_message "INPUT_ZIPNAME as from stdin  = $1"
 print_message "antares_version from stdin  = $ANTARES_VERSION"
-print_message "solver binary: $ANTARES_SOLVER_BIN"
+print_message "run mode: $RUN_MODE"
+print_message "binary: ${ANTARES_SOLVER_BIN:-$XPANSION_LAUNCHER_BIN}"
 print_message "name of the study: $STUDY_NAME"
 print_message "zipfile: $INPUT_ZIPNAME"
 print_message "home directory: $USER_HOME"
@@ -106,11 +181,30 @@ UNZIP_DURATION=$SECONDS
 print_message "unzip duration = $UNZIP_DURATION"
 print_message " "
 
-# Launch ANTARES
+# Launch ANTARES or ANTARES_XPANSION
 SECONDS=0
 print_timed_message "start $JOB_TYPE"
-# shellcheck disable=SC2086
-srun $ANTARES_SOLVER_BIN --force-parallel=${SLURM_CPUS_PER_TASK:-1} -i "$STUDY_PATH" $OTHER_OPTIONS
+if [ "$RUN_MODE" = "xpansion" ]; then
+  # Deliberately not under srun, unlike every other step here. The launcher
+  # drives the whole chain itself - the bundled antares-solver on the weekly
+  # problems, lp_namer, then Benders, which is an MPI binary - and an MPI
+  # program started inside an srun step is a "direct launch" as far as Open
+  # MPI is concerned: it then demands Slurm's PMI/PMIx support and aborts in
+  # MPI_Init without it ("OPAL ERROR: Unreachable in ext3x_client.c"). Run
+  # from the batch step it initialises on its own.
+  #
+  # Same reason the number of ranks goes to the launcher rather than to srun.
+  # Above 1 it spawns them through mpirun, which inside an allocation goes
+  # back through Slurm and needs that PMIx support after all, so raising
+  # slurm_xpansion_mpi_procs means installing it on the nodes.
+  # shellcheck disable=SC2086
+  "$XPANSION_LAUNCHER_BIN" --step full -i "$STUDY_PATH" \
+       --antares-n-cpu "${SLURM_CPUS_PER_TASK:-1}" \
+       -n {{ slurm_xpansion_mpi_procs }} $OTHER_OPTIONS
+else
+  # shellcheck disable=SC2086
+  srun $ANTARES_SOLVER_BIN --force-parallel=${SLURM_CPUS_PER_TASK:-1} -i "$STUDY_PATH" $OTHER_OPTIONS
+fi
 print_timed_message "end $JOB_TYPE"
 ANTARES_DURATION=$SECONDS
 print_message "$JOB_TYPE duration = $ANTARES_DURATION"
