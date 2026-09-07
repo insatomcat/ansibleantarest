@@ -205,7 +205,9 @@ else
   # shellcheck disable=SC2086
   srun $ANTARES_SOLVER_BIN --force-parallel=${SLURM_CPUS_PER_TASK:-1} -i "$STUDY_PATH" $OTHER_OPTIONS
 fi
+RUN_RC=$?
 print_timed_message "end $JOB_TYPE"
+print_message "$JOB_TYPE exit code = $RUN_RC"
 ANTARES_DURATION=$SECONDS
 print_message "$JOB_TYPE duration = $ANTARES_DURATION"
 print_message " "
@@ -250,3 +252,15 @@ echo "$START_TIME $SLURM_JOB_NAME $SLURM_JOB_ID $SLURM_CPUS_PER_TASK $UNZIP_DURA
 
 # Goodbye
 print_timed_message "THE END"
+
+# Exit on the code of the run, not on that of the last command of the script -
+# which is what the upstream template does, and the reason a solver killed by
+# the OOM killer still produced a job Slurm recorded as COMPLETED and a study
+# Antares-Web showed as successful. Everything above this line still runs when
+# the solver fails: the zip is built and the scratch is cleaned, so the partial
+# results and the logs come back. That is what makes this safe, and it is not
+# an assumption about the launcher: a job in FAILED state gives
+# `finished_with_error` in antares-launcher, which still downloads the final
+# zip, and Antares-Web's `_handle_failure` still imports whatever output it
+# finds before marking the job failed.
+exit $RUN_RC
