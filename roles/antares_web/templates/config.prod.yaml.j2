@@ -47,15 +47,27 @@ storage:
   # by nothing else: the API process starts no background service, since
   # `server.services` is left unset.
   #
-  # Only the destructive switches are written here. Every interval keeps its
+  # Only the `*_dry_run` switches are written here. Every interval keeps its
   # upstream default, see docs/configuration.md for the `*_sleeping_time` and
   # `*_cron` keys. Note that auto_archive_sleeping_time and auto_archive_cron
   # are mutually exclusive: setting both makes the application refuse to start.
+  #
+  # watcher_scan_dry_run is written out too, although it holds the upstream
+  # value, so that `grep dry_run config.prod.yaml` answers what this deployment
+  # does rather than leaving half the answer implicit.
+  #
+  # tasks_gc_dry_run needs 2.34.0 or later to be read at all: the hand-written
+  # config loader of 2.33 and earlier ignored that one key. See the defaults of
+  # the role.
   # -------------------------------------------------------------------------
   matrix_gc_dry_run: {{ antarest_matrix_gc_dry_run | bool | lower }}
   blob_gc_dry_run: {{ antarest_blob_gc_dry_run | bool | lower }}
   variable_view_gc_dry_run: {{ antarest_variable_view_gc_dry_run | bool | lower }}
+  tasks_gc_dry_run: {{ antarest_tasks_gc_dry_run | bool | lower }}
   auto_archive_dry_run: {{ antarest_auto_archive_dry_run | bool | lower }}
+  # false: dry run here does not hold a deletion back, it stops the scan from
+  # registering the studies it finds. See the defaults of the role.
+  watcher_scan_dry_run: {{ antarest_watcher_scan_dry_run | bool | lower }}
 
   workspaces:
     # required, no filter applied, this folder is not watched
