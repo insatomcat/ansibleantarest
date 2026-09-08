@@ -248,6 +248,48 @@ antarest_http_port: 80
 antarest_force_rebuild: false # force rebuild of frontend + image
 ```
 
+The rest of `config.prod.yaml` is written from the defaults of the role, `roles/antares_web/defaults/main.yml`:
+
+```yaml
+antarest_log_level: INFO           # every antarest process reads this file
+antarest_worker_threadpool_size: 12
+antarest_gunicorn_workers: 4
+antarest_external_auth_url: ""     # empty: only the local accounts exist
+antarest_external_auth_default_group_role: 10      # 10 reader ... 40 admin
+antarest_external_auth_add_ext_groups: false
+antarest_external_auth_group_mapping: {}
+antarest_local_launcher_nb_cores_detection: true
+```
+
+What stays written in the template is what is coupled to something else on the machine: the container paths are the other half of the mounts in `roles/antares_web/vars/main.yml`, and `root_path: api` is the other half of the `location /api/` of the nginx configuration. Changing either alone breaks the stack, so neither is a variable.
+
+The local launcher reads the cores of the machine as long as `antarest_local_launcher_nb_cores_detection` is on, and *overwrites* whatever `antarest_local_launcher_nb_cores` says. Turn detection off and the map is used, which is worth doing on a shared machine: the upstream fallback offers 22 cores out of 24 whatever the machine really has.
+
+### Study workspaces
+
+The directories the application exposes, one entry per workspace:
+
+```yaml
+antarest_workspaces:                 # roles/antares_web/defaults/main.yml
+  default:
+    dir: internal_studies
+  tmp:
+    dir: studies
+  etudes:                            # an added one
+    dir: etudes
+    filter_in: ["^study-.*"]         # what the scan takes in
+    filter_out: ["^_.*"]             #             and leaves out
+    groups: ["etudes"]               # who sees what is found there
+```
+
+`default` is required and is not a workspace like the others: it holds the managed studies, the ones the interface creates itself, and it is the only one the watcher never scans. Its studies are named after their id, which is why the folder tree of the interface shows nothing under the managed studies and answers "no folder found" while the studies themselves are listed. Every other entry is a workspace of studies "on disk": a directory the watcher walks, whose sub-directories appear in the interface under the name of the workspace, `tmp` being the one the upstream reference configuration declares.
+
+Each entry becomes `{{ antarest_data_dir }}/workspaces/<dir>` on the host, created by the play, and `/workspaces/<dir>` in the containers. `dir` defaults to the name of the workspace and the two differ for the workspaces above for historical reasons. That path is what the studies are recorded with in the database, so changing the directory of a workspace that already holds studies leaves those rows pointing at a path that no longer exists; taking a workspace out of the variable removes neither the directory nor its studies.
+
+To expose a tree that already exists elsewhere, an NFS study directory for instance, mount it on `{{ antarest_data_dir }}/workspaces/<dir>` on the host and declare the workspace. The mount has to be in place before the containers start: `/workspaces` is bind-mounted into them, and a filesystem mounted underneath it afterwards stays invisible inside a running container.
+
+A directory holding a file named `AW_NO_SCAN` is skipped by the scan, and a study only reaches the interface once the watcher has run for real, see the maintenance tasks below.
+
 ### TLS
 
 There is already an nginx in the stack, so that is the one that terminates TLS: no second reverse proxy to install and no port to move. Switching it on makes the `antares-nginx` container listen on 443 as well and, by default, redirect http to it.
@@ -289,6 +331,9 @@ slurm_cluster_name: antares
 slurm_partition: antares
 slurm_select_type: "select/cons_tres"   # use select/linear for exclusive nodes
 slurmdbd_innodb_buffer_pool_size: "1G"
+slurm_launcher_ssh_port: 22             # how Antares-Web reaches the front-end
+slurm_launcher_default_wait_time: 900   # seconds
+slurm_launcher_default_time_limit: 172800
 ```
 
 Compute node characteristics (`CPUs`, `SocketsPerBoard`, `CoresPerSocket`, `ThreadsPerCore`, `RealMemory`) are derived from Ansible facts and can be overridden per-host in the inventory using `slurm_node_cpus`, `slurm_node_sockets`, `slurm_node_cores_per_socket`, `slurm_node_threads_per_core` and `slurm_node_real_memory`.
@@ -415,6 +460,17 @@ journalctl -u antarest-celery-beat -f      # what was scheduled
 ```
 
 Read a few cycles before switching one off. `auto_archive` is the one to be careful with: it is not a collector, it moves studies users can see into the archive directory.
+
+Each switch, `blob_gc` excepted, goes with the threshold that decides what is old enough to be taken. The dry run decides *that* something is deleted, these decide *which*, so they are written out next to it rather than left implicit at the upstream value:
+
+```yaml
+antarest_matrix_gc_retention_time: 3600        # seconds, not days
+antarest_variable_view_gc_retention_days: 30
+antarest_tasks_gc_retention_days: 30
+antarest_auto_archive_threshold_days: 60
+```
+
+Intervals are the one part left implicit: every `*_sleeping_time` and `*_cron` of the upstream `docs/configuration.md` keeps its default, and `auto_archive_sleeping_time` and `auto_archive_cron` are mutually exclusive, setting both makes the application refuse to start.
 
 Order matters between two of them. Every `output_variables_views` row pins its matrix, so `matrices_cleaner` reclaims almost nothing until `variable_view_cleaner` has run for real.
 

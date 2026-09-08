@@ -1,4 +1,17 @@
 ---
+# `default` is where the managed studies are written and there is no fallback
+# for it: `get_workspace_path` looks the name up in the file and raises
+# `ValueError: Workspace 'default' not found in config`, at the moment a study
+# is created rather than at startup. That is a 500 in the interface, a long way
+# from the inventory entry that caused it, hence the check here.
+- name: Check the default workspace is declared
+  ansible.builtin.assert:
+    that: "'default' in antarest_workspaces"
+    fail_msg: >-
+      antarest_workspaces must declare a `default` workspace: that is where
+      Antares-Web writes the studies it creates itself.
+    quiet: true
+
 - name: Create the Antares-Web data directories
   ansible.builtin.file:
     path: "{{ item }}"
@@ -8,8 +21,6 @@
     mode: "0755"
   loop:
     - "{{ antarest_data_dir }}/workspaces"
-    - "{{ antarest_data_dir }}/workspaces/internal_studies"
-    - "{{ antarest_data_dir }}/workspaces/studies"
     - "{{ antarest_data_dir }}/tmp"
     - "{{ antarest_data_dir }}/matrices"
     - "{{ antarest_data_dir }}/archives"
@@ -27,6 +38,24 @@
     - "{{ antarest_data_dir }}/local_workspace"
     - "{{ antarest_data_dir }}/local_workspace/local"
     - "{{ antarest_data_dir }}/local_workspace/slurm"
+
+# One directory per declared workspace, under the single /workspaces mount.
+# Created here rather than left to podman, which would make them owned by root:
+# the containers run as the antares user and the watcher has to be able to read
+# them, the backend to write in the default one.
+#
+# Nothing removes the directory of a workspace taken out of the variable. That
+# is deliberate: it holds studies.
+- name: Create the workspace directories
+  ansible.builtin.file:
+    path: "{{ antarest_data_dir }}/workspaces/{{ item.value.dir | default(item.key) }}"
+    state: directory
+    owner: "{{ antares_user }}"
+    group: "{{ antares_group }}"
+    mode: "0755"
+  loop: "{{ antarest_workspaces | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
 
 # Since 2.34 the configuration is loaded through pydantic, and a `hostname:`
 # left empty in the slurm launcher is a validation error rather than something
