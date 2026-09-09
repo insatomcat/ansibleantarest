@@ -66,6 +66,11 @@
       {{ 'https' if antarest_tls_enabled | default(false) | bool else 'http' }}://{{
          hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}:{{
          antarest_https_port if antarest_tls_enabled | default(false) | bool else antarest_http_port }}
+    # Both live in the role defaults, which a playbook that does not include
+    # the role cannot see, hence the fallbacks. Empty means the deployment
+    # keeps its state on the boot disk, and the volume checks do not apply.
+    verify_data_device: "{{ antarest_data_device | default('') }}"
+    verify_data_dir: "{{ antarest_data_dir | default(antarest_base_dir ~ '/data') }}"
   tasks:
 
     # `until` rather than a single shot, and the state itself rather than the
@@ -162,6 +167,72 @@
         validate_certs: false
       delegate_to: localhost
       become: false
+
+    # A stack that answers proves nothing about *where* it is answering from.
+    # With a volume declared, the failure this catches is the quiet one: the
+    # volume did not come back, the units started on the empty mount point of
+    # the boot disk, and the interface is up with an empty database. The
+    # RequiresMountsFor= the units carry is what should have stopped that, so
+    # this is also the check that the units were rendered with it.
+    #
+    # Skipped when antarest_data_device is empty, where the state is meant to
+    # be on the boot disk and the data directory is an ordinary directory.
+    - name: The state is on the volume it was given
+      when: verify_data_device | length > 0
+      block:
+        - name: Ask what is mounted on the data directory
+          ansible.builtin.command:
+            cmd: findmnt --noheadings --output SOURCE --mountpoint {{ verify_data_dir }}
+          register: verify_data_mount
+          changed_when: false
+          failed_when: false
+
+        # antarest_data_device may be a symlink udev maintains, and findmnt
+        # answers with the device the kernel knows, so the two are compared
+        # once both are resolved.
+        - name: Resolve the device the volume is attached as
+          ansible.builtin.command:
+            cmd: readlink -f {{ verify_data_device }}
+          register: verify_data_real_device
+          changed_when: false
+
+        - name: Check the data directory is a mount point
+          ansible.builtin.assert:
+            that: verify_data_mount.rc == 0
+            fail_msg: >-
+              {{ verify_data_dir }} on {{ inventory_hostname }} is not a mount
+              point, while antarest_data_device names {{ verify_data_device }}.
+              The studies and the database are being written to the boot disk.
+            quiet: true
+
+        - name: Check it is the declared volume that is mounted there
+          ansible.builtin.assert:
+            that: (verify_data_mount.stdout | trim) == (verify_data_real_device.stdout | trim)
+            fail_msg: >-
+              {{ verify_data_dir }} on {{ inventory_hostname }} is mounted from
+              {{ verify_data_mount.stdout | trim }}, but antarest_data_device
+              names {{ verify_data_device }}
+              ({{ verify_data_real_device.stdout | trim }}).
+            quiet: true
+
+        # The one failure that is invisible until the next reboot: a volume
+        # mounted by hand passes both checks above and is gone on the way back
+        # up, taking the data directory with it.
+        - name: Ask fstab about the data directory
+          ansible.builtin.command:
+            cmd: findmnt --fstab --noheadings --output SOURCE --mountpoint {{ verify_data_dir }}
+          register: verify_data_fstab
+          changed_when: false
+          failed_when: false
+
+        - name: Check the mount survives a reboot
+          ansible.builtin.assert:
+            that: verify_data_fstab.rc == 0
+            fail_msg: >-
+              {{ verify_data_dir }} is mounted on {{ inventory_hostname }} but
+              /etc/fstab has no entry for it, so the next reboot brings the
+              machine back with its state on the boot disk.
+            quiet: true
 
 # ---------------------------------------------------------------------------
 #  The Slurm cluster

@@ -18,6 +18,7 @@ Everything is written in English, README included. Keep it that way.
 | What a RHEL target gets on top (CRB, EPEL, OpenHPC, SELinux) | What a RHEL-compatible target needs on top |
 | Every tunable and its default | Main variables |
 | Where files land on the web server | Antares-Web server directory layout |
+| Putting the studies and the database on a block device | Putting the state on its own volume |
 | Quadlet units, podman version floor | Containers: podman and quadlet |
 | celery-beat, celery-worker, the collectors | Background maintenance tasks |
 | nftables, fail2ban, sshd, unattended updates | Hardening |
@@ -64,10 +65,10 @@ Everything is written in English, README included. Keep it that way.
 | `slurm_compute` | slurmd |
 | `slurm_launch_script` | `launchAntares.sh` in the shared `/home` |
 
-`roles/antares_web/tasks/` is split by concern (`checkout`, `build_frontend`,
-`build_image`, `config`, `service`, `nginx`, `tls`, `certbot`, `migrate`,
-`ssh_key`, `load_artifacts`, `patch_frontend`). Go straight to the file whose
-name matches the question.
+`roles/antares_web/tasks/` is split by concern (`data_volume`, `checkout`,
+`build_frontend`, `build_image`, `config`, `service`, `nginx`, `tls`,
+`certbot`, `migrate`, `ssh_key`, `load_artifacts`, `patch_frontend`). Go
+straight to the file whose name matches the question.
 
 ## Conventions
 

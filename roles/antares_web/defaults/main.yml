@@ -7,6 +7,33 @@ antarest_deploy_dir: "{{ antarest_base_dir }}/deploy"
 # the checkout, so that upgrading Antares-Web never puts the data at risk.
 antarest_data_dir: "{{ antarest_base_dir }}/data"
 
+# A block device to hold that state instead of the boot disk. Empty keeps
+# everything on the boot disk, which is what every deployment did before this
+# existed. A device name is a property of one machine, so this belongs in the
+# inventory rather than in group_vars/all.yml:
+#
+#   antares_web_1:
+#     antarest_data_device: /dev/oracleoci/oraclevdb
+#
+# The volume is mounted on antarest_data_dir itself, rather than elsewhere with
+# antarest_data_dir pointed at it. A workspace path is what its studies are
+# recorded with in the database, so it has to read the same whether the state
+# sits on a volume or on the boot disk, and adding or removing the volume then
+# stays a decision about hardware alone.
+antarest_data_device: ""
+
+# The device is formatted whole, with no partition table: nothing else will
+# ever share it, and growing it afterwards is then the filesystem alone
+# (`xfs_growfs {{ antarest_data_dir }}`), with no partition to extend first.
+antarest_data_fstype: xfs
+
+# nofail so that a volume which failed to attach still leaves a machine that
+# boots and can be logged into. What keeps that from being silent is the
+# RequiresMountsFor= the container units carry when this is set: the stack
+# fails to start rather than starting on the empty mount point. Add _netdev for
+# an iSCSI attachment, whose device is not there until the network is.
+antarest_data_mount_opts: "defaults,nofail"
+
 antarest_solvers_dir: "{{ antarest_deploy_dir }}/solvers"
 antarest_ssh_key: "{{ antarest_deploy_dir }}/id_rsa"
 
