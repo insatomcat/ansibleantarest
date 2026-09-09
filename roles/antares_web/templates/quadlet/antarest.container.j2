@@ -16,6 +16,19 @@ PartOf={{ antarest_service_name }}.target
 # postgres *container* started, not that it accepts connections yet.
 StartLimitIntervalSec=300
 StartLimitBurst=5
+# The other direction of the dependency antares-nginx declares on this unit.
+# That one only propagates downwards: when this backend exhausts the budget
+# above, the start job of antares-nginx fails with 'dependency', and nothing
+# starts it again once the backend recovers, so the interface stays down long
+# after its cause is gone. Upholds= closes that: while this unit is active,
+# systemd starts antares-nginx whenever it finds it inactive or failed.
+#
+# It is deliberately here rather than on the target, and it names nginx alone:
+# a backend container that keeps dying must stay `failed` rather than loop out
+# of sight, which is the whole point of the start budget. The price is that
+# `systemctl stop antares-nginx` no longer holds while the backend runs; stop
+# the target, or the backend, to take the front end down.
+Upholds=antares-nginx.service
 
 [Container]
 ContainerName=antarest
