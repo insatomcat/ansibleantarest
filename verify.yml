@@ -107,7 +107,8 @@
               'antarest.service', 'antarest-celery-beat.service',
               'antarest-celery-worker.service', 'antares-nginx.service',
               'antares-edge.service']
-             + (['antarest-adminer.service'] if antarest_enable_adminer | default(false) | bool else []) }}
+             + (['antarest-adminer.service'] if antarest_enable_adminer | default(false) | bool else [])
+             + (['keycloak.service'] if keycloak_enabled | default(false) | bool else []) }}
 
     - name: Fail when a unit of the stack is not running
       ansible.builtin.assert:
@@ -171,6 +172,23 @@
         validate_certs: false
       delegate_to: localhost
       become: false
+
+    # Through the front door, from the controller, like everything above: what
+    # is under test is the route, and a realm that answers proves at the same
+    # time that Keycloak is up, that its database was created and that the
+    # realm the connector authenticates against was imported.
+    - name: Ask Keycloak for the realm the connector uses
+      ansible.builtin.uri:
+        url: >-
+          {{ verify_web_url }}{{ keycloak_relative_path }}/realms/{{ keycloak_realm }}/.well-known/openid-configuration
+        validate_certs: false
+      register: verify_keycloak
+      retries: 12
+      delay: 5
+      until: verify_keycloak.status | default(0) == 200
+      delegate_to: localhost
+      become: false
+      when: keycloak_enabled | default(false) | bool
 
     # A stack that answers proves nothing about *where* it is answering from.
     # With a volume declared, the failure this catches is the quiet one: the
@@ -714,7 +732,8 @@
       {{ [5355]
          + ([antarest_http_port | int, antarest_https_port | int]
             if inventory_hostname not in (groups['antares_web'] | default([]))
-            else [5432, 6379, antarest_nginx_port | int])
+            else [5432, 6379, antarest_nginx_port | int]
+                 + ([keycloak_port | int] if keycloak_enabled | default(false) | bool else []))
          + ([111, 2049, 6817, 3306] + ([6819] if slurmdbd_enabled | bool else [])
             if slurm_enabled | bool and inventory_hostname in (groups['slurm_frontend'] | default([])) else [])
          + ([111, 2049, 6818]

@@ -66,13 +66,15 @@ antarest_adminer_image: "{{ container_registry }}/adminer:5"
 
 # The images that have to be present for the stack to start, beyond our own.
 # Shared with build.yml so the archives and the units cannot drift apart. The
-# front door is in there although it belongs to another role: it is one more
-# image an offline target has to find loaded, and `unique` keeps it from being
-# archived twice when it is pinned to the same nginx as this stack serves with.
+# front door and Keycloak are in there although they belong to other roles:
+# they are two more images an offline target has to find loaded, and `unique`
+# keeps the front door from being archived twice when it is pinned to the same
+# nginx as this stack serves with.
 antarest_thirdparty_images: >-
   {{ ([antarest_postgres_image, antarest_redis_image, antarest_nginx_image,
        antares_edge_image]
-      + ([antarest_adminer_image] if antarest_enable_adminer | bool else []))
+      + ([antarest_adminer_image] if antarest_enable_adminer | bool else [])
+      + ([keycloak_image] if keycloak_enabled | bool else []))
      | unique }}
 
 # Build context of the derived image. Deliberately a directory of its own,

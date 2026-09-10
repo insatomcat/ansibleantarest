@@ -1,0 +1,12 @@
+---
+# The role runs whatever keycloak_enabled says, so that turning it back off
+# takes the container down instead of leaving an orphan unit running next to a
+# deployment that no longer knows about it.
+
+- name: Install Keycloak
+  ansible.builtin.include_tasks: install.yml
+  when: keycloak_enabled | bool
+
+- name: Remove Keycloak
+  ansible.builtin.include_tasks: remove.yml
+  when: not keycloak_enabled | bool

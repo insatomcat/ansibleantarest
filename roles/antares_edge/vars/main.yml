@@ -41,8 +41,15 @@ antares_edge_volumes: >-
 #
 # Antares-Web is always there and is the catch-all; anything else claims a
 # prefix of its own, and nginx picks the longest match whatever the order.
+# The Keycloak location is written without a trailing slash, so that /auth and
+# /auth/ both land there rather than the first one falling through to the web
+# application.
 antares_edge_routes: >-
   {{ [{'path': '/',
        'upstream': '127.0.0.1:' ~ antarest_nginx_port,
        'name': 'Antares-Web'}]
+     + ([{'path': keycloak_relative_path,
+          'upstream': '127.0.0.1:' ~ keycloak_port,
+          'name': 'Keycloak'}]
+        if keycloak_enabled | bool else [])
      + antares_edge_extra_routes }}

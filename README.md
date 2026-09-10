@@ -491,6 +491,7 @@ Everything after the run still happens before that exit: the post-processing, th
 /etc/systemd/system/antares-web.target
 
 /etc/antares-web/edge/       front door configuration
+/etc/antares-web/keycloak/   realm imported at the first start of Keycloak
 /etc/antares-web/tls/        self-signed or hand-copied certificate
 /etc/letsencrypt/            certbot state, when that provider is used
 /var/www/certbot/            ACME challenge webroot, served by the front door
@@ -527,15 +528,16 @@ podman ps
 journalctl -u antarest.service -f
 ```
 
-On the web server the generated services are `antarest`, `antarest-celery-beat`, `antarest-celery-worker`, `postgresql`, `redis`, `antares-nginx`, `antares-edge` and `antares-web-network`. On the Slurm frontend, the accounting DB follows the same pattern under `slurmdb.target` (`slurmdb-mariadb`, and `slurmdb-adminer` if enabled).
+On the web server the generated services are `antarest`, `antarest-celery-beat`, `antarest-celery-worker`, `postgresql`, `redis`, `antares-nginx`, `antares-edge`, `antares-web-network`, and `keycloak` when it is enabled. On the Slurm frontend, the accounting DB follows the same pattern under `slurmdb.target` (`slurmdb-mariadb`, and `slurmdb-adminer` if enabled).
 
-Three container names are significant (they become DNS names on the podman network). Renaming them silently breaks the stack:
+Some container names are significant (they become DNS names on the podman network). Renaming them silently breaks the stack:
 
 | Container | Who depends on it |
 |---|---|
 | `antarest`   | upstream `nginx.conf` proxies to `http://antarest:5000/` |
 | `postgresql` | `config.prod.yaml` points DB to `postgresql:5432` |
 | `redis`      | `config.prod.yaml` points cache to `redis` |
+| `keycloak`   | the authentication connector resolves it, see `antares_auth_keycloak_url` |
 
 `postgresql` also has the alias `postgres` (the upstream compose container_name). Compose resolved both service and container names; podman resolves only the container name and aliases.
 
@@ -605,6 +607,49 @@ The worker runs celery's `solo` pool, one task at a time. That is not a conserva
 The beat container is the one oddity in the stack. It keeps its "last run" state in a shelve file whose default name is relative to the working directory, which in this image is `/`, not writable by a container running as `antares_uid`. Its unit therefore carries `PodmanArgs=--workdir=/celerybeat --entrypoint=/scripts/start.sh`: the working directory moves onto a bind mount under `data/celerybeat`, and the entrypoint has to be given absolutely because the image declares it as the relative path `./scripts/start.sh`. Both go through `PodmanArgs=` because the `WorkingDir=` and `Entrypoint=` quadlet keys only exist from podman 5.0 and Ubuntu 24.04 ships 4.9.
 
 Intervals are not exposed as Ansible variables. Every `*_sleeping_time` and `*_cron` of the upstream `docs/configuration.md` can be added to `roles/antares_web/templates/config.prod.yaml.j2` under `storage:`. One trap: `auto_archive_sleeping_time` and `auto_archive_cron` are mutually exclusive, setting both makes the application refuse to start.
+
+## Authentication
+
+Antares-Web knows two kinds of account. Local ones live in its database, admin included, and are managed from its own interface. External ones come from `security.external_auth`: a URL the backend POSTs a username and a password to, expecting the first name, the last name and the groups of that user back. That is all the protocol is, and it is the only hook the application has. It speaks no OIDC, no SAML and no LDAP.
+
+```yaml
+antarest_external_auth_url: "http://antares-auth-kc:8870"
+antarest_external_auth_default_group_role: 10      # 10 reader ... 40 admin
+antarest_external_auth_add_ext_groups: true
+```
+
+A user who logs in that way is created in the database on the spot, with the role `antarest_external_auth_default_group_role` in each group the service returned. `antarest_external_auth_add_ext_groups` decides whether groups that do not exist yet are created; with it off, only the groups listed in `antarest_external_auth_group_mapping` are honoured, which is the way to expose two or three of them and ignore the rest.
+
+### Keycloak
+
+`keycloak_enabled` puts a Keycloak next to Antares-Web: one more container on the podman network, published on `127.0.0.1:8082`, served by the front door under `/auth/`, and sharing the PostgreSQL the stack already runs.
+
+It gets a database of its own in that cluster (`keycloak`, with a role of the same name), created by the playbook before the container is ever started. A schema in the Antares-Web database would have worked; a database of its own means a migration on either side has no business meeting the other one's, and a dump of one is not a dump of both.
+
+```yaml
+keycloak_enabled: true
+keycloak_realm: antares
+keycloak_admin_password: "..."      # seeds the master realm admin, once
+keycloak_db_password: "..."
+keycloak_client_secret: "..."
+```
+
+The playbook imports a realm at the first start, and only then: Keycloak skips a realm that already exists, which is what keeps the users and groups created since. That realm holds one client, `antares-auth`, with a direct access grant (to check a password) and a service account carrying `view-users` (to read the groups of the user who just logged in). Nothing here holds a credential of the `master` realm. Users and groups are created afterwards, from the console at `https://<domain>/auth/admin/`.
+
+To replay a change to `roles/keycloak/templates/realm.json.j2` on a machine whose realm holds nothing worth keeping:
+
+```bash
+podman exec keycloak /opt/keycloak/bin/kc.sh import \
+    --file /opt/keycloak/data/import/antares-realm.json --override true
+```
+
+That overwrites the realm, users and groups included.
+
+`keycloak_admin_password` has the same shape as `antarest_admin_password`: it seeds the first administrator when the database is empty and is ignored ever after. Changing it later is done from the console. The other two secrets are read at every start, and `keycloak_db_password` is reconciled by the playbook, which checks the role can still log in with it and sets it when it cannot.
+
+Without TLS the Keycloak console is reachable only from a private address: its realms are imported with `sslRequired: none`, but the `master` realm the console lives in keeps the Keycloak default and refuses a plain-http login from anywhere else. Turn TLS on, or tunnel: `ssh -L 8082:127.0.0.1:8082 <machine>`, then `http://127.0.0.1:8082/auth/admin/`.
+
+Turning `keycloak_enabled` back off stops and removes the container. It leaves the database alone: turning it on again finds its realms, its users and its groups where they were.
 
 ## Hardening
 
@@ -710,6 +755,7 @@ Without a registry, each new version means `N × size` copies with no layer dedu
 ```bash
 ansible-playbook site.yml --tags antares_web     # redeploy application
 ansible-playbook site.yml --tags edge            # front door only: TLS, routes
+ansible-playbook site.yml --tags keycloak        # Keycloak only
 ansible-playbook site.yml --tags slurm           # cluster only
 ansible-playbook site.yml --tags solver          # (re)install solvers
 ansible-playbook site.yml --tags xpansion        # (re)install Antares-Xpansion (needs antares_xpansion_enabled)
@@ -730,7 +776,7 @@ ansible-playbook verify.yml --tags firewall      # only the rulesets
 
 It changes nothing beyond one marker file in the shared `/home`, which the last play removes, so it is safe against a production deployment. Each part skips itself where it does not apply (`slurm_enabled`, `hardening_firewall_enabled`, `hardening_journal_persistent`):
 
-- **Antares-Web.** Every unit of the stack is `active`, the backend answers `/api/health`, nginx serves the built front-end and routes `/api/` to the backend, all of it asked from the controller through the front door, so the answer crosses the firewall and the whole proxy chain rather than a loopback. The other way round, the ports everything behind the front door is published on are checked to be reachable from the machine alone. When `antarest_data_device` is set, the data directory is checked to really be that volume's mount point and to have its entry in `/etc/fstab`: a stack that answers proves nothing about *where* it is writing, and a volume that did not come back leaves the units on the empty mount point of the boot disk, with an empty database behind a working interface. With the variable empty the state belongs on the boot disk and the check does not apply.
+- **Antares-Web.** Every unit of the stack is `active`, the backend answers `/api/health`, nginx serves the built front-end and routes `/api/` to the backend, all of it asked from the controller through the front door, so the answer crosses the firewall and the whole proxy chain rather than a loopback. The other way round, the ports everything behind the front door is published on are checked to be reachable from the machine alone. With Keycloak enabled, its realm answers through the front door, which says at once that it is up, that its database was created and that the realm was imported. When `antarest_data_device` is set, the data directory is checked to really be that volume's mount point and to have its entry in `/etc/fstab`: a stack that answers proves nothing about *where* it is writing, and a volume that did not come back leaves the units on the empty mount point of the boot disk, with an empty database behind a working interface. With the variable empty the state belongs on the boot disk and the check does not apply.
 - **The cluster.** `slurmctld` is alive and sees every compute node of the inventory in a healthy state, the cluster is registered in the accounting database, the compute nodes really mount the front-end's `/home` (a marker written on one side and read on the other) and can execute the solvers installed in it, and a job submitted exactly the way the backend submits one - over SSH, with the key generated on the web machine, to the `antares` account of the front-end - runs on a compute node.
 - **The journal.** `journalctl --header` is asked which files journald is actually writing to, and they have to be under `/var/log/journal` with nothing left under `/run/log/journal/<this machine's id>`. The id is half the question, and an EL 9 is what says so: its cloud images ship a committed `/etc/machine-id` which cloud-init resets on the first boot, so journald writes for five seconds under the image's id, is restarted under the new one and flushes that one alone. The runtime file of the first id stays in `/run` until the next reboot, OFFLINE, holding those five seconds. Nothing writes to it, no flush can move it - journald only ever flushes its own id - and it is not a journal the machine is losing. That is the location itself rather than the drop-in that asked for it, which is the point: a machine whose journal is in the `/run` tmpfs loses, at the next reboot, the log of everything that led to it, and every other check in this file is read out of that journal.
 
@@ -759,7 +805,7 @@ The reference procedure dates from September 2025; several upstream changes have
 
 ## Major database versions
 
-Third-party images are pinned to majors (`postgres:18`, `mariadb:11`, `redis:8`, `nginx:1.30`, `adminer:5`) rather than `latest` to avoid accidental major upgrades. nginx is pinned on a minor because its major is always `1`, and on the stable branch rather than the mainline one, which stops being rebuilt as soon as the next mainline opens.
+Third-party images are pinned to majors (`postgres:18`, `mariadb:11`, `redis:8`, `nginx:1.30`, `adminer:5`, `keycloak:26.7`) rather than `latest` to avoid accidental major upgrades. nginx is pinned on a minor because its major is always `1`, and on the stable branch rather than the mainline one, which stops being rebuilt as soon as the next mainline opens. Keycloak too: it has published nothing but `26.x` for two years, and it migrates its own schema on the first start of a new version without migrating back.
 
 Since these tags are also the names of the archives `build.yml` produces, changing one invalidates the whole artifact set: re-run `build.yml` before the next `archive` deployment. The target says so explicitly rather than failing later on a missing image.
 

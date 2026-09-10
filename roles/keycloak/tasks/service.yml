@@ -1,0 +1,62 @@
+---
+# Same shape as the front door: this role owns one unit, and validates and
+# starts it itself rather than through the list antares_web keeps for the
+# containers it writes.
+- name: Validate the quadlet units
+  ansible.builtin.command: /usr/lib/systemd/system-generators/podman-system-generator -dryrun
+  register: keycloak_quadlet_check
+  changed_when: false
+
+- name: Check the Keycloak service was generated
+  ansible.builtin.assert:
+    that:
+      - "'---' ~ keycloak_container ~ '.service---' in keycloak_quadlet_check.stdout"
+    fail_msg: >-
+      The quadlet generator did not produce {{ keycloak_container }}.service.
+      Units present in /etc/containers/systemd:
+      {{ keycloak_quadlet_check.stdout | regex_findall('---(.+?)---') | join(', ') }}
+    quiet: true
+
+# A container that exhausted its start budget stays `failed` and systemd
+# refuses to start it again until StartLimitIntervalSec has run, so the run
+# that fixes the cause would fail on the previous run's verdict.
+- name: Look for a failure a previous run left
+  ansible.builtin.command: "systemctl is-failed {{ keycloak_container }}.service"
+  register: keycloak_failed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Clear it
+  ansible.builtin.command: "systemctl reset-failed {{ keycloak_container }}.service"
+  when: keycloak_failed.stdout == 'failed'
+  changed_when: true
+
+# Started, not enabled: `systemctl enable` refuses a unit the quadlet generator
+# produced. What brings it back after a reboot is the WantedBy= inside the
+# .container file, through antares-web.target, which is a real unit file and is
+# enabled by antares_web.
+- name: Start Keycloak
+  ansible.builtin.systemd:
+    name: "{{ keycloak_container }}.service"
+    state: started
+    daemon_reload: true
+
+- name: Apply the pending restarts now
+  ansible.builtin.meta: flush_handlers
+
+# The realm's discovery document rather than a port or the health endpoint: the
+# port answers before the realm exists, and health lives on the management port
+# 9000, which nothing publishes. A 200 here means Keycloak is up *and* the realm
+# the connector authenticates against was imported.
+#
+# Patient: the first start creates the schema and imports the realm.
+- name: Wait for the realm to answer
+  ansible.builtin.uri:
+    url: >-
+      http://127.0.0.1:{{ keycloak_port }}{{ keycloak_relative_path }}/realms/{{ keycloak_realm }}/.well-known/openid-configuration
+    status_code: [200]
+  register: keycloak_ready
+  retries: 60
+  delay: 5
+  until: keycloak_ready.status is defined and keycloak_ready.status == 200
