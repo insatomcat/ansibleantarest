@@ -1,0 +1,22 @@
+---
+# Runs after antares_web on purpose: the ACME http-01 challenge is answered by
+# this very container, so a certificate can only be obtained once the front
+# door is up, and the front door is only worth starting once there is something
+# behind it to proxy to.
+
+- name: Prepare the TLS material
+  ansible.builtin.include_tasks: tls.yml
+  when: antarest_tls_enabled | bool
+
+- name: Render the front door
+  ansible.builtin.include_tasks: nginx.yml
+
+- name: Start the front door
+  ansible.builtin.include_tasks: service.yml
+
+# After the front door is up, since the challenge is answered through it.
+- name: Obtain the TLS certificate
+  ansible.builtin.include_tasks: certbot.yml
+  when:
+    - antarest_tls_enabled | bool
+    - antarest_tls_provider == 'letsencrypt'

@@ -1,0 +1,8 @@
+---
+# The front door alone, not the whole target: a new certificate or a new route
+# has no reason to restart the backend, the database and the studies with it.
+- name: Restart the front door
+  ansible.builtin.systemd:
+    name: "{{ antares_edge_container }}.service"
+    state: restarted
+    daemon_reload: true

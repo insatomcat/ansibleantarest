@@ -1,11 +1,31 @@
 ---
-# The nginx configuration and its unit, in a file of their own because they are
-# rendered twice on the run that obtains a certificate: once before the stack
-# starts (plain http, so that certbot has something to answer the challenge
-# with) and once after (TLS on, port 443 published).
+# The nginx configuration and its unit. This nginx serves the web application
+# and the /api/ proxy and nothing else: the ports of the machine, TLS and the
+# routing of anything else it serves belong to the antares_edge role.
 
-# With TLS off the project file is mounted straight from the checkout and there
-# is nothing to render, see antarest_nginx_conf_source.
+# The rendered configuration is derived from the project file, so a change on
+# their side would otherwise be silently dropped: the mount points at ours.
+# A warning rather than a failure, since a reformatting is not a reason to stop
+# a deployment.
+- name: Read the nginx configuration shipped by the project
+  ansible.builtin.stat:
+    path: "{{ antarest_dir }}/resources/deploy/nginx.conf"
+    checksum_algorithm: sha1
+  register: antarest_nginx_upstream
+
+- name: Warn when the project changed its nginx configuration
+  ansible.builtin.debug:
+    msg: >-
+      {{ antarest_dir }}/resources/deploy/nginx.conf has checksum
+      {{ antarest_nginx_upstream.stat.checksum }}, not the
+      {{ antarest_nginx_upstream_sha1 }} the deployed configuration was derived
+      from. That file is not mounted: compare it to
+      roles/antares_web/templates/nginx.conf.j2, carry over what changed, and
+      update antarest_nginx_upstream_sha1.
+  when:
+    - antarest_nginx_upstream.stat.exists | default(false)
+    - antarest_nginx_upstream.stat.checksum != antarest_nginx_upstream_sha1
+
 - name: Deploy the nginx configuration
   ansible.builtin.template:
     src: nginx.conf.j2
@@ -13,7 +33,6 @@
     owner: root
     group: root
     mode: "0644"
-  when: antarest_tls_enabled | bool
   notify: Restart Antares-Web
 
 - name: Deploy the nginx quadlet unit

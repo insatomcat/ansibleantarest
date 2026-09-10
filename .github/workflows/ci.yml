@@ -634,7 +634,7 @@ jobs:
           # reasoning as the unit sweep of verify.yml, which the cluster job
           # runs instead of this step.
           for unit in postgresql redis antarest antarest-celery-beat \
-                      antarest-celery-worker antares-nginx; do
+                      antarest-celery-worker antares-nginx antares-edge; do
             for _ in $(seq 1 12); do
               state=$(vm "systemctl is-active $unit.service" || true)
               case "$state" in
@@ -714,7 +714,7 @@ jobs:
           vm 'sudo podman ps -a'
           vm 'sudo podman images'
           for unit in postgresql redis antarest antarest-celery-beat \
-                      antarest-celery-worker antares-nginx; do
+                      antarest-celery-worker antares-nginx antares-edge; do
             echo "===== $unit.service"
             vm "sudo journalctl -u $unit.service --no-pager -n 100"
           done
@@ -1213,7 +1213,7 @@ jobs:
           echo "===== the web machine"
           vm antares-web 'sudo podman ps -a'
           for unit in postgresql redis antarest antarest-celery-beat \
-                      antarest-celery-worker antares-nginx; do
+                      antarest-celery-worker antares-nginx antares-edge; do
             echo "===== $unit.service"
             vm antares-web "sudo journalctl -u $unit.service --no-pager -n 100"
           done
@@ -1554,7 +1554,7 @@ jobs:
           echo "===== the shared home"
           vm 'showmount -e localhost; ls -l /home/antares'
           for unit in postgresql redis antarest antarest-celery-beat \
-                      antarest-celery-worker antares-nginx; do
+                      antarest-celery-worker antares-nginx antares-edge; do
             echo "===== $unit.service"
             vm "sudo journalctl -u $unit.service --no-pager -n 100"
           done

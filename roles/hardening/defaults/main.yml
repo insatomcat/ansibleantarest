@@ -138,10 +138,11 @@ hardening_fail2ban_nft_table: antares_f2b
 # Jail on the Antares-Web login form, on the antares_web machines. The API
 # answers 401 on a wrong password, nginx logs it, this counts them.
 hardening_fail2ban_web_jail: true
-# Container whose journal the jail reads. Same name as the one the antares_web
-# role gives nginx; that role's defaults are not in scope in this play, hence
-# the fallback rather than a direct reference.
-hardening_fail2ban_web_container: "{{ antarest_nginx_container | default('antares-nginx') }}"
+# Container whose journal the jail reads: the front door, not the Antares-Web
+# nginx. It is the only one that sees the real client address, everything
+# behind it being reached through a proxy. Its role's defaults are not in scope
+# in this play, hence the fallback rather than a direct reference.
+hardening_fail2ban_web_container: "{{ antares_edge_container | default('antares-edge') }}"
 hardening_fail2ban_web_maxretry: 10
 hardening_fail2ban_web_findtime: 10m
 hardening_fail2ban_web_bantime: 1h
