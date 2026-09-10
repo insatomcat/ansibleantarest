@@ -1,0 +1,72 @@
+---
+# The journal is where everything here says what went wrong: fail2ban's bans,
+# the backend's crash loops, the containers (LogDriver=journald in the
+# quadlets) and dnf-automatic's report. When it lives in /run, a reboot takes
+# all of that with it - and a reboot is what follows a kernel update or a
+# maintenance window, that is, the moment the answer was wanted. Only the
+# RedHat family keeps a second copy, in /var/log/messages through rsyslog; the
+# Ubuntu images ship no rsyslog at all, which is already the reason the jails
+# read the journal rather than /var/log/auth.log.
+
+- name: Create the journald drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# A drop-in rather than journald.conf itself: the cloud images write their own
+# settings in that file and there is no reason to take them over.
+- name: Keep the journal across reboots
+  ansible.builtin.template:
+    src: journald-antares.conf.j2
+    dest: /etc/systemd/journald.conf.d/10-antares.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: hardening_journald_conf
+
+# journald reads its configuration once, at start. Restarting it is what
+# creates /var/log/journal and moves the writes there; this role runs before
+# anything is deployed and before the jails exist, so nothing is reading the
+# journal yet at this point.
+- name: Restart journald on the new configuration
+  ansible.builtin.systemd:
+    name: systemd-journald.service
+    state: restarted
+  when: hardening_journald_conf.changed
+
+# The entries already in /run stay there until journald is told to move them,
+# which is what systemd-journal-flush does at boot and what this does now.
+- name: Move what is already in /run to disk
+  ansible.builtin.command: journalctl --flush
+  changed_when: false
+  when: hardening_journald_conf.changed
+
+# Created at run time by journald, the directory is root:root 0755 and its
+# files carry no ACL, so `journalctl` without sudo shows an operator nothing.
+# The `z` and `a+` lines of the distribution's own tmpfiles say what it should
+# be (2755 root:systemd-journal, read for adm and wheel); a reboot would apply
+# them, and this is the run that made the directory.
+- name: Give the journal directory the ownership systemd gives it at boot
+  ansible.builtin.command: systemd-tmpfiles --create --prefix=/var/log/journal
+  when: hardening_journald_conf.changed
+
+- name: Check the journal is on disk
+  ansible.builtin.stat:
+    path: /var/log/journal
+  register: hardening_journal_dir
+
+# `--check` never restarts journald, so the directory is legitimately missing
+# there and would be the only failure of the run.
+- name: Fail if the journal is still volatile
+  ansible.builtin.assert:
+    that: hardening_journal_dir.stat.isdir | default(false)
+    fail_msg: >-
+      journald did not create /var/log/journal on {{ inventory_hostname }}, so
+      its journal is still wiped at every reboot. `journalctl --header` there
+      says what it made of the configuration; set hardening_journal_persistent
+      to false to leave the journal alone.
+    quiet: true
+  when: not ansible_check_mode

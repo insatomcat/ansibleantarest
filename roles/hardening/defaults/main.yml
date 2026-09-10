@@ -176,6 +176,17 @@ hardening_ssh_allow_tcp_forwarding: true
 hardening_ssh_extra_ports: []
 
 # ---------------------------------------------------------------------------
+#  Journal
+# ---------------------------------------------------------------------------
+# Whether journald keeps its journal in /var/log/journal rather than in the
+# /run tmpfs it is wiped from at every reboot.
+hardening_journal_persistent: true
+
+# How much of the root filesystem the journal may take. Left unset, journald
+# would help itself to 10% of it, capped at 4G.
+hardening_journal_max_use: "500M"
+
+# ---------------------------------------------------------------------------
 #  Unattended upgrades
 # ---------------------------------------------------------------------------
 # unattended-upgrades on the Debian family, dnf-automatic on the RedHat one.

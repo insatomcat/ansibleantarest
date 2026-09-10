@@ -14,7 +14,9 @@
 #      the cluster, a job submitted the way Antares-Web submits it runs on a
 #      compute node, and the shared /home really is shared,
 #    - the firewall: three different rulesets on three kinds of machine, each
-#      of which has to let the peers through and keep everyone else out.
+#      of which has to let the peers through and keep everyone else out,
+#    - the journal: the one thing every answer above is read from, which is
+#      worth nothing if it is wiped at the next reboot.
 #
 #  The controller is the outside world here, and that is the point of the
 #  second half: it is not in the inventory, so it is in no ruleset's trusted
@@ -26,10 +28,11 @@
 #  that the last play removes. It is safe on a production deployment, and it
 #  is what the `slurm` job of .github/workflows/ci.yml runs after site.yml.
 #
-#  Both halves switch themselves off where they do not apply: the cluster
-#  plays when slurm_enabled is false, the firewall plays when
+#  Every play switches itself off where it does not apply: the cluster ones
+#  when slurm_enabled is false, the firewall ones when
 #  hardening_firewall_enabled is false - a deployment filtered by a cloud
-#  security group instead has nothing on the machine to check.
+#  security group instead has nothing on the machine to check - and the
+#  journal one when the hardening role was told to leave the journal alone.
 #
 #  Note on `hostvars[inventory_hostname]` below, where `ansible_host` would
 #  read more naturally: a task with delegate_to takes its connection
@@ -508,6 +511,80 @@
           name of a compute node followed by the launch script check.
         quiet: true
       when: slurm_enabled | bool
+
+# ---------------------------------------------------------------------------
+#  The journal
+#
+#  Everything else in this file reads a journal at some point, and so does
+#  every diagnosis made the day after. Where journald is actually writing is
+#  therefore worth one question, and the answer is not the drop-in the role
+#  wrote: a file it ignored, a later drop-in, a /var with nothing free, and
+#  the machine is one reboot away from having no history of what it did.
+# ---------------------------------------------------------------------------
+
+- name: The journal is on disk and survives a reboot
+  hosts: all
+  become: true
+  gather_facts: false
+  tags: [verify, hardening]
+  tasks:
+
+    # `--header` lists the files journald would read, with their path, which
+    # is the location itself rather than the configuration that asked for it.
+    - name: Ask journald which files it is writing to
+      ansible.builtin.command: journalctl --header
+      register: verify_journal_header
+      changed_when: false
+      when:
+        - hardening_enabled | bool
+        - hardening_journal_persistent | bool
+
+    - name: Check the journal lives in /var and not in the /run tmpfs
+      ansible.builtin.assert:
+        that:
+          - verify_journal_persistent | length > 0
+          - verify_journal_runtime | length == 0
+        fail_msg: >-
+          journald on {{ inventory_hostname }} holds
+          {{ verify_journal_persistent | length }} file(s) under /var/log/journal
+          and {{ verify_journal_runtime | length }} under
+          /run/log/journal/{{ verify_machine_id }}
+          ({{ verify_journal_runtime | join(', ') | default('none', true) }}), so
+          this machine loses {{ 'part of' if verify_journal_persistent | length > 0
+          else 'all of' }} its logs at the next reboot. Check
+          /etc/systemd/journald.conf.d/10-antares.conf and what
+          `journalctl --disk-usage` and `df -h /var` say there.
+        quiet: true
+      vars:
+        verify_journal_files: >-
+          {{ verify_journal_header.stdout_lines | default([])
+             | select('match', '^File path: ')
+             | map('regex_replace', '^File path: ', '') | list }}
+        verify_journal_persistent: >-
+          {{ verify_journal_files | select('match', '^/var/log/journal/') | list }}
+        # Empty rather than absent would match every runtime directory, which
+        # is the old reading of this check and the safe way to be wrong.
+        verify_machine_id: "{{ ansible_facts['machine_id'] | default('') }}"
+        # Written before /var is usable and moved by systemd-journal-flush at
+        # boot, so anything left under this machine's own id belongs to a
+        # machine that never flushed.
+        #
+        # Under its own id, and only an EL 9 says why that matters. Its cloud
+        # images ship a committed /etc/machine-id, which cloud-init resets on
+        # the first boot: journald runs for five seconds under the image's id,
+        # is restarted under the new one, and flushes that one alone. What it
+        # leaves behind is /run/log/journal/<the image's id>/system.journal,
+        # OFFLINE, holding the first five seconds of the first boot. Nothing
+        # writes to it, no reboot brings it back, and no flush can move it,
+        # since journald only ever flushes its own id. It is not a journal this
+        # machine is losing, and counting it failed three EL 9 clusters that
+        # were keeping their logs exactly as asked.
+        verify_journal_runtime: >-
+          {{ verify_journal_files
+             | select('match', '^/run/log/journal/' ~ (verify_machine_id | regex_escape)) | list }}
+      when:
+        - hardening_enabled | bool
+        - hardening_journal_persistent | bool
 
 # ---------------------------------------------------------------------------
 #  The firewall
