@@ -1,0 +1,120 @@
+---
+# ===========================================================================
+#  Third half of the CI, used by the `standalone-slurm` job of
+#  .github/workflows/ci.yml.
+#
+#  One machine, in every group at once:
+#
+#      antares-solo  192.168.77.11   the web application, and the cluster it
+#                                    submits to: slurmctld, slurmdbd, the NFS
+#                                    export of /home, and the one slurmd that
+#                                    runs the studies
+#
+#  Why that shape exists at all: Antares-Web's local launcher ignores the
+#  Xpansion mode, so a deployment with `slurm_enabled: false` cannot run an
+#  investment optimisation - see "Known limitations" in the README. A single
+#  machine that is also its own cluster gets the Slurm launcher, and with it
+#  Xpansion, on the computing capacity that machine happens to have.
+#
+#  Nothing in the roles is specific to it. `slurm_frontend` already tolerates
+#  being a compute node too, which inventory/hosts.yml documents, and every
+#  role decides what it does from `inventory_hostname in groups[...]` rather
+#  than from the play it is in, so a host that is in the three groups gets the
+#  union of the three behaviours. What this job checks is that the union is
+#  really a working deployment.
+#
+#  On a bridge rather than on QEMU's user-mode network, which the single
+#  machine of the `standalone` job uses. verify.yml probes the machine from
+#  the controller and the controller has to be *outside*: the runner sits on
+#  the bridge at 192.168.77.1 without being in this inventory, so it is in no
+#  trusted set and its probes cross the input hook like traffic from the
+#  internet. That matters here more than anywhere else, since this machine
+#  carries the union of the three rulesets the cluster spreads over three
+#  machines.
+#
+#  Two checks of verify.yml become tautologies on one machine and are left in
+#  rather than switched off: the shared /home is read on the machine that
+#  exported it, and the job submitted over SSH lands on the node it was
+#  submitted from. Everything else is exactly the question it asks of a
+#  cluster.
+#
+#  The inventory name is the guest host name, and that is not cosmetic:
+#  slurmd matches the machine's own `hostname -s` against the NodeName lines
+#  of slurm.conf, which are generated from it.
+#
+#  Note on precedence, the same one the other inventories carry: settings
+#  written under a *host* override group_vars/all.yml, a `vars:` block on a
+#  group does not. Everything below therefore sits on the host.
+# ===========================================================================
+
+all:
+  hosts:
+
+    antares-solo:
+
+      # ---------------------------------------------------------------
+      #  Connection. The account and the key come from the cloud-init
+      #  seed the workflow builds; the key is the runner's own, generated
+      #  for the job. host_key_checking is already off in ansible.cfg,
+      #  which matters here: the host key is new on every run.
+      # ---------------------------------------------------------------
+      ansible_host: 192.168.77.11
+      ansible_user: ansible
+      ansible_ssh_private_key_file: ~/.ssh/id_ed25519_ci
+
+      # slurm_enabled is left alone: group_vars/all.yml already defaults it
+      # to true, which is what this inventory is for.
+
+      # ---------------------------------------------------------------
+      #  On, and worth more here than in either other shape: this is the
+      #  one machine of the CI whose ruleset is the union of the three -
+      #  the interface published to the world, the Slurm and NFS ports
+      #  open to the peers alone, and a peer set that contains nothing but
+      #  its own addresses. The probes of verify.yml come from the runner,
+      #  which is on the bridge and not in this inventory.
+      # ---------------------------------------------------------------
+      hardening_firewall_enabled: true
+
+      # ---------------------------------------------------------------
+      #  Not the shipped defaults, so the secrets check of the hardening
+      #  role has nothing to report and that path is exercised too. These
+      #  are public by construction: the machine is destroyed with the job
+      #  and the network it sits on exists only inside the runner.
+      # ---------------------------------------------------------------
+      antarest_jwt_key: "ci-jwt-not-a-secret"
+      antarest_admin_password: "ci-admin-not-a-secret"
+      antarest_db_password: "ci-db-not-a-secret"
+      slurmdbd_db_password: "ci-slurmdb-not-a-secret"
+
+      # Four gunicorn workers of the default formula would each load the
+      # whole application, on a machine that is also running the daemons of
+      # a cluster. Two is enough to still exercise the preforked path Redis
+      # is needed for.
+      antarest_gunicorn_workers: 2
+
+      # The shipped 1G is sized for a front-end that does nothing else.
+      # Here MariaDB shares the machine with postgres, redis, the backend
+      # and whatever a study is given, which is the whole point of this
+      # shape and the first thing to size on a real one.
+      slurmdbd_innodb_buffer_pool_size: "256M"
+
+  children:
+
+    # The same machine under three names. site.yml runs the plays in order -
+    # NFS, munge, Slurm, the front-end, the compute node, then the web stack
+    # and the SSH authorisation - so the machine plays every part in the
+    # order a cluster would.
+    antares_web:
+      hosts:
+        antares-solo:
+
+    slurm:
+      children:
+
+        slurm_frontend:
+          hosts:
+            antares-solo:
+
+        slurm_compute:
+          hosts:
+            antares-solo:
