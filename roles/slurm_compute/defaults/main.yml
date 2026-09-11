@@ -7,3 +7,9 @@ _slurmd_packages_by_repo:
     {{ ['slurmd'] if ansible_facts['os_family'] == 'Debian' else ['slurm-slurmd'] }}
   openhpc:
     - slurm-slurmd-ohpc
+
+# What the launch script runs on the node beyond the solvers. 7-Zip builds the
+# final zip of a run on several threads; the package has one name on both
+# families, and comes from EPEL on EL.
+slurm_compute_packages:
+  - 7zip

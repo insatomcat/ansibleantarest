@@ -2,14 +2,6 @@
 # Everything here lands in the shared /home, so it only has to be done once,
 # on the front-end.
 
-- name: Create the shared scratch directory
-  ansible.builtin.file:
-    path: "{{ slurm_scratch_dir }}"
-    state: directory
-    owner: "{{ antares_user }}"
-    group: "{{ antares_group }}"
-    mode: "0755"
-
 - name: Deploy the Antares launch script
   ansible.builtin.template:
     src: launchAntares.sh.j2

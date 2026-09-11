@@ -12,6 +12,22 @@
     group: root
     mode: "0755"
 
+- name: Install what the launch script runs
+  ansible.builtin.package:
+    name: "{{ slurm_compute_packages }}"
+    state: present
+
+# On the node's own disk, see slurm_scratch_dir. The launch script recreates it
+# when systemd-tmpfiles has cleaned it away; creating it here is what makes a
+# path outside /var/tmp, a local volume mounted for the purpose, work too.
+- name: Create the scratch directory of the launch script
+  ansible.builtin.file:
+    path: "{{ slurm_scratch_dir }}"
+    state: directory
+    owner: "{{ antares_user }}"
+    group: "{{ antares_group }}"
+    mode: "0755"
+
 # The slurm-wlm metapackage may have dragged slurmctld in; only the front-end
 # is supposed to run a controller.
 #
