@@ -13,3 +13,17 @@ slurmdbd_quadlet_all_units:
   - slurmdb-data.volume
   - slurmdb-mariadb.container
   - slurmdb-adminer.container
+
+# The names build.yml gives the archives of slurmdbd_thirdparty_images, derived
+# from the image names by the very rule its save step uses, so repinning a tag
+# renames the archive on both sides at once instead of silently loading the old
+# one.
+slurmdbd_image_archives: >-
+  {{ slurmdbd_thirdparty_images
+     | map('regex_replace', '[^a-zA-Z0-9]', '-')
+     | map('regex_replace', '^(.*)$', 'slurm-thirdparty-\1.tar.gz')
+     | list }}
+
+# Where the archives land on the front-end. Under the accounting database's own
+# directory: they are its images, and nothing else on this machine reads them.
+slurmdbd_artifacts_dir: "{{ slurmdbd_dir }}/artifacts"

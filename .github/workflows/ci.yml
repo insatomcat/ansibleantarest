@@ -433,7 +433,7 @@ jobs:
           ls -lh artifacts/
           cat artifacts/manifest.yml
 
-      # Around 900 MB of already-compressed archives, so no point paying for
+      # Around 1 GB of already-compressed archives, so no point paying for
       # the zip: compression-level 0 stores them as they are.
       - name: Upload the artefacts
         uses: actions/upload-artifact@v7
