@@ -33,19 +33,26 @@
 
 # :'pw' is psql quoting the value of the variable as a string literal, which is
 # what keeps a password holding a quote from being a syntax error, or worse.
+# That substitution belongs to psql, not to the server, and `-c` hands its
+# argument straight to the server: the statement has to come in on stdin, which
+# is what `exec -i` keeps open. Reading a script rather than a `-c` also means
+# psql exits 0 on a failed statement unless it is told otherwise, hence
+# ON_ERROR_STOP.
 - name: Create the Keycloak database role
   ansible.builtin.command:
     argv:
       - "{{ container_cmd }}"
       - exec
+      - -i
       - postgresql
       - psql
       - -U
       - postgres
       - -v
+      - ON_ERROR_STOP=1
+      - -v
       - "pw={{ keycloak_db_password }}"
-      - -c
-      - "CREATE ROLE {{ keycloak_db_user }} LOGIN PASSWORD :'pw'"
+    stdin: "CREATE ROLE {{ keycloak_db_user }} LOGIN PASSWORD :'pw'"
   when: keycloak_role_present.stdout | trim != '1'
   changed_when: true
 
@@ -98,14 +105,16 @@
     argv:
       - "{{ container_cmd }}"
       - exec
+      - -i
       - postgresql
       - psql
       - -U
       - postgres
       - -v
+      - ON_ERROR_STOP=1
+      - -v
       - "pw={{ keycloak_db_password }}"
-      - -c
-      - "ALTER ROLE {{ keycloak_db_user }} PASSWORD :'pw'"
+    stdin: "ALTER ROLE {{ keycloak_db_user }} PASSWORD :'pw'"
   when: keycloak_db_login.rc != 0
   changed_when: true
   notify: Restart Keycloak
