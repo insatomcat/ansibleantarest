@@ -14,8 +14,11 @@
 #   - the `module load` lines are dropped (no environment modules here); the
 #     Xpansion branch runs the C++ implementation, which needs none, rather
 #     than the R one the upstream template calls,
-#   - the scratch directory lives in the shared /home so that the front-end
-#     can collect the results.
+#   - the study is unpacked and run in a scratch directory on the node's own
+#     disk, and only the final zip goes to the shared /home, where the
+#     front-end collects it,
+#   - that zip is built by 7-Zip, on as many threads as the job was given,
+#     when the node has it.
 
 INPUT_ZIPNAME=$1
 ANTARES_VERSION=$2
@@ -164,7 +167,9 @@ print_message "hostname: $SLURM_JOB_NODELIST"
 print_message "local directory: $JOB_SCRATCH_DIR"
 print_message " "
 
-# create job-specific temporary scratch directory
+# create job-specific temporary scratch directory, local to the node (see
+# slurm_scratch_dir). -p also recreates the parent, which slurm_compute makes
+# but systemd-tmpfiles removes from /var/tmp once it has sat empty for a month.
 mkdir -p "$JOB_SCRATCH_DIR"
 # copy input_zipfile to JOB_SCRATCH_DIR
 cp "$INPUT_ZIPNAME" "$JOB_SCRATCH_DIR"
@@ -228,9 +233,24 @@ if [ "$POST_PROCESSING" = "True" ]; then
 fi
 
 # Zip finished study
+#
+# zip deflates on one core. 7-Zip deflates on as many threads as it is told,
+# into the same format, and the format is fixed: antares-launcher expects a
+# finished_*.zip and Antares-Web opens it with Python's zipfile. 7z is what
+# the 7zip package installs on every supported distribution (slurm_compute
+# puts it there), 7zz what upstream calls its own build; zip -2 stays the
+# fallback on a node that has neither. slurm.conf binds no step to its cores,
+# so the threads get the whole allocation even under srun.
 SECONDS=0
+ZIP_BIN=$(command -v 7zz || command -v 7z)
 print_timed_message "start ZIP"
-srun zip -2 -r "${USER_HOME}"/"$FINAL_ZIP_FILE" "$STUDY_NAME" > /dev/null 2>&1
+print_message "zip tool: ${ZIP_BIN:-zip}"
+if [ -n "$ZIP_BIN" ]; then
+  srun "$ZIP_BIN" a -bd -tzip -mx=1 -mmt="${SLURM_CPUS_PER_TASK:-1}" \
+       "${USER_HOME}"/"$FINAL_ZIP_FILE" "$STUDY_NAME" > /dev/null 2>&1
+else
+  srun zip -2 -r "${USER_HOME}"/"$FINAL_ZIP_FILE" "$STUDY_NAME" > /dev/null 2>&1
+fi
 print_timed_message "finish ZIP"
 ZIP_DURATION=$SECONDS
 print_message "final zip duration = $ZIP_DURATION"
