@@ -29,3 +29,14 @@ keycloak_volumes: >-
   {{ ([keycloak_dir ~ '/import:/opt/keycloak/data/import:ro']
       if keycloak_realm_import | bool else [])
      | map('regex_replace', '$', container_volume_opts | trim) | list }}
+
+# ===========================================================================
+#  Where the playbook talks to Keycloak
+# ===========================================================================
+#
+# The loopback port the front door proxies to, and not keycloak_public_url: the
+# playbook talks to the machine it is deploying, which has no reason to leave
+# through the front door and come back, and this answers before a domain or a
+# certificate exists. The master realm accepts a plain-http login from the
+# loopback, which is what makes tasks/admin.yml possible.
+keycloak_local_url: "http://127.0.0.1:{{ keycloak_port }}{{ keycloak_relative_path }}"

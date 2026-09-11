@@ -52,3 +52,18 @@ keycloak_image_gid: 0
 
 # Java options appended to whatever the image sets.
 keycloak_java_opts: ""
+
+# Replace the administrator Keycloak bootstraps with a permanent one.
+#
+# Keycloak 26 marks the account it creates from KC_BOOTSTRAP_ADMIN_* temporary
+# and asks, on every page of the console, for it to be replaced. tasks/admin.yml
+# does exactly that and puts keycloak_admin_user back in its place, so the
+# operator logs in with what the inventory says and reads no warning. Turn it
+# off for a master realm managed by hand.
+keycloak_admin_permanent: true
+
+# The administrator the replacement is done from, since the name the operator
+# configured is held by the temporary account until it is deleted. It lives
+# between two tasks of the same run, and the run deletes it whenever it finds
+# one.
+keycloak_admin_rotate_user: "{{ keycloak_admin_user }}-rotate"
