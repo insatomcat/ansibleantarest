@@ -58,6 +58,7 @@ Everything is written in English, README included. Keep it that way.
 | `hardening` | nftables, fail2ban, sshd, unattended updates, persistent journal, firewalld handling |
 | `podman` | podman install plus the version floor quadlet needs |
 | `antares_web` | The whole web stack: checkout, frontend build, derived image, config, quadlet units, nginx |
+| `antares_auth` | The two connectors for the `external_auth` hook (`files/kc-rest`, `files/ldap-rest`): image built from the sources here, one container, picked by `antares_auth_provider` |
 | `keycloak` | Keycloak next to Antares-Web: its database in the stack's PostgreSQL, its realm, its unit. Removes itself when `keycloak_enabled` is off |
 | `antares_edge` | The front door: the one container holding the ports of the machine, TLS, certbot, and the routing to everything published on the loopback |
 | `antares_build` | Runs only on the builder: turns what `antares_web` built into archives |

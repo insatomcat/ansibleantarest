@@ -1,0 +1,53 @@
+---
+- name: Check the Keycloak connector has what it needs
+  ansible.builtin.assert:
+    that: keycloak_client_secret | default('') | length > 0
+    fail_msg: >-
+      antares_auth_provider is `keycloak` but keycloak_client_secret is empty.
+      It is the secret of the {{ keycloak_client_id }} client, shared between
+      the realm Keycloak imported and this connector; without it every login is
+      answered 401.
+    quiet: true
+  when: antares_auth_provider == 'keycloak'
+
+- name: Check the LDAP connector has what it needs
+  ansible.builtin.assert:
+    that:
+      - antares_auth_ldap_host | length > 0
+      - antares_auth_ldap_base_dn | length > 0
+      - antares_auth_ldap_bind_dn | length > 0
+      - antares_auth_ldap_bind_password | length > 0
+    fail_msg: >-
+      antares_auth_provider is `ldap` but the directory is not described.
+      antares_auth_ldap_host and antares_auth_ldap_base_dn say where it is,
+      antares_auth_ldap_bind_dn and antares_auth_ldap_bind_password are the
+      read-only account the connector reads names and groups with. See
+      roles/antares_auth/defaults/main.yml for the layout it expects.
+    quiet: true
+  when: antares_auth_provider == 'ldap'
+
+- name: Build the connector image
+  ansible.builtin.include_tasks: build_images.yml
+  when: antarest_image_source == 'build'
+
+- name: Load the prebuilt connector image
+  ansible.builtin.include_tasks: load_image.yml
+  when: antarest_image_source == 'archive'
+
+- name: Deploy the connector quadlet unit
+  ansible.builtin.template:
+    src: quadlet/antares-auth.container.j2
+    dest: "/etc/containers/systemd/{{ antares_auth_container }}.container"
+    owner: root
+    group: root
+    mode: "0644"
+  register: antares_auth_unit
+  notify: Restart the authentication connector
+
+- name: Reload systemd so the quadlet generator picks the unit up
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: antares_auth_unit.changed
+
+- name: Start the connector
+  ansible.builtin.include_tasks: service.yml

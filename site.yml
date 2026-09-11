@@ -146,6 +146,11 @@
     # that turning it back off takes the container down.
     - role: keycloak
       tags: keycloak
+    # After keycloak, which is the one it talks to in the shape this
+    # deployment ships. Like that role, it runs whatever the provider is, so
+    # that changing it takes the previous connector down.
+    - role: antares_auth
+      tags: auth
     - role: antares_edge
       tags: edge
 

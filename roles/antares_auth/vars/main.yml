@@ -1,0 +1,30 @@
+---
+# What each provider is made of. `dir` is the build context under files/,
+# `image` the name it is built and archived under.
+antares_auth_connectors:
+  keycloak:
+    dir: kc-rest
+    image: "{{ container_local_prefix }}/antares-auth-keycloak:latest"
+  ldap:
+    dir: ldap-rest
+    image: "{{ container_local_prefix }}/antares-auth-ldap:latest"
+
+# The one this deployment runs. Only ever read when antares_auth_provider is
+# not `none`, which is what keeps the lookup from failing on a deployment that
+# has no connector at all.
+antares_auth_source: "{{ antares_auth_connectors[antares_auth_provider].dir }}"
+antares_auth_image: "{{ antares_auth_connectors[antares_auth_provider].image }}"
+
+# Name of the archive build.yml produces and the target loads. One name for
+# both connectors, since only one is ever deployed: changing the provider
+# renames nothing and the prune step of antares_build cannot leave a stale
+# image of the other one behind.
+antares_auth_archive: antares-auth-image.tar.gz
+
+# Every container name this role has ever written. Whatever is in here but not
+# selected is stopped and removed, so switching provider - or turning the
+# connector off - takes the old one down instead of leaving it running next to
+# the new one, answering nothing.
+antares_auth_all_containers:
+  - antares-auth-keycloak
+  - antares-auth-ldap

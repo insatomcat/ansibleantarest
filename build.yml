@@ -6,6 +6,7 @@
 #
 #  Produces, in ./artifacts on the controller:
 #    - antarest-image.tar.gz     the backend image, UID baked in
+#    - antares-auth-image.tar.gz the authentication connector, when one is set
 #    - thirdparty-*.tar.gz       postgres, redis, nginx, adminer if enabled
 #    - webapp-dist.tar.gz        the built web application
 #    - antares-*.tar.gz          the solver tarballs
@@ -122,6 +123,16 @@
         name: antares_web
         tasks_from: build_image
         public: true
+
+    # Only the connector antares_auth_provider names, and nothing at all when
+    # it is `none`: an image nobody deploys is 150 MB on the wire to every
+    # target, since load_artifacts ships the whole artefact directory.
+    - name: Build the authentication connector image
+      ansible.builtin.include_role:
+        name: antares_auth
+        tasks_from: build_images
+        public: true
+      when: antares_auth_provider != 'none'
 
     - name: Save everything as archives and bring them back
       ansible.builtin.include_role:

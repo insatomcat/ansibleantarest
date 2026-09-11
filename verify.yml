@@ -108,7 +108,9 @@
               'antarest-celery-worker.service', 'antares-nginx.service',
               'antares-edge.service']
              + (['antarest-adminer.service'] if antarest_enable_adminer | default(false) | bool else [])
-             + (['keycloak.service'] if keycloak_enabled | default(false) | bool else []) }}
+             + (['keycloak.service'] if keycloak_enabled | default(false) | bool else [])
+             + ([antares_auth_container ~ '.service']
+                if antares_auth_provider | default('none') != 'none' else []) }}
 
     - name: Fail when a unit of the stack is not running
       ansible.builtin.assert:
@@ -189,6 +191,20 @@
       delegate_to: localhost
       become: false
       when: keycloak_enabled | default(false) | bool
+
+    # The connector publishes no port - only the containers of the stack have
+    # any business calling it - so this is asked from inside it. What it proves
+    # is that the container the backend resolves as
+    # antarest_external_auth_url is up and serving.
+    - name: Ask the authentication connector for its health
+      ansible.builtin.command:
+        cmd: >-
+          {{ container_cmd | default('/usr/bin/podman') }} exec {{ antares_auth_container }}
+          python -c "import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:{{ antares_auth_port }}/health').read()"
+      changed_when: false
+      become: true
+      when: antares_auth_provider | default('none') != 'none'
 
     # A stack that answers proves nothing about *where* it is answering from.
     # With a volume declared, the failure this catches is the quiet one: the

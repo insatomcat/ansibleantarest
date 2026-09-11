@@ -7,8 +7,10 @@
 # Internet access can still start the stack. This is literally the list the
 # target checks before starting, rather than a copy of it: a copy drifts, and
 # the drift only shows up as a container that cannot pull on an offline machine.
-# It follows that antarest_enable_adminer has to be set where the builder sees
-# it too (group_vars/all.yml), not only on the web host.
+# It follows that the switches deciding what is in it - antarest_enable_adminer,
+# keycloak_enabled - have to be set where the builder sees them too
+# (group_vars/all.yml), not only on the web host. Same for
+# antares_auth_provider, which decides the connector image built next to them.
 antares_build_thirdparty_images: "{{ antarest_thirdparty_images }}"
 
 # Whether to also save the solver tarballs into the artefact directory.

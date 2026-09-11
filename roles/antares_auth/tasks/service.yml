@@ -1,0 +1,57 @@
+---
+# Same shape as the front door and Keycloak: this role owns one unit and
+# validates and starts it itself.
+- name: Validate the quadlet units
+  ansible.builtin.command: /usr/lib/systemd/system-generators/podman-system-generator -dryrun
+  register: antares_auth_quadlet_check
+  changed_when: false
+
+- name: Check the connector service was generated
+  ansible.builtin.assert:
+    that:
+      - "'---' ~ antares_auth_container ~ '.service---' in antares_auth_quadlet_check.stdout"
+    fail_msg: >-
+      The quadlet generator did not produce {{ antares_auth_container }}.service.
+      Units present in /etc/containers/systemd:
+      {{ antares_auth_quadlet_check.stdout | regex_findall('---(.+?)---') | join(', ') }}
+    quiet: true
+
+- name: Look for a failure a previous run left
+  ansible.builtin.command: "systemctl is-failed {{ antares_auth_container }}.service"
+  register: antares_auth_failed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Clear it
+  ansible.builtin.command: "systemctl reset-failed {{ antares_auth_container }}.service"
+  when: antares_auth_failed.stdout == 'failed'
+  changed_when: true
+
+# Started, not enabled: `systemctl enable` refuses a unit the quadlet generator
+# produced. What brings it back after a reboot is the WantedBy= inside the
+# .container file, through antares-web.target, which is a real unit file and is
+# enabled by antares_web.
+- name: Start the connector
+  ansible.builtin.systemd:
+    name: "{{ antares_auth_container }}.service"
+    state: started
+    daemon_reload: true
+
+- name: Apply the pending restarts now
+  ansible.builtin.meta: flush_handlers
+
+# From inside the container, since it publishes no port: nothing on the host
+# can reach it, and that is the point. python is what the image is built on, so
+# this needs nothing installed.
+- name: Wait for the connector to answer
+  ansible.builtin.command:
+    cmd: >-
+      {{ container_cmd }} exec {{ antares_auth_container }}
+      python -c "import urllib.request;
+      urllib.request.urlopen('http://127.0.0.1:{{ antares_auth_port }}/health').read()"
+  register: antares_auth_health
+  until: antares_auth_health.rc == 0
+  retries: 12
+  delay: 5
+  changed_when: false
