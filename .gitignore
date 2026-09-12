@@ -1,6 +1,7 @@
 .facts/
 *.retry
 antares-slurm-1.3.pdf
+resume-fonctionnalites.pdf
 
 # Artefacts produced by build.yml: container image archives, the built web
 # application and the solver tarballs. Hundreds of megabytes, rebuildable.
