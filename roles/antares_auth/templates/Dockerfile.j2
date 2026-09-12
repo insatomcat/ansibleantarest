@@ -20,8 +20,22 @@ EXPOSE {{ antares_auth_port }}
 # every login of the deployment, and the development server is single-threaded,
 # unsupervised and says so on every start. Access logs to stdout, which the
 # journald log driver of the unit collects.
+#
+# --no-control-socket: gunicorn 25 added a unix socket for its control
+# interface, the one `gunicornc` drives, and turns it on by default. Its path
+# is $XDG_RUNTIME_DIR/gunicorn.ctl, and that variable is unset in a container,
+# so it falls back to $HOME/.gunicorn - which here is /app, the WORKDIR, owned
+# by root while the process runs as the antares account:
+#
+#   [ERROR] Control server error: [Errno 13] Permission denied: '/app/.gunicorn'
+#
+# at every single start. Harmless, gunicorn carries on and serves, but an ERROR
+# in the journal of the path every login goes through is a false lead nobody
+# needs. Turned off rather than given a writable directory it would be used
+# from by nothing.
 CMD ["gunicorn", \
      "--bind", "0.0.0.0:{{ antares_auth_port }}", \
      "--workers", "{{ antares_auth_workers }}", \
      "--access-logfile", "-", \
+     "--no-control-socket", \
      "app:app"]
