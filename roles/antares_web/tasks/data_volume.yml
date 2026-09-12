@@ -96,7 +96,7 @@
 # on the boot disk, out of sight, while PostgreSQL initialises an empty cluster
 # on the volume and the interface comes back up with nothing in it. Refused
 # here rather than discovered then: moving the state is a one-off the operator
-# does with the stack stopped, see the README.
+# does with the stack stopped, see docs/antares-web.md.
 - name: Look for the data directory on the boot disk
   ansible.builtin.stat:
     path: "{{ antarest_data_dir }}"
@@ -120,7 +120,7 @@
       disk, and mounting {{ antarest_data_device }} over it would hide them
       rather than move them. Stop {{ antarest_service_name }}.target, move the
       tree onto the volume by hand, then run this play again. See "Putting the
-      state on its own volume" in the README.
+      state on its own volume" in docs/antares-web.md.
     quiet: true
   when: antarest_data_disk.mountpoint is none
 

@@ -39,7 +39,8 @@ keycloak_http_port: 8080
 # At the first start and no other: Keycloak skips a realm that already exists,
 # which is what keeps the users and groups created from the console since. A
 # change to the template is therefore not applied by re-running the playbook,
-# and replaying one is a decision, not a side effect - see the README.
+# and replaying one is a decision, not a side effect - see
+# docs/authentication.md.
 keycloak_realm_import: true
 
 # UID the Keycloak image runs as. The import file is written root:root 0640, so

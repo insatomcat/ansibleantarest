@@ -51,7 +51,8 @@ antarest_base_image: "{{ container_local_prefix }}/antarest:base"
 # directory written by another one without a pg_upgrade. With `latest`, the day
 # the tag moves to the next major, an ordinary re-run of this playbook pulls it
 # and the stack stops, with nothing having changed on our side. Moving to a new
-# major is a deliberate operation with a dump and a restore, see the README.
+# major is a deliberate operation with a dump and a restore, see
+# docs/operations.md.
 #
 # The others hold no state we own, so pinning them is about reproducibility: a
 # rebuild should not silently change the software being deployed. nginx is
