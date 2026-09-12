@@ -31,6 +31,61 @@ keycloak_volumes: >-
      | map('regex_replace', '$', container_volume_opts | trim) | list }}
 
 # ===========================================================================
+#  The user profile of the imported realm
+# ===========================================================================
+#
+# Keycloak's own default marks email, firstName and lastName required for the
+# `user` role, and the VERIFY_PROFILE action is enabled. An account created
+# from the console with a username and a password alone is therefore incomplete
+# in Keycloak's eyes, and the direct access grant the connector logs people in
+# with answers `Account is not fully set up` - a 401 at the Antares-Web login
+# page, for a user the console shows as enabled, with a valid password and no
+# required action against their name. The action is derived from this profile
+# rather than written on the account, which is what makes it invisible there.
+#
+# So the realm is imported without those three requirements. It is the profile
+# Keycloak ships, minus the `required` keys: the fields still exist, are still
+# validated when filled, and an operator who wants them filled can say so in
+# Realm settings > User profile. The connector already treats them as optional
+# and falls back to the username when a first name is missing, so nothing
+# downstream needs them.
+keycloak_user_profile:
+  attributes:
+    - name: username
+      displayName: "${username}"
+      validations:
+        length: {min: 3, max: 255}
+        username-prohibited-characters: {}
+        up-username-not-idn-homograph: {}
+      permissions: {view: [admin, user], edit: [admin, user]}
+      multivalued: false
+    - name: email
+      displayName: "${email}"
+      validations:
+        email: {}
+        length: {max: 255}
+      permissions: {view: [admin, user], edit: [admin, user]}
+      multivalued: false
+    - name: firstName
+      displayName: "${firstName}"
+      validations:
+        length: {max: 255}
+        person-name-prohibited-characters: {}
+      permissions: {view: [admin, user], edit: [admin, user]}
+      multivalued: false
+    - name: lastName
+      displayName: "${lastName}"
+      validations:
+        length: {max: 255}
+        person-name-prohibited-characters: {}
+      permissions: {view: [admin, user], edit: [admin, user]}
+      multivalued: false
+  groups:
+    - name: user-metadata
+      displayHeader: User metadata
+      displayDescription: Attributes, which refer to user metadata
+
+# ===========================================================================
 #  Where the playbook talks to Keycloak
 # ===========================================================================
 #
