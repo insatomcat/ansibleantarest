@@ -524,8 +524,17 @@
           - StrictHostKeyChecking=no
           - -o
           - UserKnownHostsFile=/dev/null
+          # VERBOSE rather than the ERROR the rest of this repository uses: a
+          # server that accepts the connection and closes it straight away -
+          # sshd past MaxStartups, or refusing a penalised source address - is
+          # reported by the client either as "kex_exchange_identification" or
+          # as nothing at all, depending on whether the reset lands while it
+          # writes its banner or while it reads the other one. A failure with
+          # an empty stderr and a hundredth of a second on the clock is not
+          # something to debug twice, and the debug1 lines only ever appear in
+          # the log when this task fails.
           - -o
-          - LogLevel=ERROR
+          - LogLevel=VERBOSE
           - -o
           - ConnectTimeout=10
           - "{{ antares_user }}@{{ slurm_frontend_ip | trim }}"
