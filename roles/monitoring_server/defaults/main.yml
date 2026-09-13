@@ -1,0 +1,75 @@
+---
+# ===========================================================================
+#  Prometheus and Grafana, on the Antares-Web machine
+#
+#  Two containers next to the stack, not in it: both run in the host network
+#  namespace and publish on the loopback, so they depend on no podman network
+#  and on no unit of the deployment. That is deliberate and it is the whole
+#  design of this half - the moment the stack is down is the moment its graphs
+#  are worth reading. What the outside reaches is the front door, which routes
+#  monitoring_grafana_path to Grafana exactly as it routes
+#  keycloak_relative_path to Keycloak.
+#
+#  Prometheus scrapes every machine of the inventory (the node exporter each
+#  one runs, plus the Slurm exporter on the front-end) over the network the
+#  firewall already trusts, so nothing has to be opened for it.
+#
+#  The switches, the images, the ports and the Grafana password live in
+#  group_vars/all.yml: the front door and the builder both read them.
+# ===========================================================================
+
+monitoring_prometheus_container: prometheus
+monitoring_grafana_container: grafana
+
+# Rendered configuration: the scrape targets and the Grafana provisioning.
+# Under the same /etc/antares-web as the rest of what this machine runs, so it
+# has one configuration tree rather than two.
+monitoring_server_dir: /etc/antares-web/monitoring
+
+# The database of Prometheus and the one of Grafana. Under antarest_data_dir,
+# which is where the state of this machine lives and what a block device is
+# mounted on when there is one: a month of samples is the only thing here that
+# grows, and it grows where there is room for it.
+monitoring_server_data_dir: "{{ antarest_data_dir }}/monitoring"
+
+# UIDs the two images run as, which is what their databases have to be owned
+# by. Written down rather than looked up because they are properties of the
+# images: the Prometheus one runs as nobody, the Grafana one as its own
+# `grafana` account. A directory owned by anyone else is a container that
+# starts and immediately fails on its first write.
+monitoring_prometheus_uid: 65534
+monitoring_grafana_uid: 472
+
+# Extra scrape jobs, appended to the ones this role generates. One entry per
+# job, in Prometheus' own spelling:
+#
+#   monitoring_extra_scrape_jobs:
+#     - job_name: postgres
+#       static_configs:
+#         - targets: ["127.0.0.1:9187"]
+#
+# The generated jobs cover what this deployment installs; anything else an
+# operator adds next to it goes here rather than in the template.
+monitoring_extra_scrape_jobs: []
+
+# Address to scrape a machine on, read from that machine's inventory entry:
+#
+#   slurm_node_1:
+#     monitoring_node_address: 10.1.0.13
+#
+# Empty means the address of the default route, which is what the facts give
+# and the right answer on a machine with one network. Set it on a machine
+# whose default route is not the network the deployment talks on.
+monitoring_node_address: ""
+
+# What Grafana tells browsers it is. Empty is worked out in vars/main.yml from
+# the domain, the scheme and the port the front door serves, which is right
+# for every deployment that has a domain. Set it by hand for anything else -
+# a reverse proxy in front of the front door, a name that is not
+# antarest_tls_domain - and end it with a slash.
+monitoring_grafana_root_url: ""
+
+# Whether Grafana checks grafana.com for a newer release on every start. Off:
+# the machine this runs on is frequently one that cannot reach the internet at
+# all, where the check is a failed request in the log and nothing else.
+monitoring_grafana_check_updates: false

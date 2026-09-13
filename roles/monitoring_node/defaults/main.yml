@@ -1,0 +1,53 @@
+---
+# ===========================================================================
+#  The Prometheus node exporter, on every machine of the inventory
+#
+#  One container per machine, in the host network namespace, reading the host
+#  through a read-only mount of `/`. It is the only role of this deployment
+#  that runs on every group at once, which is the point: a compute node that
+#  ran out of memory and a web server whose disk is full look the same from
+#  Antares-Web, and neither is visible in the application's own logs.
+#
+#  This role also owns the artefact loading of the whole monitoring stack:
+#  tasks/load_artifacts.yml is written for any list of images and is what
+#  monitoring_server and monitoring_slurm include as well. It lives here
+#  because this is the role every machine runs, so the file is on the shortest
+#  path from "a machine of the fleet" to "the image it has to load".
+#
+#  The switch (monitoring_enabled), the images and the ports live in
+#  group_vars/all.yml: the builder has to archive the images and the front
+#  door has to route to Grafana, and neither can read a role default.
+# ===========================================================================
+
+# Load-bearing only as a unit name: nothing resolves it, since this container
+# is in the host network namespace and has no name on any podman network.
+monitoring_node_exporter_container: node-exporter
+
+# Where the monitoring archives are staged and where a rendered configuration
+# goes, on every machine including the compute nodes. A tree of its own rather
+# than a corner of /var/antares-web: a compute node has no Antares-Web.
+monitoring_base_dir: /var/antares-monitoring
+monitoring_artifacts_dir: "{{ monitoring_base_dir }}/artifacts"
+
+# Address the exporter binds. Empty means every interface, which is what makes
+# it reachable from the machine that scrapes it. What keeps it private is the
+# firewall: roles/hardening trusts the addresses of the inventory and drops
+# the rest, so this port answers the Prometheus of the deployment and nobody
+# else. Pin it to one address on a machine whose interfaces are not all equal
+# - it is passed to --web.listen-address as `<address>:<port>`.
+monitoring_node_exporter_bind: ""
+
+# Mount points the filesystem collector leaves alone. Everything a container
+# runtime lays under the machine's own filesystems: podman's overlay mounts
+# appear and disappear with the containers, they are the same device as the
+# filesystem underneath, and each one otherwise becomes a time series that
+# never comes back. The pattern is anchored on both sides, as node-exporter
+# expects.
+monitoring_node_exporter_mount_exclude: >-
+  ^/(dev|proc|sys|run/containers/.+|var/lib/containers/.+|var/lib/kubelet/.+)($|/)
+
+# Filesystem types it ignores. The list node-exporter ships, which is every
+# pseudo-filesystem; spelled out here because the default of the flag is
+# replaced rather than extended when a deployment sets it.
+monitoring_node_exporter_fs_exclude: >-
+  ^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$

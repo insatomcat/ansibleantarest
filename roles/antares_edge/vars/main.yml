@@ -43,7 +43,9 @@ antares_edge_volumes: >-
 # prefix of its own, and nginx picks the longest match whatever the order.
 # The Keycloak location is written without a trailing slash, so that /auth and
 # /auth/ both land there rather than the first one falling through to the web
-# application.
+# application. Grafana and Prometheus are spelled the same way and for the
+# same reason, and both are told the prefix they are served under, so the
+# path is passed through untouched rather than stripped here.
 antares_edge_routes: >-
   {{ [{'path': '/',
        'upstream': '127.0.0.1:' ~ antarest_nginx_port,
@@ -52,4 +54,12 @@ antares_edge_routes: >-
           'upstream': '127.0.0.1:' ~ keycloak_port,
           'name': 'Keycloak'}]
         if keycloak_enabled | bool else [])
+     + ([{'path': monitoring_grafana_path,
+          'upstream': '127.0.0.1:' ~ monitoring_grafana_port,
+          'name': 'Grafana'}]
+        if monitoring_enabled | bool else [])
+     + ([{'path': monitoring_prometheus_path,
+          'upstream': '127.0.0.1:' ~ monitoring_prometheus_port,
+          'name': 'Prometheus'}]
+        if (monitoring_enabled | bool and monitoring_prometheus_public | bool) else [])
      + antares_edge_extra_routes }}

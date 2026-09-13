@@ -1,0 +1,28 @@
+{{ ansible_managed | comment }}
+#
+# Read by Grafana at every start, from
+# /etc/grafana/provisioning/datasources/antares.yml. `editable: false` is what
+# keeps the interface from offering to change a file the playbook owns and
+# rewrites on the next run.
+#
+# The address is the loopback and not a container name: both containers are in
+# the host network namespace, so this is the very address the operator would
+# tunnel to.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    # Fixed rather than generated, because the provisioned dashboards name it:
+    # a uid that changed with every deployment would leave them pointing at a
+    # datasource that no longer exists.
+    uid: antares-prometheus
+    type: prometheus
+    access: proxy
+    url: "http://127.0.0.1:{{ monitoring_prometheus_port }}{{ monitoring_prometheus_path if monitoring_prometheus_public | bool else '' }}"
+    isDefault: true
+    editable: false
+    jsonData:
+      # Tells Grafana the resolution of the data, so that a rate() over a
+      # window shorter than the scrape interval is not offered.
+      timeInterval: {{ monitoring_scrape_interval }}

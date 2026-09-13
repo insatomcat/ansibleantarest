@@ -1,0 +1,12 @@
+---
+# The role runs whatever monitoring_enabled says, so that turning it back off
+# takes both containers down instead of leaving them scraping a fleet the
+# deployment no longer monitors. Same shape as roles/keycloak.
+
+- name: Install Prometheus and Grafana
+  ansible.builtin.include_tasks: install.yml
+  when: monitoring_enabled | bool
+
+- name: Remove Prometheus and Grafana
+  ansible.builtin.include_tasks: remove.yml
+  when: not monitoring_enabled | bool

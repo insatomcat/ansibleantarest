@@ -1,0 +1,36 @@
+---
+# ===========================================================================
+#  What the node exporter mounts, and what podman has to be told
+# ===========================================================================
+
+# The whole host filesystem, read-only, which is what --path.rootfs reads.
+#
+# Deliberately *without* container_volume_opts, the `,z` every other mount of
+# this deployment carries: that flag relabels the host directory
+# container_file_t, and the host directory here is `/`. Relabelling the root
+# filesystem of the machine is not a mount option, it is an incident.
+#
+# `rslave` propagates the mounts made after the container started - a volume
+# attached later, an NFS share mounted by another role - so the exporter keeps
+# reporting the filesystems of the machine rather than the ones it had at
+# start-up.
+monitoring_node_exporter_volumes:
+  - "/:/host:ro,rslave"
+
+# --pid=host so that the exporter reads the real /proc rather than the two
+# processes of its own namespace, and label=disable because the mount above
+# carries no `z`: with SELinux enforcing, a container_t process reading a tree
+# labelled var_t, home_root_t and everything else the machine happens to use
+# is denied at the first file. Disabling the label for this one container is
+# the trade the upstream image documents, and it is bounded by the mount being
+# read-only.
+monitoring_node_exporter_podman_args: >-
+  --pid=host{{ ' --security-opt=label=disable'
+               if (ansible_facts.selinux.status | default('disabled')) == 'enabled' else '' }}
+
+# Where the playbook itself asks the exporter whether it is up. The loopback
+# whenever the exporter listens on every interface, which is the default, and
+# the pinned address otherwise - a check that talks to the machine it is
+# deploying has no reason to leave it and come back.
+monitoring_node_exporter_probe_host: >-
+  {{ monitoring_node_exporter_bind | trim | default('127.0.0.1', true) }}

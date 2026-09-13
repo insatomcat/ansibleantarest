@@ -1,0 +1,106 @@
+---
+# Used when antarest_image_source is `archive`, and written for any list of
+# monitoring images rather than for the node exporter alone: monitoring_server
+# and monitoring_slurm include this very file with a list of their own.
+#
+#     monitoring_load_images   the images this machine has to end up holding
+#
+# It exists for the same reason as its two counterparts
+# (roles/antares_web/tasks/load_artifacts.yml and the one in slurm_frontend):
+# quadlet units carry podman's default pull policy, `missing`, so an image
+# that was not loaded is an image the unit tries to *pull* - the one thing
+# this mode exists to avoid. On a compute node it would be the first and only
+# time anything on that machine reached a registry.
+#
+# Each machine receives its own archives by name and nothing else. A compute
+# node has no business downloading Grafana, and the web machine's own
+# load_artifacts excludes this prefix for the same reason.
+
+- name: Check the monitoring archives exist on the controller
+  ansible.builtin.stat:
+    path: "{{ antares_artifacts_dir }}/{{ monitoring_image_archives[item] }}"
+  loop: "{{ monitoring_load_images }}"
+  register: monitoring_artifacts
+  delegate_to: localhost
+  become: false
+
+- name: Fail when the monitoring archives are missing
+  ansible.builtin.assert:
+    that: monitoring_artifacts.results | rejectattr('stat.exists') | list | length == 0
+    fail_msg: >-
+      antarest_image_source is `archive` but
+      {{ monitoring_artifacts.results | rejectattr('stat.exists')
+         | map(attribute='item') | map('extract', monitoring_image_archives) | join(', ') }}
+      {{ 'is' if (monitoring_artifacts.results | rejectattr('stat.exists') | list | length) == 1 else 'are' }}
+      missing from {{ antares_artifacts_dir }}. build.yml only archives them
+      when monitoring_enabled is true *on the builder*, which the inventory
+      entry of this host has no say in. Produce them with
+      `ansible-playbook build.yml`, or deploy with
+      `-e antarest_image_source=build` to let the units pull instead.
+    quiet: true
+
+- name: Create the artefact staging directory
+  ansible.builtin.file:
+    path: "{{ monitoring_artifacts_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# rsync rather than the copy module, and ownership left alone so that the
+# controller's umask does not fight the task above on every run - the same
+# reasoning, and the same scars, as roles/antares_web/tasks/load_artifacts.yml.
+- name: Ship the archives to the machine
+  ansible.posix.synchronize:
+    src: "{{ antares_artifacts_dir }}/"
+    dest: "{{ monitoring_artifacts_dir }}/"
+    owner: false
+    group: false
+    perms: false
+    rsync_opts: >-
+      {{ (monitoring_load_images | map('extract', monitoring_image_archives)
+          | map('regex_replace', '^', '--include=') | list)
+         + ['--exclude=*'] }}
+
+# Loading is not free and the archives do not change between two runs of the
+# same build, so only what podman does not already hold is loaded.
+- name: Look for the images already present
+  ansible.builtin.command: "{{ container_cmd }} image inspect {{ item }}"
+  loop: "{{ monitoring_load_images }}"
+  register: monitoring_images_present
+  changed_when: false
+  failed_when: false
+
+# The two lists are built from monitoring_load_images in the same order, so an
+# image and its archive travel together through the zip.
+- name: Load the images that are missing
+  ansible.builtin.command: >-
+    {{ container_cmd }} load -i {{ monitoring_artifacts_dir }}/{{ monitoring_image_archives[item.1] }}
+  loop: >-
+    {{ monitoring_images_present.results | zip(monitoring_load_images) | list }}
+  loop_control:
+    label: "{{ monitoring_image_archives[item.1] }}"
+  when: item.0.rc != 0
+  changed_when: true
+
+# An archive set produced before a tag was repinned loads without error and
+# leaves the image the unit names simply absent. Say so here rather than in a
+# unit that fails to pull on a machine with no route to Docker Hub.
+- name: Check the images are now present
+  ansible.builtin.command: "{{ container_cmd }} image inspect {{ item }}"
+  loop: "{{ monitoring_load_images }}"
+  register: monitoring_images_after_load
+  changed_when: false
+  failed_when: false
+
+- name: Fail when a monitoring image did not load
+  ansible.builtin.assert:
+    that: monitoring_images_after_load.results | selectattr('rc', 'ne', 0) | list | length == 0
+    fail_msg: >-
+      {{ monitoring_images_after_load.results | selectattr('rc', 'ne', 0)
+         | map(attribute='item') | join(', ') }}
+      still absent after loading the archives from {{ antares_artifacts_dir }}.
+      They were built under other names, most likely by a build.yml older than
+      the current image pins; check manifest.yml and re-run
+      `ansible-playbook build.yml`.
+    quiet: true

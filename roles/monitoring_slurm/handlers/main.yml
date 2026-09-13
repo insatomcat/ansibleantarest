@@ -1,0 +1,6 @@
+---
+- name: Restart the Slurm exporter
+  ansible.builtin.systemd:
+    name: "{{ monitoring_slurm_exporter_container }}.service"
+    state: restarted
+    daemon_reload: true

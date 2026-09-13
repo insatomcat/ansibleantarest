@@ -1,0 +1,38 @@
+---
+# monitoring_enabled turned back off. Deleting the unit file alone is not
+# enough: the next daemon-reload makes the service unknown to systemd, but the
+# container it started keeps running. So stop first, while the service still
+# exists, then remove.
+- name: Look for the node exporter unit
+  ansible.builtin.stat:
+    path: "/etc/containers/systemd/{{ monitoring_node_exporter_container }}.container"
+  register: monitoring_node_stale_unit
+
+# No `enabled: false` to go with it: systemctl refuses to disable a unit the
+# quadlet generator produced. What un-enables it is the removal of the
+# .container file below, since the WantedBy= it carries is what the generator
+# turns into a want of multi-user.target.
+- name: Stop the node exporter
+  ansible.builtin.systemd:
+    name: "{{ monitoring_node_exporter_container }}.service"
+    state: stopped
+  when: monitoring_node_stale_unit.stat.exists
+
+- name: Remove the node exporter unit
+  ansible.builtin.file:
+    path: "/etc/containers/systemd/{{ monitoring_node_exporter_container }}.container"
+    state: absent
+  register: monitoring_node_unit_removed
+
+- name: Reload systemd so the generator forgets it
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: monitoring_node_unit_removed.changed
+
+# The staged archives go with it. They are a copy of what the controller
+# holds, they are only ever read at load time, and leaving a few dozen
+# megabytes on every compute node of the fleet is not a service to anyone.
+- name: Remove the monitoring directory
+  ansible.builtin.file:
+    path: "{{ monitoring_base_dir }}"
+    state: absent
