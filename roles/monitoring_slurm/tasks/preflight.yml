@@ -68,15 +68,17 @@
   changed_when: false
   failed_when: false
 
+# Both written as double-quoted scalars, which is what makes `\\.` reach Jinja
+# as `\.`: in a folded block scalar a backslash is literal, the expression
+# would look for one in "slurm 25.11.2", match nothing, and the comparison
+# below would quietly fall through to "unknown" on every machine.
 - name: Work out whether the two can talk
   ansible.builtin.set_fact:
     # Kept in the fact cache so that a later run limited to the web machine
     # still knows whether to declare this exporter as a Prometheus target.
     cacheable: true
-    monitoring_slurm_cluster_version: "{{ monitoring_slurm_cluster_version_raw.stdout | regex_search('[0-9]+\\.[0-9]+') }}"
-    monitoring_slurm_image_version: >-
-      {{ (monitoring_slurm_image_version_raw.stdout | regex_search('[0-9]+\\.[0-9]+'))
-         if monitoring_slurm_image_version_raw.rc == 0 else '' }}
+    monitoring_slurm_cluster_version: "{{ monitoring_slurm_cluster_version_raw.stdout | regex_search('[0-9]+\\.[0-9]+') | default('', true) }}"
+    monitoring_slurm_image_version: "{{ (monitoring_slurm_image_version_raw.stdout | regex_search('[0-9]+\\.[0-9]+') | default('', true)) if monitoring_slurm_image_version_raw.rc == 0 else '' }}"
 
 - name: Decide whether the exporter is deployed
   ansible.builtin.set_fact:
@@ -88,6 +90,19 @@
                   or monitoring_slurm_image_version | trim | length == 0
                   or monitoring_slurm_cluster_version | trim | length == 0)
          else monitoring_slurm_cluster_version is version(monitoring_slurm_image_version | trim, '>=') }}
+
+# Always, and not only when something is wrong: this pair is the whole
+# question of this role, it is read from two places that both move, and a log
+# that says which two versions were compared is what makes an answer of either
+# kind checkable afterwards.
+- name: Report the Slurm versions the exporter has to live with
+  ansible.builtin.debug:
+    msg: >-
+      Slurm {{ monitoring_slurm_cluster_version | default('unknown', true) }} on
+      {{ inventory_hostname }},
+      {{ monitoring_slurm_image_version | default('unknown', true) }} in
+      {{ monitoring_slurm_exporter_image }}: the exporter is
+      {{ 'deployed' if monitoring_slurm_exporter_supported | bool else 'skipped' }}.
 
 # A warning and not a failure: the cluster is healthy, the machines are still
 # monitored, and what is missing is one exporter. Prometheus is not told about
