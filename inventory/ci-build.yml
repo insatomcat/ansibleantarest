@@ -70,6 +70,20 @@ all:
       keycloak_enabled: true
       antares_auth_provider: keycloak
 
+      # ---------------------------------------------------------------
+      #  Monitoring, here for exactly the same reason: monitoring_enabled
+      #  is what fills monitoring_images, and that list is what build.yml
+      #  pulls and archives under the monitoring-thirdparty-* prefix. The
+      #  three deploy suites turn it on and run with
+      #  antarest_image_source=archive, where nothing pulls, so a target
+      #  would otherwise fail on images that were never shipped.
+      #
+      #  slurm_enabled is left at the default of group_vars/all.yml, which
+      #  is true, so the Slurm exporter is archived too and the cluster
+      #  suites find it.
+      # ---------------------------------------------------------------
+      monitoring_enabled: true
+
       # Left at the default of group_vars/all.yml, which is true. The builder
       # is not a cluster node, but this is also what decides whether the
       # accounting database's images are archived, and the `slurm` and
