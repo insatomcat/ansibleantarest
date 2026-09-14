@@ -705,13 +705,24 @@ jobs:
           # And that Prometheus is really scraping this machine. Asked from
           # inside it, because that is where Prometheus is bound: the point
           # of the loopback bind is that this cannot be asked from anywhere
-          # else. A target that is `unknown` here is one that has not been
-          # scraped yet, which after a full deployment it has.
-          vm "curl -fsS 'http://127.0.0.1:8084/api/v1/targets?state=active'" \
-             > /tmp/prom-targets.json
+          # else.
+          #
+          # Waited out rather than asked once, which is the whole reason this
+          # loop exists: Prometheus is the last thing the run starts, a target
+          # is `unknown` until it has been scraped once, and the first scrape
+          # is up to monitoring_scrape_interval away. verify.yml does the same
+          # thing with `until` in the cluster jobs.
+          for _ in $(seq 1 12); do
+            vm "curl -fsS 'http://127.0.0.1:8084/api/v1/targets?state=active'" \
+               > /tmp/prom-targets.json
+            down=$(jq '[.data.activeTargets[] | select(.health != "up")] | length' \
+                      /tmp/prom-targets.json)
+            if [ "$down" = 0 ]; then break; fi
+            sleep 10
+          done
           jq -r '.data.activeTargets[] | "\(.labels.job) \(.scrapeUrl) \(.health) \(.lastError)"' \
              /tmp/prom-targets.json
-          if [ "$(jq '[.data.activeTargets[] | select(.health != "up")] | length' /tmp/prom-targets.json)" != 0 ]; then
+          if [ "$down" != 0 ]; then
             echo "::error::a Prometheus target is not up on ${{ matrix.target.label }}"
             exit 1
           fi
