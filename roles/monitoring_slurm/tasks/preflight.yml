@@ -56,13 +56,22 @@
   changed_when: false
 
 # `--entrypoint sinfo` because the entrypoint of the image is the exporter
-# itself. Tolerated failure on purpose: the publisher's `-minimal` images
+# itself, and the same mount and podman flags as the unit because of what
+# `sinfo --version` does before it prints anything: since Slurm 24 a client
+# resolves its configuration first, falls back to looking the controller up in
+# DNS when it finds none, and exits 1 with "Could not establish a
+# configuration source" - a version question that fails for want of a
+# configuration file.
+#
+# Tolerated failure on purpose all the same: the publisher's `-minimal` images
 # carry no slurm-client at all and are meant to run the host's binaries, so
-# there is nothing to read there and nothing to second-guess - see
+# there is nothing to read there and nothing to second-guess. See
 # monitoring_slurm_exporter_extra_flags.
 - name: Ask the image which Slurm client it carries
   ansible.builtin.command: >-
-    {{ container_cmd }} run --rm --entrypoint sinfo
+    {{ container_cmd }} run --rm {{ monitoring_slurm_exporter_podman_args | trim }}
+    --volume {{ slurm_conf_dir }}:/etc/slurm:ro
+    --entrypoint sinfo
     {{ monitoring_slurm_exporter_image }} --version
   register: monitoring_slurm_image_version_raw
   changed_when: false
@@ -103,6 +112,10 @@
       {{ monitoring_slurm_image_version | default('unknown', true) }} in
       {{ monitoring_slurm_exporter_image }}: the exporter is
       {{ 'deployed' if monitoring_slurm_exporter_supported | bool else 'skipped' }}.
+      {{ ('Its version could not be read: '
+          ~ (monitoring_slurm_image_version_raw.stderr | default('') | trim
+             | regex_replace('\n[\s\S]*$', '')))
+         if monitoring_slurm_image_version | trim | length == 0 else '' }}
 
 # A warning and not a failure: the cluster is healthy, the machines are still
 # monitored, and what is missing is one exporter. Prometheus is not told about
