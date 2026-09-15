@@ -23,9 +23,8 @@ Monitoring is optional too and off by default: `monitoring_enabled: true` puts a
 ```bash
 ansible-galaxy collection install -r requirements.yml
 
-# edit the inventory and variables
-$EDITOR inventory/hosts.yml
-$EDITOR group_vars/all.yml      # at least set the secrets (see below)
+# edit the inventory: hosts, and every variable this deployment sets
+$EDITOR inventory/hosts.yml     # at least set the secrets (see below)
 
 ansible-playbook site.yml
 ```
@@ -76,11 +75,15 @@ ansible-playbook -i inventory/antares-web.example.yml site.yml \
 
 The builder and the targets must agree on `antares_uid`/`antares_gid` (baked into the image) and share the same CPU architecture. See [Build once, deploy everywhere](docs/build-and-deploy.md).
 
-One thing to know when editing these files: settings written **under a host** override `group_vars/all.yml`, while a `vars:` block on a group does *not*, since playbook `group_vars` outrank inventory group vars. That is why everything per-deployment sits on the host in the examples. Anything shared by several machines belongs in `group_vars/all.yml`.
+There is no `group_vars/` next to the playbooks: every default lives in the code, in `roles/<role>/defaults/`, and the inventory is the only place a deployment describes itself. Role defaults are the lowest precedence Ansible has, so anything the inventory sets wins - under a host, or in a `vars:` block on a group, both work. The examples put per-deployment settings on the host because that is usually where they belong, not because a group would be ignored.
+
+The knobs several roles share (and the ones `build.yml` and `verify.yml` read without running a role) live in `roles/antares_defaults/`, one file per area. Nothing there needs editing to deploy: override in the inventory instead.
+
+The one exception is `inventory/group_vars/slurm.yml`, the per-node hardware description `slurm.conf` is generated from. It has to be an inventory variable rather than a role default, because every node reads it from *every other* node's `hostvars`, where a role default is not visible. It is picked up by any `-i inventory/*.yml`.
 
 ## Before production
 
-Set secrets in `group_vars/all.yml` (or an ansible-vault encrypted file):
+Set secrets in your inventory (or in an ansible-vault encrypted file):
 
 | Variable | Default | Notes |
 |---|---:|---|
@@ -94,7 +97,7 @@ The PostgreSQL password is read only at the first initialization of the data vol
 
 `antarest_admin_password` has the same shape: AntaREST writes it when it creates the `admin` row and never again, so it seeds an empty database and nothing more. Changing it on a deployment that already ran is an update in the database, see [Operating a deployment](docs/operations.md#changing-the-admin-password).
 
-The `hardening` role reports any of these still holding the shipped value, and refuses to deploy if `hardening_fail_on_default_secrets` is on. On anything reachable from the internet, also turn TLS on and read [Hardening](docs/hardening.md).
+The `hardening` role stops the deployment on any of these still holding the shipped value, naming them. That is `hardening_fail_on_default_secrets`, on by default; set it to false on a throwaway machine. On anything reachable from the internet, also turn TLS on and read [Hardening](docs/hardening.md).
 
 ## The playbooks
 
@@ -104,7 +107,7 @@ The `hardening` role reports any of these still holding the shipped value, and r
 | `build.yml` | Builds the artefacts once on a `builder` host and pulls them into `artifacts/` on the controller, with the very task files the deployment uses. See [Build once, deploy everywhere](docs/build-and-deploy.md). |
 | `verify.yml` | Read-only end-to-end checks after a deployment. Run it from a machine that is not in the inventory, see [Operating a deployment](docs/operations.md). |
 
-Every role carries the variables it owns in `roles/<role>/defaults/main.yml`, and the fleet-wide knobs are in `group_vars/all.yml`, which is commented throughout. The roles with a surface worth describing have a `README.md` of their own: `antares_web`, `antares_edge`, `antares_auth`, `keycloak`, `podman`, `hardening`, `common`, `slurm_frontend`, `monitoring_node`, `monitoring_slurm` and `monitoring_server`.
+Every role carries the variables it owns in `roles/<role>/defaults/main.yml`, and the knobs shared between roles are in `roles/antares_defaults/defaults/main/`, one commented file per area. The roles with a surface worth describing have a `README.md` of their own: `antares_defaults`, `antares_web`, `antares_edge`, `antares_auth`, `keycloak`, `podman`, `hardening`, `common`, `slurm_frontend`, `monitoring_node`, `monitoring_slurm` and `monitoring_server`.
 
 ## Documentation
 

@@ -27,5 +27,5 @@ while the front-end still pulled MariaDB from Docker Hub on its first boot.
 The NFS export of the shared `/home` is `nfs_server`, not this role, and it
 uses `no_root_squash`: on a network you do not control, turn the firewall on.
 
-Variables in `defaults/main.yml` and `group_vars/slurm.yml`, documented in
+Variables in `defaults/main.yml` and `roles/antares_defaults/`, documented in
 [The Slurm cluster](../../docs/slurm.md).

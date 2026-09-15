@@ -19,7 +19,7 @@
 #  docs/monitoring.md.
 #
 #  The switch (monitoring_slurm_enabled), the image and the port live in
-#  group_vars/all.yml, next to the rest of the monitoring knobs.
+#  roles/antares_defaults/, next to the rest of the monitoring knobs.
 # ===========================================================================
 
 monitoring_slurm_exporter_container: slurm-exporter

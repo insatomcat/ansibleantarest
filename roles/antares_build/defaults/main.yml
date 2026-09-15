@@ -1,7 +1,8 @@
 ---
-# antares_build_root and antares_build_artifacts live in group_vars/all.yml:
-# build.yml needs them in its play vars, to override container_cmd before the
-# reused build tasks run, and role defaults are not visible there.
+# antares_build_root and antares_build_artifacts live in roles/antares_defaults/,
+# which build.yml imports in its pre_tasks: it needs them in its play vars, to
+# override container_cmd before the reused build tasks run, and *this* role's
+# defaults are not visible there.
 
 # Third-party images shipped alongside our own, so that a target with no
 # Internet access can still start the stack. This is literally the list the
@@ -9,7 +10,8 @@
 # the drift only shows up as a container that cannot pull on an offline machine.
 # It follows that the switches deciding what is in it - antarest_enable_adminer,
 # keycloak_enabled - have to be set where the builder sees them too
-# (group_vars/all.yml), not only on the web host. Same for
+# (in the inventory, or left at the default of roles/antares_defaults/), not
+# only on the web host. Same for
 # antares_auth_provider, which decides the connector image built next to them.
 antares_build_thirdparty_images: "{{ antarest_thirdparty_images }}"
 
@@ -53,5 +55,5 @@ antares_build_slurm_images: >-
 # a compute node has no business receiving Grafana. Empty when the deployment
 # is not monitored - and, like the switches above, monitoring_enabled and
 # monitoring_slurm_enabled have to be right where the builder sees them, which
-# is why the list itself lives in group_vars/all.yml.
+# is why the list itself lives in roles/antares_defaults/.
 antares_build_monitoring_images: "{{ monitoring_images }}"

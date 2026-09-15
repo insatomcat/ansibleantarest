@@ -1,0 +1,80 @@
+---
+# ===========================================================================
+#  Keycloak and the external_auth connectors
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+#  Keycloak
+#
+#  An identity provider next to Antares-Web, on the same machine, in the same
+#  PostgreSQL (in a database of its own) and behind the same front door, which
+#  serves it under keycloak_relative_path.
+#
+#  Antares-Web does not speak OIDC. What it has is `security.external_auth`, a
+#  URL it POSTs a username and a password to and expects the user's names and
+#  groups back. The bridge is the kc-rest connector of the antares_auth role,
+#  which is what antares_auth_provider turns on; Keycloak alone logs nobody in.
+#
+#  What the operator does after the first deployment: open
+#  https://<domain>/auth/admin/, log in with keycloak_admin_user, and create
+#  the users and the groups. The realm, the client the connector authenticates
+#  with and its service account are imported by the playbook.
+# ---------------------------------------------------------------------------
+keycloak_enabled: false
+
+# Pinned to a minor, like every other third-party image here: the tag keeps
+# receiving patch releases, and a major upgrade is a decision (Keycloak
+# migrates its own schema on the first start of a new version, and does not
+# migrate back).
+keycloak_image: "quay.io/keycloak/keycloak:26.7"
+
+# Loopback port the front door proxies to, and the prefix it serves Keycloak
+# under. The prefix is also what Keycloak is told to build its own URLs with
+# (KC_HTTP_RELATIVE_PATH), so the two cannot disagree.
+keycloak_port: 8082
+keycloak_relative_path: /auth
+
+# The realm holding the Antares users, and the client the connector
+# authenticates with. Both are created by the realm the playbook imports.
+keycloak_realm: antares
+keycloak_client_id: antares-auth
+
+# Secrets - CHANGE THESE.
+#
+# keycloak_admin_password seeds the first administrator of the master realm and
+# is read once, when the database is empty, exactly like the Antares-Web one:
+# changing it afterwards is done from the console. The other two are read at
+# every start.
+#
+# The account Keycloak bootstraps from it is a temporary one, which its console
+# says on every page until it is replaced. The playbook replaces it, right
+# after the first start, with a permanent account of the same name and the same
+# password - keycloak_admin_permanent in the role defaults, and
+# docs/authentication.md.
+keycloak_admin_password: "admin"
+keycloak_db_password: "changeme-keycloak-db"
+keycloak_client_secret: "changeme-keycloak-client"
+
+# ---------------------------------------------------------------------------
+#  The authentication connector
+#
+#  Which of the two connectors of the antares_auth role is deployed, and
+#  therefore what antarest_external_auth_url points Antares-Web at. Only one is
+#  ever deployed: the application reads a single URL.
+#
+#    none      only the local accounts of Antares-Web exist
+#    keycloak  the kc-rest connector, against keycloak_enabled above or any
+#              other Keycloak (antares_auth_keycloak_url)
+#    ldap      the ldap-rest connector, against a directory that already
+#              exists. Everything it needs is in the role defaults, and the
+#              role refuses to deploy without it.
+#
+#  Set where the *builder* sees it too, like antarest_enable_adminer: build.yml
+#  only archives the connector it is told about.
+# ---------------------------------------------------------------------------
+antares_auth_provider: none
+
+# Port the connector listens on, and the container name the backend resolves.
+# One port for either connector: they never run together.
+antares_auth_port: 8870
+antares_auth_container: "antares-auth-{{ antares_auth_provider }}"

@@ -1,0 +1,90 @@
+---
+# ===========================================================================
+#  The Slurm cluster, its database and the shared /home
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+#  Slurm on / off
+#
+#  false -> only the `antares_web` play runs and Antares-Web is configured
+#           with the local launcher alone (the solver runs on the web server).
+#  true  -> the Slurm cluster is deployed too and both launchers are exposed.
+# ---------------------------------------------------------------------------
+slurm_enabled: true
+
+# ---------------------------------------------------------------------------
+#  Slurm cluster
+# ---------------------------------------------------------------------------
+slurm_cluster_name: antares
+slurm_partition: antares
+
+# Where the Slurm packages come from.
+#
+#   distro  : the distribution ships them. True on Debian and Ubuntu
+#             (slurm-wlm), false on every EL rebuild: neither the base
+#             repositories nor EPEL carry Slurm any more.
+#   openhpc : the OpenHPC repositories, which package Slurm for EL and are
+#             what the HPC world actually uses there. The package names then
+#             carry an -ohpc suffix, and /etc/slurm, the systemd units and the
+#             slurm account are the same as everywhere else, so nothing beyond
+#             the names changes.
+#
+# The default follows the family. Set slurm_repo to `distro` on a RedHat
+# machine whose Slurm you install yourself.
+slurm_repo: "{{ 'openhpc' if ansible_facts['os_family'] == 'RedHat' else 'distro' }}"
+
+# Paths and system account used by the Slurm daemons. Defined here rather
+# than in the roles because several plays need them.
+slurm_conf_dir: /etc/slurm
+slurm_log_dir: /var/log/slurm
+slurm_spool_dir: /var/spool/slurm
+slurm_user: slurm
+
+# Root of the solver installs inside the shared /home.
+slurm_solvers_dir: "{{ antares_home }}/solvers"
+# Same, for the Antares-Xpansion packages.
+slurm_xpansion_dir: "{{ antares_home }}/xpansion"
+
+slurm_launch_script: "{{ antares_home }}/launchAntares.sh"
+
+# Accounting database (MariaDB in a container on the front-end).
+slurmdbd_enabled: true
+slurmdbd_db_password: "changeme-slurm-acct"
+# Pinned to a major, like the Antares-Web images: the slurmdb-data volume holds
+# a MariaDB cluster of one specific major, and moving to the next one is a
+# deliberate dump and restore, not something a re-run should trigger.
+slurmdbd_mariadb_image: "{{ container_registry }}/mariadb:11"
+slurmdbd_adminer_image: "{{ container_registry }}/adminer:5"
+
+# Whether adminer is deployed next to the accounting database. Shared rather
+# than private to slurm_frontend because slurmdbd_thirdparty_images below is
+# built from it, and the builder resolves that list without running the role.
+slurmdbd_enable_adminer: false
+
+# The images the accounting database needs, beyond the packaged daemons. The
+# counterpart of antarest_thirdparty_images for the Slurm half: build.yml
+# archives this very list and slurm_frontend loads it, so the two cannot drift.
+# It lives here rather than in roles/slurm_frontend/vars/ because the builder
+# reads it and never runs that role - same reason as keycloak_image above.
+slurmdbd_thirdparty_images: >-
+  {{ [slurmdbd_mariadb_image]
+     + ([slurmdbd_adminer_image] if slurmdbd_enable_adminer | bool else []) }}
+
+# NFS. The path only: it is the shared /home both halves of the cluster agree
+# on, and verify.yml checks the export from both sides. The mount and export
+# options belong to the two roles that use them.
+nfs_export_path: /home
+
+# ---------------------------------------------------------------------------
+#  Derived values - normally no need to touch these
+# ---------------------------------------------------------------------------
+_slurm_frontend_host: "{{ (groups['slurm_frontend'] | default([])) | first | default('') }}"
+
+slurm_frontend_name: >-
+  {{ (hostvars[_slurm_frontend_host].slurm_node_name
+      | default(_slurm_frontend_host.split('.')[0])) if _slurm_frontend_host else '' }}
+
+slurm_frontend_ip: >-
+  {{ (hostvars[_slurm_frontend_host].slurm_node_ip
+      | default(hostvars[_slurm_frontend_host].ansible_facts.default_ipv4.address
+      | default(hostvars[_slurm_frontend_host].ansible_host | default('')))) if _slurm_frontend_host else '' }}

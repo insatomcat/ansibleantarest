@@ -11,7 +11,7 @@
 #
 # One series per major, not one series for everything: OpenHPC 3 publishes an
 # EL_9 tree and nothing above, OpenHPC 4 publishes EL_10 and has no EL_9 tree.
-# group_vars/all.yml maps the major to the release rpm; the two checks below
+# This role's defaults map the major to the release rpm; the two checks below
 # are what happens when that mapping has nothing to say.
 
 # A major OpenHPC publishes nothing for, EL 8 or whatever comes after 10 before
@@ -25,7 +25,7 @@
       {{ inventory_hostname }} runs {{ ansible_facts['distribution'] }}
       {{ ansible_facts['distribution_version'] }} and no OpenHPC release
       package is known for EL {{ ansible_facts['distribution_major_version'] }}
-      (see slurm_openhpc_release in group_vars/all.yml, which today maps EL 9
+      (see slurm_openhpc_release in roles/slurm_common/defaults/main.yml, which maps EL 9
       to OpenHPC 3 and EL 10 to OpenHPC 4). There is nothing to install Slurm
       from on this machine. Put the Slurm nodes on a major OpenHPC publishes
       for, set slurm_openhpc_release to a release rpm yourself, or set

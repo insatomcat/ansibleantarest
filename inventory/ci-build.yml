@@ -24,9 +24,9 @@
 #  set (127.0.0.1, localhost, ::1), and under the address it runs a plain
 #  local rsync without the elevation the far side needs.
 #
-#  Note on precedence, the same one the example inventories carry: settings
-#  written under a *host* override group_vars/all.yml, a `vars:` block on a
-#  group does not. Everything below therefore sits on the host.
+#  Note on precedence, the same one the example inventories carry: every
+#  default lives in a role, which is the lowest precedence Ansible has, so
+#  anything written here wins - on a host or on a group alike.
 # ===========================================================================
 
 all:
@@ -78,13 +78,13 @@ all:
       #  antarest_image_source=archive, where nothing pulls, so a target
       #  would otherwise fail on images that were never shipped.
       #
-      #  slurm_enabled is left at the default of group_vars/all.yml, which
+      #  slurm_enabled is left at the default of antares_defaults, which
       #  is true, so the Slurm exporter is archived too and the cluster
       #  suites find it.
       # ---------------------------------------------------------------
       monitoring_enabled: true
 
-      # Left at the default of group_vars/all.yml, which is true. The builder
+      # Left at the default of antares_defaults, which is true. The builder
       # is not a cluster node, but this is also what decides whether the
       # accounting database's images are archived, and the `slurm` and
       # `standalone-slurm` jobs deploy from these very artefacts: turning it

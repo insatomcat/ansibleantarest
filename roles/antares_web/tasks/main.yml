@@ -16,7 +16,7 @@
     antares_solver_dest: "{{ antarest_solvers_dir }}"
 
 # Either the image and the web application are built here, or they are loaded
-# from what build.yml produced. See antarest_image_source in group_vars/all.yml.
+# from what build.yml produced. See antarest_image_source in antares_defaults.
 - name: Load the prebuilt image and web application
   ansible.builtin.include_tasks: load_artifacts.yml
   when: antarest_image_source == 'archive'

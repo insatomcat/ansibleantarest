@@ -17,3 +17,8 @@ _nfs_client_packages_by_family:
     - nfs-common
   RedHat:
     - nfs-utils
+
+# How the compute nodes mount the shared /home. _netdev keeps the mount from
+# being attempted before the network is up. The path is nfs_export_path, in
+# roles/antares_defaults/.
+nfs_mount_options: "defaults,_netdev"

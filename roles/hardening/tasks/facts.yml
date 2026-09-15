@@ -100,7 +100,7 @@
 #
 #  Only on the machines that run Antares-Web, and only those that are actually
 #  published: with TLS off, nothing listens on 443. The variables live in
-#  group_vars/all.yml so that they are in scope here too.
+#  roles/antares_defaults/ so that they are in scope here too.
 # ---------------------------------------------------------------------------
 - name: Resolve the public ports of Antares-Web
   ansible.builtin.set_fact:

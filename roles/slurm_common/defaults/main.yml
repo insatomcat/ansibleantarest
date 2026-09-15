@@ -3,7 +3,7 @@
 # the reference procedure pulls in with build-essential.
 #
 # Two axes here, not one: where Slurm comes from (slurm_repo, see
-# group_vars/all.yml) decides the Slurm package names, and the family decides
+# roles/antares_defaults/) decides the Slurm package names, and the family decides
 # the toolchain ones. The Debian family splits the plugins out of the client
 # package; OpenHPC and the EL packaging both ship everything in one.
 slurm_common_packages: >-
@@ -46,3 +46,31 @@ slurm_extra_config: []
 # to start, which is only ever what you want if their name reaches them some
 # other way.
 slurm_hostname_check: true
+
+# The release rpm that declares those repositories, per EL major, because
+# OpenHPC does not keep one series per major: OpenHPC 3 publishes EL_9 and no
+# more, OpenHPC 4 publishes EL_10 and openEuler and has no EL_9 tree. So the
+# major of the machine picks the series, and a machine whose major is not
+# listed here gets an empty string, which roles/slurm_common/tasks/repo.yml
+# turns into a named failure rather than a missing package much later.
+#
+# Consequence worth knowing before mixing majors: the two series do not carry
+# the same Slurm. OpenHPC 3 is on 25.11 today, OpenHPC 4 on 25.05, so EL 10
+# gets the *older* one. That does not matter for one cluster, which the
+# "one distribution per cluster" rule above already keeps homogeneous, and it
+# is the reason that rule is there.
+#
+# Override with a full URL to pin another version or a local mirror. The
+# check in repo.yml only compares the EL_<major> in the path with the machine.
+slurm_openhpc_release: >-
+  {{ _slurm_openhpc_release_by_major[ansible_facts['distribution_major_version']]
+     | default('') }}
+_slurm_openhpc_release_by_major:
+  "9": "http://repos.openhpc.community/OpenHPC/3/EL_9/x86_64/ohpc-release-3-1.el9.x86_64.rpm"
+  "10": "http://repos.openhpc.community/OpenHPC/4/EL_10/x86_64/ohpc-release-4-1.el10.x86_64.rpm"
+
+# `select/cons_tres` lets several studies share a node, which is what makes
+# the --cpus-per-task sent by antares-launcher meaningful. Switch to
+# `select/linear` for exclusive whole-node allocation.
+slurm_select_type: "select/cons_tres"
+slurm_select_type_parameters: "CR_Core"
