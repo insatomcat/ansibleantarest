@@ -12,8 +12,29 @@
 #  slurm_node_cpus / slurm_node_real_memory in the inventory.
 # ===========================================================================
 
+# ---------------------------------------------------------------------------
+#  `all:!builder`, on every play of this file that is not aimed at a group
+#  already.
+#
+#  A builder is not a machine of the deployment. It exists for the length of a
+#  `build.yml` run, it holds no service, nothing scrapes it and nothing
+#  connects to it - that playbook only pulls artefacts back to the controller.
+#  Configuring it here would install the base packages, the `antares` account,
+#  nftables and fail2ban on a machine that has no use for any of it, and
+#  hardening would go on to ask it about secrets it does not hold.
+#
+#  It is excluded by the group rather than by the shape of a given inventory:
+#  the example file lists a builder next to the fleet, and so does anyone who
+#  builds and deploys from the same `-i`. Build it with `build.yml`, which
+#  installs on it exactly what a build needs and nothing else.
+#
+#  The same difference is already taken elsewhere, for the same reason: the
+#  trusted peer set of the firewall (roles/hardening/tasks/facts.yml), the
+#  Prometheus targets (roles/monitoring_server/vars/main.yml) and the checks
+#  of verify.yml.
+# ---------------------------------------------------------------------------
 - name: Gather facts from every machine
-  hosts: all
+  hosts: all:!builder
   # gather_facts is a no-op whenever the jsonfile cache is still valid,
   # including after the machine behind this name has been rebuilt as a
   # different distribution. The setup module always talks to the host and
@@ -29,7 +50,7 @@
       ansible.builtin.setup:
 
 - name: Base configuration
-  hosts: all
+  hosts: all:!builder
   become: true
   tags: common
   roles:
@@ -41,7 +62,7 @@
 # a full deployment with everything open. Only the input hook is filtered, so
 # nothing here gets in the way of what follows.
 - name: Hardening
-  hosts: all
+  hosts: all:!builder
   become: true
   tags: hardening
   roles:
@@ -60,9 +81,9 @@
 # takes the exporters down, rather than leaving them behind on every machine
 # of a fleet that no longer collects them.
 - name: Monitoring - the node exporter of every machine
-  # Not `all`: a builder is listed in the same inventory in the example file,
-  # it is a machine that exists for the length of a build, and Prometheus does
-  # not scrape it. An exporter nobody reads is one more container to explain.
+  # See the note at the top of this file for the exclusion. An exporter on a
+  # builder is one more container to explain, and Prometheus does not scrape
+  # it anyway.
   hosts: all:!builder
   become: true
   tags: monitoring
