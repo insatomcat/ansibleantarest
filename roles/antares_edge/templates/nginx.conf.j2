@@ -19,6 +19,46 @@ map $http_upgrade $antares_edge_connection {
     default upgrade;
     ''      close;
 }
+{% if antares_edge_basic_auth_tiers %}
+
+# ---------------------------------------------------------------------------
+#  The password in front of the password
+#
+#  auth_basic takes a realm, and the string `off` in its place switches it off.
+#  Both are computed per request here rather than written into the locations,
+#  which is what lets one location be closed to the internet and open to the
+#  machine itself.
+# ---------------------------------------------------------------------------
+{% for tier in antares_edge_basic_auth_tiers %}
+
+# The realm the {{ tier.name }} tier announces, and `off` for the addresses the
+# front door never challenges. `geo` rather than `map`, for the CIDR notation.
+geo $antares_edge_{{ tier.name }}_realm {
+    default "{{ tier.realm }}";
+{% for network in antares_edge_basic_auth_trusted %}
+    {{ network }} off;
+{% endfor %}
+}
+{% endfor %}
+{% if 'app' in antares_edge_basic_auth_names %}
+
+# And the exception the browser application needs. Its API calls carry a
+# bearer token in the Authorization header, which is the very header basic
+# authentication uses: a browser cannot send both, so a password asked on the
+# API would make the application unusable rather than more private. Same for a
+# websocket handshake, which a browser cannot put a header on at all.
+#
+# A request that qualifies is not let in - it is handed to the backend, which
+# asks it for the token it claims to have. What this opens to the internet is
+# the API's own unauthenticated surface and nothing else, and only under the
+# location that declares a token_path.
+map "$http_upgrade:$http_authorization" $antares_edge_token_realm {
+    default          $antares_edge_app_realm;
+    "~*^websocket:"  off;
+    "~*^:bearer "    off;
+}
+{% endif %}
+{% endif %}
 
 {% macro routes() %}
     client_max_body_size {{ antares_edge_client_max_body_size }};
@@ -42,8 +82,24 @@ map $http_upgrade $antares_edge_connection {
     proxy_redirect     off;
     proxy_read_timeout {{ antares_edge_proxy_read_timeout }};
 {% for route in antares_edge_routes %}
+{% set tier = route.auth | default('') %}
+{% set gated = tier in antares_edge_basic_auth_names %}
+{% if gated and route.token_path is defined %}
+
+    # {{ route.name }}, the part of it whose clients authenticate themselves.
+    # Longer prefix than the location below, so it wins whatever the order.
+    location {{ route.token_path }} {
+      auth_basic           $antares_edge_token_realm;
+      auth_basic_user_file {{ antares_edge_htpasswd_container_dir }}/{{ tier }};
+      proxy_pass http://{{ route.upstream }};
+    }
+{% endif %}
 
     location {{ route.path }} {   # {{ route.name }}
+{% if gated %}
+      auth_basic           $antares_edge_{{ tier }}_realm;
+      auth_basic_user_file {{ antares_edge_htpasswd_container_dir }}/{{ tier }};
+{% endif %}
       proxy_pass http://{{ route.upstream }};
     }
 {% endfor %}

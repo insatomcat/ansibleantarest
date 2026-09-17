@@ -115,6 +115,30 @@ all:
       monitoring_enabled: true
       monitoring_grafana_admin_password: "ci-grafana-not-a-secret"
 
+      # ---------------------------------------------------------------
+      #  The password in front of the password, on the one shape whose
+      #  controller is really outside the machine: the runner sits on the
+      #  bridge without being in this inventory, so its probes are not in
+      #  antares_edge_basic_auth_trusted and are challenged like anyone
+      #  else's. That is what makes the two halves testable here and
+      #  nowhere else - verify.yml asks the front door for the interface,
+      #  the Keycloak console and Grafana with no password and requires a
+      #  401 with a Basic challenge, and reaches what is behind them from
+      #  the machine's own loopback, which the door never challenges.
+      #
+      #  Both hash formats on purpose, since nginx reads the first itself
+      #  and hands the second to crypt(3): the passwords behind them are
+      #  `ci-edge-not-a-secret` and `ci-edge-admin-not-a-secret`, and the
+      #  workflow uses them in one curl to check the door also opens.
+      #  Public by construction, like every other secret in this file.
+      # ---------------------------------------------------------------
+      antares_edge_basic_auth_users:
+        - name: ci-user
+          hash: "$6$cieedge01$OrSfjAEMiqmfVzQl2/h682p9GEbPz5TvAPGwMWtvS5a4OLY46r47bPcAMxu4ANGu8.8Hm.PtEjo6JkZecikyj0"
+      antares_edge_basic_auth_admin_users:
+        - name: ci-admin
+          hash: "$apr1$ciedgead$mB3ePas6m2QGX0tfD/.Pa."
+
       # Four gunicorn workers of the default formula would each load the
       # whole application, on a machine that is also running the daemons of
       # a cluster. Two is enough to still exercise the preforked path Redis

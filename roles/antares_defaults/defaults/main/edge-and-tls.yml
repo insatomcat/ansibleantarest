@@ -41,3 +41,35 @@ antares_edge_image: "{{ container_registry }}/nginx:1.30"
 # ---------------------------------------------------------------------------
 antarest_tls_enabled: false
 antarest_tls_domain: ""                # e.g. antares.example.org
+
+# ---------------------------------------------------------------------------
+#  The password in front of the password
+#
+#  Two lists of accounts the front door asks for before it proxies anything.
+#  The first guards the web application, the second the administration
+#  interfaces served next to it (the Keycloak console, Grafana, Prometheus),
+#  deliberately separate: the people who operate a deployment are not the
+#  people who use it.
+#
+#  Empty is off, and empty is the default: a list with one account in it is
+#  what turns its tier on. There is no *_enabled flag on purpose, so that
+#  filling a list and forgetting a flag cannot leave the door open.
+#
+#      antares_edge_basic_auth_users:
+#        - name: alice
+#          hash: "$6$Xk1...$Yy..."
+#
+#  The hash, never the password. Generate one with either of:
+#
+#      openssl passwd -6                # SHA-512, what nginx reads through crypt(3)
+#      htpasswd -n alice                # $apr1$, understood by nginx itself
+#
+#  Read by verify.yml as well as by the antares_edge role, which is why the
+#  lists live here: what an answer through the front door proves depends on
+#  whether it had to get past one. Everything else about the feature - the
+#  realms, the addresses never asked for a password - is in
+#  roles/antares_edge/defaults/main.yml, and the whole of it is documented in
+#  docs/edge-and-tls.md.
+# ---------------------------------------------------------------------------
+antares_edge_basic_auth_users: []
+antares_edge_basic_auth_admin_users: []
