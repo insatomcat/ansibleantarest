@@ -51,6 +51,17 @@ The local launcher reads the cores of the machine as long as `antarest_local_lau
 
 Configuration and data live outside the git checkout: changing `antarest_version` and re-running the playbook updates the application without touching the data. `data/` is the one directory worth putting on a volume of its own, see [Putting the state on its own volume](#putting-the-state-on-its-own-volume).
 
+## adminer
+
+A database web UI next to the stack, off by default, published on the loopback alone because it exposes the whole database and carries no authentication beyond the PostgreSQL credentials. Reach it through a tunnel: `ssh -L 8080:127.0.0.1:8080 <machine>`.
+
+```yaml
+antarest_enable_adminer: false
+antarest_adminer_port: 8080
+```
+
+The port is a variable, and its counterpart on the accounting database, `slurmdbd_adminer_port`, deliberately defaults to something else (see [The Slurm cluster](slurm.md)). One machine can be an `antares_web` and a `slurm_frontend` at once, which is the [standalone-slurm shape](slurm.md#the-cluster-on-the-web-machine-itself); it then runs both adminers, and two of them on the same loopback port means the second one never binds. The play refuses an inventory that sets them equal on such a machine rather than leaving a unit failing ten seconds after a deployment that reported success.
+
 ## Putting the state on its own volume
 
 Everything the deployment has to keep lives under `antarest_data_dir`, that is `/var/antares-web/data`: the studies, the matrix store, the archives, the logs and the PostgreSQL cluster. By default that sits on the boot disk. On a cloud instance it is usually worth giving it a volume of its own, which can be resized, snapshotted and re-attached to another machine without going through the image.

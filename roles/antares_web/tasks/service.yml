@@ -1,4 +1,24 @@
 ---
+# A machine can be an antares_web and a slurm_frontend at once - that is the
+# standalone-slurm shape - and then it runs two adminers, one per database.
+# They publish on the same loopback, so the same port means the second one
+# never binds and its unit fails with "address already in use", ten seconds
+# after a deployment that reported success. The defaults differ; this catches
+# an inventory that made them equal again.
+- name: Check the two adminers do not want the same port
+  ansible.builtin.assert:
+    that: antarest_adminer_port | int != slurmdbd_adminer_port | int
+    fail_msg: >-
+      antarest_adminer_port and slurmdbd_adminer_port are both
+      {{ antarest_adminer_port }}, and this machine runs both adminers. They
+      are published on 127.0.0.1, so one of them would not start. Set one of
+      the two to a free port.
+    quiet: true
+  when:
+    - antarest_enable_adminer | bool
+    - slurmdbd_enable_adminer | bool
+    - inventory_hostname in groups['slurm_frontend'] | default([])
+
 # The generator is what systemd itself runs on reload, so this catches a
 # malformed unit before the stack is asked to start. It exits non-zero and names
 # the offending file and key. Note that it validates the whole of

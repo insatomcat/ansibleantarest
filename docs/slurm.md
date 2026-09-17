@@ -14,12 +14,15 @@ slurmdbd_innodb_buffer_pool_size: "1G"
 slurmdbd_mariadb_image: "docker.io/library/mariadb:11"
 slurmdbd_adminer_image: "docker.io/library/adminer:5"
 slurmdbd_enable_adminer: false          # published on 127.0.0.1 only
+slurmdbd_adminer_port: 8085             # not antarest_adminer_port, see below
 slurm_launcher_ssh_port: 22             # how Antares-Web reaches the front-end
 slurm_launcher_default_wait_time: 900   # seconds
 slurm_launcher_default_time_limit: 172800
 ```
 
 `slurmdbd_thirdparty_images` is the list those two image pins produce, and the accounting database's counterpart of `antarest_thirdparty_images`: `build.yml` archives exactly that list and the front-end checks exactly that list is loaded before starting anything, so the two cannot drift. It lives in `roles/antares_defaults/` rather than in `slurm_frontend` because the builder reads it and never runs that role, and so does `slurmdbd_enable_adminer`, which it is built from.
+
+`slurmdbd_adminer_port` is not `antarest_adminer_port` on purpose. A front-end that is also the web machine runs an adminer for each database, both published on the loopback, and the same port there means the second one never binds. The web play refuses an inventory that sets them equal on such a machine.
 
 Compute node characteristics (`CPUs`, `SocketsPerBoard`, `CoresPerSocket`, `ThreadsPerCore`, `RealMemory`) are derived from Ansible facts and can be overridden per-host in the inventory using `slurm_node_cpus`, `slurm_node_sockets`, `slurm_node_cores_per_socket`, `slurm_node_threads_per_core` and `slurm_node_real_memory`.
 
