@@ -99,10 +99,36 @@
     # then checked for what it is, from here, by the task that expects a 401.
     verify_web_gated: "{{ (antares_edge_basic_auth_users | default([])) | length > 0 }}"
     verify_admin_gated: "{{ (antares_edge_basic_auth_admin_users | default([])) | length > 0 }}"
-    verify_web_probe_url: "{{ verify_edge_local_url if verify_web_gated | bool else verify_web_url }}"
-    verify_web_probe_from: "{{ inventory_hostname if verify_web_gated | bool else 'localhost' }}"
-    verify_admin_probe_url: "{{ verify_edge_local_url if verify_admin_gated | bool else verify_web_url }}"
-    verify_admin_probe_from: "{{ inventory_hostname if verify_admin_gated | bool else 'localhost' }}"
+    # The account to present at the door, per tier, when the inventory or the
+    # command line gave one. A probe that carries it is asked from the
+    # controller like every other check in this file; one that has none falls
+    # back to the machine's own loopback, which the door never challenges.
+    verify_web_auth: >-
+      {{ {'Authorization': 'Basic ' ~ ((antares_edge_basic_auth_probe_user ~ ':'
+                                        ~ antares_edge_basic_auth_probe_password) | b64encode)}
+         if (antares_edge_basic_auth_probe_user | default('') | length > 0 and verify_web_gated | bool)
+         else {} }}
+    verify_admin_auth: >-
+      {{ {'Authorization': 'Basic ' ~ ((antares_edge_basic_auth_admin_probe_user ~ ':'
+                                        ~ antares_edge_basic_auth_admin_probe_password) | b64encode)}
+         if (antares_edge_basic_auth_admin_probe_user | default('') | length > 0 and verify_admin_gated | bool)
+         else {} }}
+    verify_web_outside: "{{ not verify_web_gated | bool or verify_web_auth | length > 0 }}"
+    verify_admin_outside: "{{ not verify_admin_gated | bool or verify_admin_auth | length > 0 }}"
+    verify_web_probe_url: "{{ verify_web_url if verify_web_outside | bool else verify_edge_local_url }}"
+    verify_web_probe_from: "{{ 'localhost' if verify_web_outside | bool else inventory_hostname }}"
+    verify_admin_probe_url: "{{ verify_web_url if verify_admin_outside | bool else verify_edge_local_url }}"
+    verify_admin_probe_from: "{{ 'localhost' if verify_admin_outside | bool else inventory_hostname }}"
+    # What a browser sends on every request once the door has let it through:
+    # the real account when there is one, a made-up one otherwise, since from
+    # the loopback the door does not check it and what is under test is that
+    # it is cleared rather than that it opens.
+    verify_consumed_auth: >-
+      {{ verify_web_auth if verify_web_auth | length > 0
+         else {'Authorization': 'Basic ' ~ ('verify.yml:not-a-password' | b64encode)} }}
+    verify_consumed_admin_auth: >-
+      {{ verify_admin_auth if verify_admin_auth | length > 0
+         else {'Authorization': 'Basic ' ~ ('verify.yml:not-a-password' | b64encode)} }}
     # Both live in the role defaults, which a playbook that does not include
     # the role cannot see, hence the fallbacks. Empty means the deployment
     # keeps its state on the boot disk, and the volume checks do not apply.
@@ -171,6 +197,7 @@
     - name: Ask the backend for its health
       ansible.builtin.uri:
         url: "{{ verify_web_probe_url | trim }}/api/health"
+        headers: "{{ verify_web_auth }}"
         return_content: true
         validate_certs: false
       register: verify_health
@@ -183,6 +210,7 @@
     - name: Ask nginx for the web application
       ansible.builtin.uri:
         url: "{{ verify_web_probe_url | trim }}/"
+        headers: "{{ verify_web_auth }}"
         return_content: true
         validate_certs: false
       register: verify_index
@@ -205,6 +233,7 @@
       ansible.builtin.uri:
         url: "{{ verify_web_probe_url | trim }}/api/v1/login"
         method: POST
+        headers: "{{ verify_web_auth }}"
         body_format: json
         body:
           username: verify.yml
@@ -230,8 +259,7 @@
       ansible.builtin.uri:
         url: "{{ verify_web_probe_url | trim }}/api/v1/login"
         method: POST
-        headers:
-          Authorization: "Basic {{ 'verify.yml:not-a-password' | b64encode }}"
+        headers: "{{ verify_consumed_auth }}"
         body_format: json
         body:
           username: verify.yml
@@ -284,6 +312,85 @@
         quiet: true
       when: verify_web_gated | bool
 
+    # And the check every probe above is blind to: that somebody can actually
+    # log in. A page and a health endpoint are exactly the requests that carry
+    # no credentials, so nothing above moves when authentication breaks - which
+    # is how a front door forwarding the header it authenticates with went out
+    # with every check in this file green.
+    #
+    # The password is the one the inventory sets. AntaREST writes it when it
+    # creates the admin row and never reads it again, so a deployment whose
+    # password was changed afterwards answers 401 here. Like the Keycloak
+    # login below, that is an answer and not a failure: it is reported, and
+    # the call it would have authorised is skipped with it.
+    - name: Log into Antares-Web through the front door
+      ansible.builtin.uri:
+        url: "{{ verify_web_probe_url | trim }}/api/v1/login"
+        method: POST
+        headers: "{{ verify_web_auth }}"
+        body_format: json
+        body:
+          username: admin
+          password: "{{ antarest_admin_password }}"
+        status_code: [200, 401]
+        validate_certs: false
+      register: verify_login
+      no_log: true
+      delegate_to: "{{ verify_web_probe_from }}"
+      become: false
+
+    - name: Check the login was answered by the application
+      ansible.builtin.assert:
+        that: verify_login.www_authenticate is not defined
+        fail_msg: >-
+          The login form was answered by the front door
+          ({{ verify_login.www_authenticate | default('') }}) rather than by
+          Antares-Web, so nothing behind it can be reached with a password.
+        quiet: true
+
+    # The other half of a login: the token it hands back has to work. That is
+    # what the /api/ exemption of a gated front door exists for, and a token
+    # refused here is that exemption not being applied.
+    - name: Ask the API for its users with the token the login issued
+      ansible.builtin.uri:
+        url: "{{ verify_web_probe_url | trim }}/api/v1/users"
+        headers:
+          Authorization: "Bearer {{ verify_login.json.access_token }}"
+        status_code: [200, 401]
+        validate_certs: false
+      register: verify_api_call
+      delegate_to: "{{ verify_web_probe_from }}"
+      become: false
+      when: verify_login.status | default(0) == 200
+
+    # A token refused here is either the backend's business or the door's, and
+    # the challenge header is what tells them apart: nginx answers a 401 with
+    # one, the application never does.
+    - name: Check the token the login issued is honoured
+      ansible.builtin.assert:
+        that: verify_api_call.status | default(200) == 200
+        fail_msg: >-
+          {{ 'The front door refused a request carrying a bearer token
+              (' ~ verify_api_call.www_authenticate | default('') ~ '), so the
+              token path of the Antares-Web route is not exempted and the
+              interface cannot call its own API. See antares_edge_routes in
+              roles/antares_edge/vars/main.yml.'
+             if verify_api_call.www_authenticate is defined
+             else 'Antares-Web refused the token its own login form had just
+                   issued, which is the backend and not the route.' }}
+        quiet: true
+      when: verify_login.status | default(0) == 200
+
+    - name: Report an admin password the inventory no longer holds
+      ansible.builtin.debug:
+        msg: >-
+          Antares-Web refused antarest_admin_password, so the login and the
+          token it issues could not be checked. That is what a password
+          changed since the database was created looks like, see
+          docs/operations.md; the login form was reached and answered, which
+          is what the assert above proved.
+      when: verify_login.status | default(0) != 200
+
     # Through the front door, from the controller, like everything above: what
     # is under test is the route, and a realm that answers proves at the same
     # time that Keycloak is up, that its database was created and that the
@@ -292,6 +399,7 @@
       ansible.builtin.uri:
         url: >-
           {{ verify_admin_probe_url | trim }}{{ keycloak_relative_path }}/realms/{{ keycloak_realm }}/.well-known/openid-configuration
+        headers: "{{ verify_admin_auth }}"
         validate_certs: false
       register: verify_keycloak
       retries: 12
@@ -300,6 +408,75 @@
       delegate_to: "{{ verify_admin_probe_from }}"
       become: false
       when: keycloak_enabled | default(false) | bool
+
+    # And the same two halves for Keycloak: a token from the master realm, then
+    # the admin API call it authorises. That call is what the console makes on
+    # every page it draws, with a bearer token in the header basic
+    # authentication uses, so it is the request a gated front door is most
+    # likely to have broken.
+    #
+    # A refusal is an answer and not a failure, the same way the keycloak role
+    # treats it: the master password can have been changed from the console.
+    - name: Log into the Keycloak master realm through the front door
+      ansible.builtin.uri:
+        url: "{{ verify_admin_probe_url | trim }}{{ keycloak_relative_path }}/realms/master/protocol/openid-connect/token"
+        method: POST
+        headers: "{{ verify_admin_auth }}"
+        body_format: form-urlencoded
+        body:
+          client_id: admin-cli
+          grant_type: password
+          username: "{{ keycloak_admin_user }}"
+          password: "{{ keycloak_admin_password }}"
+        status_code: [200, 400, 401]
+        validate_certs: false
+      register: verify_kc_login
+      no_log: true
+      delegate_to: "{{ verify_admin_probe_from }}"
+      become: false
+      when: keycloak_enabled | default(false) | bool
+
+    - name: Ask the Keycloak admin API for the realm, with that token
+      ansible.builtin.uri:
+        url: "{{ verify_admin_probe_url | trim }}{{ keycloak_relative_path }}/admin/realms/{{ keycloak_realm }}"
+        headers:
+          Authorization: "Bearer {{ verify_kc_login.json.access_token }}"
+        status_code: [200, 401]
+        validate_certs: false
+      register: verify_kc_call
+      delegate_to: "{{ verify_admin_probe_from }}"
+      become: false
+      when:
+        - keycloak_enabled | default(false) | bool
+        - verify_kc_login.status | default(0) == 200
+
+    - name: Check the Keycloak console can reach the API it draws from
+      ansible.builtin.assert:
+        that: verify_kc_call.status | default(200) == 200
+        fail_msg: >-
+          {{ 'The front door refused a request carrying a bearer token
+              (' ~ verify_kc_call.www_authenticate | default('') ~ '), so the
+              token path of the Keycloak route is not exempted. The console
+              loads and then draws nothing, since every call it makes carries
+              one. See antares_edge_routes in
+              roles/antares_edge/vars/main.yml.'
+             if verify_kc_call.www_authenticate is defined
+             else 'Keycloak refused the token its own master realm had just
+                   issued, which is Keycloak and not the route.' }}
+        quiet: true
+      when:
+        - keycloak_enabled | default(false) | bool
+        - verify_kc_login.status | default(0) == 200
+
+    - name: Report a master password the inventory no longer holds
+      ansible.builtin.debug:
+        msg: >-
+          Keycloak refused keycloak_admin_password, so its admin API could not
+          be asked for anything with a token. That is what a master password
+          changed from the console looks like, see docs/authentication.md.
+      when:
+        - keycloak_enabled | default(false) | bool
+        - verify_kc_login.status | default(0) != 200
 
     # The consoles are a list of their own, and the console of an identity
     # provider is the one page on a deployment worth the second password.
@@ -412,18 +589,27 @@
     # never challenges, and the door is checked from here by the task that
     # expects a 401.
     verify_admin_gated: "{{ (antares_edge_basic_auth_admin_users | default([])) | length > 0 }}"
+    verify_admin_auth: >-
+      {{ {'Authorization': 'Basic ' ~ ((antares_edge_basic_auth_admin_probe_user ~ ':'
+                                        ~ antares_edge_basic_auth_admin_probe_password) | b64encode)}
+         if (antares_edge_basic_auth_admin_probe_user | default('') | length > 0 and verify_admin_gated | bool)
+         else {} }}
+    verify_admin_outside: "{{ not verify_admin_gated | bool or verify_admin_auth | length > 0 }}"
+    verify_consumed_admin_auth: >-
+      {{ verify_admin_auth if verify_admin_auth | length > 0
+         else {'Authorization': 'Basic ' ~ ('verify.yml:not-a-password' | b64encode)} }}
     verify_grafana_url: >-
       {{ 'https' if antarest_tls_enabled | default(false) | bool else 'http' }}://{{
          hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}:{{
          antarest_https_port if antarest_tls_enabled | default(false) | bool else antarest_http_port
       }}{{ monitoring_grafana_path }}
     verify_grafana_probe_url: >-
-      {{ verify_grafana_url if not verify_admin_gated | bool
+      {{ verify_grafana_url if verify_admin_outside | bool
          else ('https' if antarest_tls_enabled | default(false) | bool else 'http')
               ~ '://127.0.0.1:'
               ~ (antarest_https_port if antarest_tls_enabled | default(false) | bool else antarest_http_port)
               ~ monitoring_grafana_path }}
-    verify_grafana_probe_from: "{{ inventory_hostname if verify_admin_gated | bool else 'localhost' }}"
+    verify_grafana_probe_from: "{{ 'localhost' if verify_admin_outside | bool else inventory_hostname }}"
     # The prefix Prometheus answers on, on the machine itself: the root unless
     # it was published, where --web.external-url moves everything under it.
     verify_prometheus_prefix: >-
@@ -586,6 +772,7 @@
     - name: Ask Grafana for its health, through the front door
       ansible.builtin.uri:
         url: "{{ verify_grafana_probe_url | trim }}/api/health"
+        headers: "{{ verify_admin_auth }}"
         validate_certs: false
         status_code: [200]
       register: verify_grafana
@@ -604,8 +791,7 @@
     - name: Ask Grafana for its health carrying the credential the front door consumes
       ansible.builtin.uri:
         url: "{{ verify_grafana_probe_url | trim }}/api/health"
-        headers:
-          Authorization: "Basic {{ 'verify.yml:not-a-password' | b64encode }}"
+        headers: "{{ verify_consumed_admin_auth }}"
         validate_certs: false
         status_code: [200]
       delegate_to: "{{ verify_grafana_probe_from }}"
@@ -624,6 +810,63 @@
       when:
         - monitoring_enabled | default(false) | bool
         - verify_admin_gated | bool
+
+    # And that somebody can log into it. Grafana authenticates with a session
+    # cookie, and it has a basic authentication of its own: a front door that
+    # forwards the credential it consumed makes Grafana refuse it and
+    # challenge for another one, which in a browser is a prompt that never
+    # ends and here is a WWW-Authenticate header where there should be none.
+    - name: Log into Grafana through the front door
+      ansible.builtin.uri:
+        url: "{{ verify_grafana_probe_url | trim }}/login"
+        method: POST
+        headers: "{{ verify_admin_auth }}"
+        body_format: json
+        body:
+          user: "{{ monitoring_grafana_admin_user }}"
+          password: "{{ monitoring_grafana_admin_password }}"
+        status_code: [200, 401]
+        validate_certs: false
+      register: verify_grafana_login
+      no_log: true
+      delegate_to: "{{ verify_grafana_probe_from }}"
+      become: false
+      when: monitoring_enabled | default(false) | bool
+
+    - name: Check nothing challenged the Grafana login for a password
+      ansible.builtin.assert:
+        that: verify_grafana_login.www_authenticate is not defined
+        fail_msg: >-
+          The Grafana login was answered with a
+          "{{ verify_grafana_login.www_authenticate | default('') }}"
+          challenge. Grafana refuses a credential that is not one of its own
+          and asks for another, which a browser turns into a prompt that never
+          ends: the front door is forwarding the header it authenticates with
+          instead of clearing it.
+        quiet: true
+      when: monitoring_enabled | default(false) | bool
+
+    - name: Ask Grafana who is logged in, with the session it just issued
+      ansible.builtin.uri:
+        url: "{{ verify_grafana_probe_url | trim }}/api/user"
+        headers: "{{ verify_admin_auth | combine({'Cookie': verify_grafana_login.cookies_string}) }}"
+        status_code: [200]
+        validate_certs: false
+      delegate_to: "{{ verify_grafana_probe_from }}"
+      become: false
+      when:
+        - monitoring_enabled | default(false) | bool
+        - verify_grafana_login.status | default(0) == 200
+
+    - name: Report a Grafana password the inventory no longer holds
+      ansible.builtin.debug:
+        msg: >-
+          Grafana refused monitoring_grafana_admin_password, so the session it
+          issues could not be checked. The variable seeds the administrator at
+          the first start like the other two, see docs/monitoring.md.
+      when:
+        - monitoring_enabled | default(false) | bool
+        - verify_grafana_login.status | default(0) != 200
 
     - name: Check Grafana reports its database is up
       ansible.builtin.assert:

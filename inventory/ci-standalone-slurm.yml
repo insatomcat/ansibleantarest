@@ -129,7 +129,10 @@ all:
       #  Both hash formats on purpose, since nginx reads the first itself
       #  and hands the second to crypt(3): the passwords behind them are
       #  `ci-edge-not-a-secret` and `ci-edge-admin-not-a-secret`, and the
-      #  workflow uses them in one curl to check the door also opens.
+      #  workflow hands them to verify.yml, which is what makes its probes
+      #  cross the door from outside rather than fall back to the machine's
+      #  own loopback. That matters: from a trusted address the gate is off
+      #  entirely, so its exemptions are not exercised at all.
       #  Public by construction, like every other secret in this file.
       # ---------------------------------------------------------------
       antares_edge_basic_auth_users:
