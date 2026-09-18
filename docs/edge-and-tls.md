@@ -31,7 +31,7 @@ antares_edge_extra_routes:
     name: Reports
 ```
 
-Longest prefix wins, whatever the order. `antares_edge_client_max_body_size` (1G, the value the Antares-Web nginx uses for study imports) and `antares_edge_proxy_read_timeout` (1200 s) apply to every route; the rest of the plumbing is in `roles/antares_edge/defaults/main.yml`.
+Longest prefix wins, whatever the order. `antares_edge_client_max_body_size` and `antares_edge_proxy_read_timeout` (1200 s) apply to every route; the rest of the plumbing is in `roles/antares_edge/defaults/main.yml`. The first follows `antarest_max_upload_size` and is what answers 413 on an import too large, so that is the one to raise: see [the size of a study import](antares-web.md#the-size-of-a-study-import).
 
 ## The password in front of the password
 

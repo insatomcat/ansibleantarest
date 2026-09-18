@@ -73,3 +73,14 @@ antarest_https_port: 443
 # it, and neither of them runs that role. The address it is published on is
 # antarest_nginx_bind, which only the role itself needs.
 antarest_nginx_port: 8081
+
+# The largest body the machine accepts, which is what a study import is: one
+# zip posted in a single request. Shared because the two nginx layers in front
+# of the backend both have to agree on it - the front door answers 413 on its
+# own, before the application's nginx ever sees the request, so raising one
+# alone changes nothing. 1G is the value the file the project ships uses.
+#
+# Raising it asks for disk: the body is buffered whole by each nginx in turn,
+# on the filesystem podman's storage lives on, and then written again by the
+# backend under the tmp directory of antarest_data_dir.
+antarest_max_upload_size: 1G

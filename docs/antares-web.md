@@ -97,6 +97,20 @@ mv /var/antares-web/data /var/antares-web/data.bak
 
 Then set `antarest_data_device` and run the play again: it finds the filesystem already there, mounts it and brings the stack back up. Keep `data.bak` until the interface has shown its studies, then remove it.
 
+## The size of a study import
+
+An import is one zip posted in a single request, and two nginx answer 413 above a size: the front door of [the edge role](edge-and-tls.md) and the application's own. One variable sets both, so they cannot drift apart:
+
+```yaml
+antarest_max_upload_size: 1G   # roles/antares_defaults/defaults/main/antares-web.yml
+```
+
+Any size nginx understands (`4G`, `20480m`), and `0` removes the limit entirely. The value applies to every route the front door publishes, Grafana and Keycloak included, since it is set once on the server rather than per location.
+
+Raising it costs disk on the way in. Both nginx buffer the whole body before proxying it, in the writable layer of their container, so on whatever filesystem holds podman's storage (`/var/lib/containers`, on `/` unless the machine was built otherwise). The backend then writes its own copy under `tmp/` in `antarest_data_dir`, which is on the data volume. A 10 GB import therefore wants about 20 GB free on `/` and 10 GB on the data volume, none of it durable, all of it released when the import ends.
+
+`antares_edge_proxy_read_timeout` (1200 s) is the other limit an import can reach. It bounds the silence between two reads rather than the whole transfer, so a slow upload is fine as long as it keeps progressing; what it does bound is the wait once the body is in and the backend is unpacking it.
+
 ## Study workspaces
 
 The directories the application exposes, one entry per workspace:

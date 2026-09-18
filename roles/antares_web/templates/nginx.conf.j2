@@ -3,11 +3,13 @@
 # Mounted as /etc/nginx/conf.d/default.conf in the {{ antarest_nginx_container }}
 # container, in place of the resources/deploy/nginx.conf shipped by the project.
 #
-# It is that file plus one header: same client_max_body_size, same /www root
-# with the SPA fallback, same /api/ proxy to http://antarest:5000/ with the
-# websocket upgrade and the long read timeout. The checksum of the upstream
-# file is compared to antarest_nginx_upstream_sha1 at deploy time, so a change
-# on their side is reported instead of being silently ignored here.
+# It is that file plus one header and one variable: the same /www root with the
+# SPA fallback, the same /api/ proxy to http://antarest:5000/ with the websocket
+# upgrade and the long read timeout, and client_max_body_size read from
+# antarest_max_upload_size instead of the 1G they hard-code, since the front
+# door has to be raised with it. The checksum of the upstream file is compared
+# to antarest_nginx_upstream_sha1 at deploy time, so a change on their side is
+# reported instead of being silently ignored here.
 #
 # TLS is not here: the machine is fronted by the antares_edge container, which
 # terminates it and proxies to the port this container publishes on the
@@ -26,7 +28,7 @@ server {
     listen       80;
     server_name  _;
 
-    client_max_body_size 1G;
+    client_max_body_size {{ antarest_max_upload_size }};
 
     # serve static webapp files
     location / {
