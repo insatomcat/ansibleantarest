@@ -28,10 +28,12 @@ antares_edge_container: antares-edge
 # TLS material lives in, so a machine has one configuration tree, not two.
 antares_edge_dir: /etc/antares-web/edge
 
-# Upload size accepted at the door. The Antares-Web nginx accepts 1G (it is in
-# the file the project ships), and a smaller value here would turn a study
-# import into a 413 before it ever reached it.
-antares_edge_client_max_body_size: 1G
+# Upload size accepted at the door. Follows the application's own nginx by
+# default: a smaller value here turns a study import into a 413 before it ever
+# reaches it, and a larger one only moves the refusal one hop further in. Raise
+# antarest_max_upload_size rather than this, which exists for a front door that
+# publishes routes of its own with another idea of a large body.
+antares_edge_client_max_body_size: "{{ antarest_max_upload_size }}"
 
 # How long a proxied request may stay silent. The Antares-Web configuration
 # uses 1200 for the API, which is what a long study operation needs.
