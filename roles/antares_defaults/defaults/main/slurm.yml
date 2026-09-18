@@ -47,6 +47,15 @@ slurm_xpansion_dir: "{{ antares_home }}/xpansion"
 
 slurm_launch_script: "{{ antares_home }}/launchAntares.sh"
 
+# Where a job unpacks the study and runs it. Local to each compute node on
+# purpose: a study and its output are thousands of small files, and every one
+# of them costs NFS round trips when the directory is in the shared /home. Only
+# the final zip is written there, in one sequential stream. /var/tmp rather
+# than /tmp, which is a tmpfs sized on RAM on Debian 13. Shared because the
+# launch script is rendered on the front-end and the directory is created on
+# the nodes.
+slurm_scratch_dir: /var/tmp/antares
+
 # Accounting database (MariaDB in a container on the front-end).
 slurmdbd_enabled: true
 slurmdbd_db_password: "changeme-slurm-acct"

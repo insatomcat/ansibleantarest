@@ -17,11 +17,10 @@ antares_xpansion_mpi_lib_dir: >-
 # of the launch script asks for one task on one node, and Open MPI counts its
 # slots from that allocation, so anything above 1 needs --ntasks raised in
 # templates/launchAntares.sh.j2 as well - or it fails with "not enough slots
-# available".
+# available". Ranks on other nodes would also need slurm_scratch_dir in the
+# shared /home: by default it is local to the node the job starts on.
 slurm_xpansion_mpi_procs: 1
 
-# Scratch space used by the launch script. Must live in the shared /home so
-# that the front-end can pick the results up. The path of the script itself is
-# slurm_launch_script, in roles/antares_defaults/: Antares-Web is configured
-# to submit it and verify.yml runs it.
-slurm_scratch_dir: "{{ antares_home }}/scratch"
+# The path of the script itself is slurm_launch_script, and its scratch space
+# slurm_scratch_dir, both in roles/antares_defaults/: Antares-Web is configured
+# to submit the one, and the other is created on every compute node.
