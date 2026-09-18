@@ -63,8 +63,19 @@
 
 # postgresql publishes no port on the host, it is only reachable on the podman
 # network, so readiness has to be asked from inside the container.
+#
+# Over TCP, and that is the whole point of the `-h`. On a first deployment the
+# image entrypoint runs initdb, then brings a *temporary* server up with
+# `listen_addresses=''` to apply POSTGRES_PASSWORD and the init scripts, and
+# only then execs the real one. That temporary server answers on the unix
+# socket, so a socket probe reports "accepting connections" while nothing
+# listens on 5432 yet, and the migration below dies a few seconds later on
+# `connection to server at "postgresql" (10.89.0.2), port 5432 failed:
+# Connection refused`. Asking over TCP waits for the server the other
+# containers actually reach. A re-run never sees any of it: with the cluster
+# already on disk the entrypoint skips the init phase entirely.
 - name: Wait for PostgreSQL to accept connections
-  ansible.builtin.command: "{{ container_cmd }} exec postgresql pg_isready -U postgres"
+  ansible.builtin.command: "{{ container_cmd }} exec postgresql pg_isready -h 127.0.0.1 -U postgres"
   register: antarest_pg_ready
   until: antarest_pg_ready.rc == 0
   retries: 30
