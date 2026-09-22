@@ -73,27 +73,35 @@ map $http_authorization $antares_edge_upstream_auth {
 }
 {% endif %}
 
+{% macro proxy_headers() %}
+      proxy_set_header Host              $host;
+      proxy_set_header X-Real-IP         $remote_addr;
+      proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Host  $host;
+      proxy_set_header X-Forwarded-Port  $server_port;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header Upgrade           $http_upgrade;
+      proxy_set_header Connection        $antares_edge_connection;
+{%- endmacro %}
 {% macro routes() %}
     client_max_body_size {{ antares_edge_client_max_body_size }};
-
-    # Set on the server rather than in each location, which inherits them as
-    # long as it declares none of its own. Host is what the services behind
-    # build their own URLs from, so it has to stay the name the user typed
-    # rather than become the loopback address nginx proxies to (which is what
-    # $proxy_host, the default, would give). X-Forwarded-Proto is the whole
-    # point of terminating TLS here: it is what tells them the client is on
-    # https, so that nothing they build points back at http.
-    proxy_set_header Host              $host;
-    proxy_set_header X-Real-IP         $remote_addr;
-    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Host  $host;
-    proxy_set_header X-Forwarded-Port  $server_port;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header Upgrade           $http_upgrade;
-    proxy_set_header Connection        $antares_edge_connection;
     proxy_http_version 1.1;
     proxy_redirect     off;
     proxy_read_timeout {{ antares_edge_proxy_read_timeout }};
+
+    # The headers of proxy_headers() go into every location rather than once
+    # on the server. nginx hands a location the proxy_set_header of the server
+    # only when it declares none of its own, and a gated one declares
+    # Authorization: set on the server, all of them silently vanished behind
+    # the password, and Grafana, told Host 127.0.0.1, refused every dashboard
+    # query as a cross-origin POST.
+    #
+    # Host is what the services behind build their own URLs from, so it has
+    # to stay the name the user typed rather than become the loopback address
+    # nginx proxies to (which is what $proxy_host, the default, would give).
+    # X-Forwarded-Proto is the whole point of terminating TLS here: it is what
+    # tells them the client is on https, so that nothing they build points
+    # back at http.
 {% for route in antares_edge_routes %}
 {% set tier = route.auth | default('') %}
 {% set gated = tier in antares_edge_basic_auth_names %}
@@ -105,6 +113,7 @@ map $http_authorization $antares_edge_upstream_auth {
       auth_basic           $antares_edge_{{ tier }}_token_realm;
       auth_basic_user_file {{ antares_edge_htpasswd_container_dir }}/{{ tier }};
       proxy_set_header     Authorization $antares_edge_upstream_auth;
+{{ proxy_headers() }}
       proxy_pass http://{{ route.upstream }};
     }
 {% endif %}
@@ -115,6 +124,7 @@ map $http_authorization $antares_edge_upstream_auth {
       auth_basic_user_file {{ antares_edge_htpasswd_container_dir }}/{{ tier }};
       proxy_set_header     Authorization $antares_edge_upstream_auth;
 {% endif %}
+{{ proxy_headers() }}
       proxy_pass http://{{ route.upstream }};
     }
 {% endfor %}
