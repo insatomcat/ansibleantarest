@@ -1,4 +1,18 @@
 ---
+# The celery beat unit hands its state file to start.sh through
+# CELERYBEAT_SCHEDULE, which 2.34 and earlier ignore: the beat would then try
+# to write in / and crash-loop. Only a release tag can be compared; a branch or
+# a commit is taken on trust.
+- name: Refuse an AntaREST release older than the units expect
+  ansible.builtin.assert:
+    that: antarest_version | regex_replace('^v', '') is version('2.35.0', '>=')
+    fail_msg: >-
+      antarest_version is {{ antarest_version }}, and this role needs 2.35.0 or
+      later (the celery beat unit relies on CELERYBEAT_SCHEDULE). Set
+      antarest_version to v2.35.0 or a later tag.
+    quiet: true
+  when: antarest_version is match('^v?[0-9]+[.][0-9]+[.][0-9]+$')
+
 # Before the checkout, which is what creates antarest_data_dir: a directory
 # made on the boot disk and then mounted over is a directory nothing can read
 # again.

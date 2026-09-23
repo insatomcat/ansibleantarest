@@ -12,6 +12,8 @@ antarest_http_port: 80
 antarest_force_rebuild: false # force rebuild of frontend + image
 ```
 
+The oldest release this deploys is 2.35.0: its celery beat unit relies on `CELERYBEAT_SCHEDULE`, which `scripts/start.sh` ignores before that. A tag older than that is refused before anything is touched. A branch or a commit is taken as it is, so pointing `antarest_version` at an older commit is on you.
+
 The rest of `config.prod.yaml` is written from the defaults of the role, `roles/antares_web/defaults/main.yml`:
 
 ```yaml

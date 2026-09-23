@@ -206,8 +206,8 @@ antarest_local_launcher_nb_cores:
 antarest_celery_pool: solo
 antarest_celery_concurrency: 1
 
-# Working directory of the beat container, holding its `celerybeat-schedule`
-# state file. A path inside the container, bind-mounted from
+# Directory of the beat container holding its `celerybeat-schedule` state
+# file. A path inside the container, bind-mounted from
 # antarest_data_dir/celerybeat.
 antarest_celerybeat_dir: /celerybeat
 

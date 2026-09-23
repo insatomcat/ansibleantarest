@@ -32,19 +32,13 @@ Volume={{ antarest_deploy_dir }}/config.prod.yaml:/resources/application.yaml:ro
 # directory as it parses, so a beat without the mount dies on start.
 Volume={{ antarest_data_dir }}/outputs:/outputs:rw{{ container_volume_opts | trim }}
 Volume={{ antarest_data_dir }}/celerybeat:{{ antarest_celerybeat_dir }}:rw{{ container_volume_opts | trim }}
-# Two podman flags instead of a plain Exec=, for one reason: celery beat keeps
-# the last run time of every task in a shelve file whose default name,
-# `celerybeat-schedule`, is *relative* to the working directory. The image
-# declares no WORKDIR, so that is `/`, which the container cannot write to since
-# it runs as {{ antares_uid }} rather than root. --workdir moves it onto the bind mount
-# above, where it also survives a restart, and --entrypoint then becomes
-# mandatory: the image entrypoint is itself the relative path
-# ./scripts/start.sh, which no longer resolves once the working directory has
-# moved.
-#
-# Both go through PodmanArgs= rather than the WorkingDir= and Entrypoint=
-# quadlet keys, which only exist from podman 5.0: Ubuntu 24.04 ships 4.9.
-PodmanArgs=--workdir={{ antarest_celerybeat_dir }} --entrypoint=/scripts/start.sh
+# celery beat keeps the last run time of every task in a shelve file whose
+# default name, `celerybeat-schedule`, is *relative* to the working directory.
+# The image declares no WORKDIR, so that is `/`, which the container cannot
+# write to since it runs as {{ antares_uid }} rather than root. start.sh passes
+# CELERYBEAT_SCHEDULE to `celery beat --schedule` since AntaREST 2.35, which
+# puts the file on the bind mount above, where it also survives a restart.
+Environment=CELERYBEAT_SCHEDULE={{ antarest_celerybeat_dir }}/celerybeat-schedule
 Exec=celery-beat
 
 [Service]
