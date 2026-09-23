@@ -11,7 +11,7 @@
 #  neither can be a default of the antares_web role. What that role alone does
 #  with the checkout is in its own defaults.
 # ---------------------------------------------------------------------------
-antarest_version: "v2.34.0"            # git tag, branch or commit
+antarest_version: "v2.35.0"            # git tag, branch or commit
 antarest_base_dir: /var/antares-web
 antarest_dir: "{{ antarest_base_dir }}/AntaREST"
 

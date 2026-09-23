@@ -288,7 +288,7 @@ antarest_auto_archive_threshold_days: 60
 # ---------------------------------------------------------------------------
 
 # Checksum of the resources/deploy/nginx.conf the rendered configuration was
-# derived from (unchanged from AntaREST v2.33.0 to v2.34.0). That file is not
+# derived from (unchanged from AntaREST v2.33.0 to v2.35.0). That file is not
 # mounted any more, so a change upstream would go unnoticed: the deployment
 # compares and warns.
 antarest_nginx_upstream_sha1: 48204a956d1dc69ef5c5b8b4585a0cb517e8f9d8

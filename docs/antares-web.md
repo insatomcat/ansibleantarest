@@ -7,7 +7,7 @@ and the units that run all this to [containers](containers.md).
 ## Configuration
 
 ```yaml
-antarest_version: "v2.34.0"   # tag, branch or commit of the AntaREST repo
+antarest_version: "v2.35.0"   # tag, branch or commit of the AntaREST repo
 antarest_http_port: 80
 antarest_force_rebuild: false # force rebuild of frontend + image
 ```
