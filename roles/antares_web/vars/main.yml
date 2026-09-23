@@ -140,3 +140,7 @@ antarest_quadlet_services: >-
 antarest_data_fs_packages:
   xfs: xfsprogs
   ext4: e2fsprogs
+
+# Copy of the manifest.yml of the last artefact set loaded on this machine, see
+# tasks/load_artifacts.yml. Outside the staging directory, which rsync fills.
+antarest_loaded_manifest: "{{ antarest_base_dir }}/loaded-manifest.yml"

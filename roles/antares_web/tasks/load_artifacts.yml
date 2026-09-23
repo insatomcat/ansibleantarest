@@ -76,6 +76,30 @@
       - "--exclude=*"
   register: antarest_artifacts_shipped
 
+# Our image is always tagged :latest and the web application always lands in
+# the same place, so "already there" says nothing about which build it came
+# from: an upgrade would find the previous version in place, load nothing and
+# report green. The manifest is what tells two builds apart (build.yml stamps
+# it with the time), so the set is loaded again whenever the shipped manifest
+# differs from the copy kept after the last successful load. A machine with no
+# copy loads once; a run that fails halfway leaves the copy alone and the next
+# one tries again.
+- name: Read the checksums of the shipped and the last loaded manifests
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    checksum_algorithm: sha1
+  loop:
+    - "{{ antarest_base_dir }}/artifacts/manifest.yml"
+    - "{{ antarest_loaded_manifest }}"
+  register: antarest_manifests
+
+- name: Decide whether the artefact set is new to this machine
+  ansible.builtin.set_fact:
+    antarest_artifacts_new: >-
+      {{ not antarest_manifests.results[1].stat.exists
+         or antarest_manifests.results[0].stat.checksum | default('')
+            != antarest_manifests.results[1].stat.checksum }}
+
 # Idempotence matters here: loading is not free, and the archives do not change
 # between two runs of the same build.
 - name: Look for the images already present
@@ -106,7 +130,9 @@
     {{ antarest_archives.files | map(attribute='path')
        | select('search', '/(antarest-image|antares-auth-image|thirdparty-.*)\.tar\.gz$')
        | list }}
-  when: antarest_images_present.results | selectattr('rc', 'ne', 0) | list | length > 0
+  when: >-
+    antarest_artifacts_new | bool
+    or antarest_images_present.results | selectattr('rc', 'ne', 0) | list | length > 0
   changed_when: true
   notify: Restart Antares-Web
 
@@ -137,7 +163,14 @@
 
 # The web application is a plain directory served by nginx through a bind mount,
 # not something baked into an image, so it travels as a tarball and lands in the
-# checkout exactly where a local build would have put it.
+# checkout exactly where a local build would have put it. The previous one goes
+# first: unpacking over it would leave the old bundles next to the new ones.
+- name: Remove the web application of the previous artefact set
+  ansible.builtin.file:
+    path: "{{ antarest_dir }}/webapp/dist"
+    state: absent
+  when: antarest_artifacts_new | bool
+
 - name: Unpack the web application into the checkout
   ansible.builtin.unarchive:
     src: "{{ antarest_base_dir }}/artifacts/webapp-dist.tar.gz"
@@ -161,3 +194,17 @@
       nginx would serve nothing. Check that the archive contains a `dist`
       directory at its root.
     quiet: true
+
+# Last, once everything above has been checked: this is what marks the set as
+# loaded.
+- name: Remember which artefact set is loaded
+  ansible.builtin.copy:
+    src: "{{ antarest_base_dir }}/artifacts/manifest.yml"
+    dest: "{{ antarest_loaded_manifest }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - antarest_artifacts_new | bool
+    - antarest_manifests.results[0].stat.exists
