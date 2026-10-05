@@ -27,7 +27,7 @@ antarest_external_auth_group_mapping: {}
 antarest_local_launcher_nb_cores_detection: true
 ```
 
-What stays written in the template is what is coupled to something else on the machine: the container paths are the other half of the mounts in `roles/antares_web/vars/main.yml`, and `root_path: api` is the other half of the `location /api/` of the nginx configuration. Changing either alone breaks the stack, so neither is a variable.
+What stays written in the template is what is coupled to something else on the machine: the container paths are the other half of the mounts in `roles/antares_web/vars/main.yml`, and `root_path: /api` is the other half of the `location /api/` of the nginx configuration. Changing either alone breaks the stack, so neither is a variable.
 
 The local launcher reads the cores of the machine as long as `antarest_local_launcher_nb_cores_detection` is on, and *overwrites* whatever `antarest_local_launcher_nb_cores` says. Turn detection off and the map is used, which is worth doing on a shared machine: the upstream fallback offers 22 cores out of 24 whatever the machine really has.
 

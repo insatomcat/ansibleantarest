@@ -160,7 +160,13 @@ debug: false
 # See https://fastapi.tiangolo.com/advanced/behind-a-proxy/
 # root_path is used when the API is served behind a proxy which adds a prefix
 # for clients. It does NOT add any prefix to the URLs fastapi serves.
-root_path: "api"
+#
+# With its leading slash, which the file the project ships leaves out. The
+# value ends up verbatim as the `servers` entry of /api/openapi.json, and a
+# relative `api` is resolved by Swagger UI against the URL of that document:
+# every "Try it out" of the API documentation page then calls /api/api/v1/...
+# and gets a 404.
+root_path: "/api"
 
 server:
   worker_threadpool_size: {{ antarest_worker_threadpool_size }}

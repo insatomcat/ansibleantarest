@@ -28,7 +28,7 @@ provider up while the backend is down, see
 
 **What is a variable and what is not.** The container paths in
 `templates/config.prod.yaml.j2` are the other half of the mounts in
-`vars/main.yml`, and `root_path: api` is the other half of the `location /api/`
+`vars/main.yml`, and `root_path: /api` is the other half of the `location /api/`
 of the nginx configuration: changing either alone breaks the stack, so neither
 is exposed. Everything else is in `defaults/main.yml`.
 

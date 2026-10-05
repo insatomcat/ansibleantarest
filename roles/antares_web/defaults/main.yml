@@ -100,7 +100,7 @@ antarest_gunicorn_workers: 4
 #  The parts of config.prod.yaml a deployment is expected to differ on. What
 #  stays written in the template is what is coupled to something else on this
 #  machine: the container paths are the other half of the mounts in
-#  vars/main.yml, and `root_path: api` is the other half of the `location
+#  vars/main.yml, and `root_path: /api` is the other half of the `location
 #  /api/` of the nginx configuration.
 # ---------------------------------------------------------------------------
 
