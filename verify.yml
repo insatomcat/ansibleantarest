@@ -1010,7 +1010,7 @@
     # would only surface hours later in a job's stderr.
     - name: Look for the solvers in the shared home
       ansible.builtin.stat:
-        path: "{{ slurm_solvers_dir }}/antares-{{ item.version }}-{{ antares_solver_os | trim }}/bin/{{ item.bin }}"
+        path: "{{ slurm_solvers_dir }}/antares-{{ item.version }}-{{ item.os | default(antares_solver_os) | trim }}/bin/{{ item.bin }}"
       register: verify_solvers
       loop: "{{ antares_solvers }}"
       loop_control:
@@ -1024,7 +1024,7 @@
       ansible.builtin.assert:
         that: item.stat.xusr | default(false)
         fail_msg: >-
-          {{ slurm_solvers_dir }}/antares-{{ item.item.version }}-{{ antares_solver_os | trim }}/bin/{{ item.item.bin }}
+          {{ slurm_solvers_dir }}/antares-{{ item.item.version }}-{{ item.item.os | default(antares_solver_os) | trim }}/bin/{{ item.item.bin }}
           is missing from the shared home of {{ inventory_hostname }}, or is
           not executable there.
         quiet: true

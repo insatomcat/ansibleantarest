@@ -98,15 +98,19 @@
 
 # One tarball per solver *and* per build of it: a fleet whose web server runs
 # Debian and whose cluster runs Oracle Linux needs both, and the targets pick
-# theirs by name out of the same cache directory.
+# theirs by name out of the same cache directory. An entry that names its own
+# `os` was published for that build only, so the OS list does not apply to it.
 - name: Download the solver tarballs
   ansible.builtin.get_url:
-    url: "{{ antares_solver_base_url }}/v{{ item.0.version }}/antares-{{ item.0.version }}-{{ item.1 }}.tar.gz"
-    dest: "{{ antares_build_artifacts }}/antares-{{ item.0.version }}-{{ item.1 }}.tar.gz"
+    url: "{{ antares_solver_base_url }}/v{{ item.0.version }}/{{ antares_solver_archive }}"
+    dest: "{{ antares_build_artifacts }}/{{ antares_solver_archive }}"
     mode: "0644"
+  vars:
+    antares_solver_archive: >-
+      antares-{{ item.0.version }}-{{ item.0.os | default(item.1) }}.tar.gz
   loop: "{{ antares_solvers | product(antares_build_solver_os) | list }}"
   loop_control:
-    label: "antares-{{ item.0.version }}-{{ item.1 }}"
+    label: "antares-{{ item.0.version }}-{{ item.0.os | default(item.1) }}"
   when: antares_build_fetch_solvers | bool
 
 # Same for Xpansion. The asset name is spelled out per entry when a release

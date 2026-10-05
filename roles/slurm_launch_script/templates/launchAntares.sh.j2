@@ -68,7 +68,7 @@ if [ "$RUN_MODE" = "antares" ]; then
     case "$ANTARES_VERSION" in
 {% for s in antares_solvers %}
         "{{ s.study_version }}"|"{{ s.study_version.split('.')[0] }}{{ s.study_version.split('.')[1] }}0"|"{{ s.version }}")
-            export ANTARES_SOLVER_BIN="{{ slurm_solvers_dir }}/antares-{{ s.version }}-{{ antares_solver_os }}/bin/{{ s.bin }}"
+            export ANTARES_SOLVER_BIN="{{ slurm_solvers_dir }}/antares-{{ s.version }}-{{ s.os | default(antares_solver_os) }}/bin/{{ s.bin }}"
             ;;
 {% endfor %}
         *)

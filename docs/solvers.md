@@ -20,6 +20,15 @@ Executable names changed across generations: `antares-<X>.<Y>-solver` for the 8.
 
 `antares_solver_os` selects which build of each release is downloaded, and it is not cosmetic: the Ubuntu 22.04 build needs glibc 2.35 and does not start on EL 9, which has 2.34, while the project's Oracle Linux 8 build (glibc 2.28) runs on every rebuild. The default follows the family of each target, so a Debian web server driving an Oracle Linux cluster installs the right binary on both sides.
 
+A release that was not published for that build takes an optional `os` key, which replaces `antares_solver_os` for that entry alone, in the download as well as in the installed path. 8.6.6 needs it: it predates the Oracle Linux 8.10 build and only exists as `OracleServer-8.9` and `Ubuntu-20.04`.
+
+```yaml
+  - version: "8.6.6"
+    study_version: "8.6"
+    bin: "antares-8.6-solver"
+    os: "OracleServer-8.9"   # the only EL build of this release
+```
+
 ## Antares-Xpansion
 
 Investment optimisation, off by default. A release weighs about 250 MB and pulls an MPI runtime onto every compute node, which a cluster that only runs simulations has no use for. It needs a cluster: Antares-Web's local launcher ignores the Xpansion mode, so this is deployed on the `slurm` group and nowhere else (see [Limitations](limitations.md)). A single machine can be that cluster, which is the point of [the cluster on the web machine itself](slurm.md#the-cluster-on-the-web-machine-itself).

@@ -127,7 +127,7 @@ launcher:
 {% endif %}
       binaries:
 {% for s in antares_solvers %}
-        "{{ s.study_version }}": /antares_simulator/antares-{{ s.version }}-{{ antares_solver_os }}/bin/{{ s.bin }}
+        "{{ s.study_version }}": /antares_simulator/antares-{{ s.version }}-{{ s.os | default(antares_solver_os) }}/bin/{{ s.bin }}
 {% endfor %}
 {% if slurm_enabled | bool %}
 

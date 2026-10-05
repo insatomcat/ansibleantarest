@@ -21,6 +21,16 @@
 #  Oracle Linux 8 build, whose glibc 2.28 runs on every EL 9 rebuild, so the
 #  default follows the family of the target.
 #
+#  An entry can carry its own `os` for the releases that were not published
+#  for that build. 8.6.6 is one: it predates the Oracle Linux 8.10 build and
+#  only exists as `OracleServer-8.9` (and `Ubuntu-20.04`), so on the RedHat
+#  family it is written
+#
+#      - version: "8.6.6"
+#        study_version: "8.6"
+#        bin: "antares-8.6-solver"
+#        os: "OracleServer-8.9"
+#
 #  On a Slurm deployment the solvers are installed twice: on the Antares-Web
 #  machine for the local launcher, and in the shared /home for the cluster.
 #  Each side resolves this against its own facts, so a Debian web server
