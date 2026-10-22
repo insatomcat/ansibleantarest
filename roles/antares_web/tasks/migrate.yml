@@ -82,6 +82,23 @@
   delay: 5
   changed_when: false
 
+# What the migration did is read from the database, before and after, and
+# not from alembic's output: AntaREST's alembic/env.py leaves its
+# `fileConfig(...)` commented out, so alembic's loggers are never given a
+# handler and "Running upgrade <from> -> <to>" is never printed, whether or not
+# a revision is applied. The table does not exist yet on a first deployment,
+# hence the failed_when, and an empty revision then stands for "no schema".
+- name: Read the schema revision before migrating
+  ansible.builtin.command:
+    cmd: >-
+      {{ container_cmd }} exec postgresql
+      psql -U postgres -d postgres -tAc "SELECT version_num FROM alembic_version"
+  register: antarest_schema_before
+  changed_when: false
+  failed_when: false
+
+# Reported as unchanged here, the change is carried by the read that follows,
+# the only place that knows whether the revision moved.
 - name: Create or upgrade the database schema
   ansible.builtin.command:
     cmd: >-
@@ -93,20 +110,29 @@
       -v {{ volume }}
       {% endfor %}
       {{ antarest_image }}
-  register: antarest_migration
-  # alembic announces "Running upgrade <from> -> <to>" only when it actually
-  # applies a revision, and says nothing when the database is already at head.
-  # Reporting changed unconditionally would make every no-op run look like it
-  # touched the schema.
+  changed_when: false
+
+- name: Read the schema revision after migrating
+  ansible.builtin.command:
+    cmd: >-
+      {{ container_cmd }} exec postgresql
+      psql -U postgres -d postgres -tAc "SELECT version_num FROM alembic_version"
+  register: antarest_schema_after
   changed_when: >-
-    'Running upgrade' in (antarest_migration.stdout ~ antarest_migration.stderr)
+    (antarest_schema_before.stdout | trim if antarest_schema_before.rc == 0 else '')
+    != antarest_schema_after.stdout | trim
 
 - name: Report what the migration did
+  vars:
+    antarest_rev_before: >-
+      {{ antarest_schema_before.stdout | trim if antarest_schema_before.rc == 0 else '' }}
+    antarest_rev_after: "{{ antarest_schema_after.stdout | trim }}"
   ansible.builtin.debug:
     msg: >-
-      {{ (antarest_migration.stdout ~ antarest_migration.stderr)
-         | regex_findall('Running upgrade [^\n]*') | join('; ')
-         | default('schema already at head', true) }}
+      {{ ('schema already at head (' ~ antarest_rev_after ~ ')')
+         if antarest_rev_before == antarest_rev_after
+         else ('schema upgraded from ' ~ (antarest_rev_before or 'nothing')
+               ~ ' to ' ~ antarest_rev_after) }}
 
 # AntaREST inserts its admin with an explicit primary key (`ADMIN_ID = 1`, in
 # init_admin_user, antarest/login/model.py), so nothing ever calls nextval on
