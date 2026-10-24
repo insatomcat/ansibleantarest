@@ -45,13 +45,21 @@ _antarest_shared_volumes:
   - "{{ antarest_data_dir }}/outputs:/outputs:rw"
   - "{{ antarest_deploy_dir }}/config.prod.yaml:/resources/application.yaml:ro"
 
-# Mounts only the API backend needs: the local launcher workspace, the gunicorn
-# configuration, the solver binaries, and the key used to reach the Slurm
-# front-end.
+# Mounts only the API backend needs: the local launcher workspace, the solver
+# binaries, and the key used to reach the Slurm front-end.
+#
+# The gunicorn configuration is deliberately the one baked into the image,
+# conf/gunicorn.py, and not resources/deploy/gunicorn.py, which the upstream
+# docker-compose.yml mounts over it. Only the image's file has the pre_fork and
+# post_fork hooks that give each worker its own ANTAREST_WORKER_ID, and the
+# Slurm launcher keys its workspace on that id (workspace-<id>, each with its
+# own launcher_db.json). With the deploy file every worker is worker 0 and they
+# all share workspace-0, behind a lock that only holds within one process:
+# launches submitted together go out twice or three times and overwrite each
+# other's archive, and some jobs fail on a missing or empty zip.
 antarest_backend_volumes: >-
   {{ antarest_shared_volumes
      + ([antarest_data_dir ~ '/local_workspace:/local_workspace:rw',
-         antarest_dir ~ '/resources/deploy/gunicorn.py:/conf/gunicorn.py:ro',
          antarest_solvers_dir ~ ':/antares_simulator:ro']
         + ([antarest_ssh_key ~ ':/id_rsa:ro'] if slurm_enabled | bool else []))
        | map('regex_replace', '$', _antarest_volume_opts) | list }}

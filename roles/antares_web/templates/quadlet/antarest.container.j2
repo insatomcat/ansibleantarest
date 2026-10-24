@@ -42,6 +42,10 @@ Network={{ antarest_service_name }}.network
 User={{ antares_uid }}:{{ antares_gid }}
 Environment=UVICORN_ROOT_PATH=/api
 Environment=GUNICORN_WORKERS={{ antarest_gunicorn_workers }}
+# conf/gunicorn.py kills a worker silent for 10 minutes. 20 minutes is what the
+# deploy configuration mounted before gave, and what antares_edge_proxy_read_timeout
+# allows a large import to unpack in. GUNICORN_CMD_ARGS outranks the file.
+Environment=GUNICORN_CMD_ARGS=--timeout=1200
 # The backend only learns the scheme of the original request from the
 # X-Forwarded-Proto that travels from the front door through antares-nginx, and
 # gunicorn ignores that header unless the proxy address is trusted. Nothing but
