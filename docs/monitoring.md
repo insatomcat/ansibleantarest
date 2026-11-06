@@ -25,7 +25,7 @@ monitoring_slurm_enabled: "{{ slurm_enabled }}"   # the exporter on the front-en
 
 # Images, pinned like every other third-party image of this deployment
 monitoring_node_exporter_image: "docker.io/prom/node-exporter:v1"
-monitoring_slurm_exporter_image: "docker.io/sckyzo/slurm-exporter:1.8.4"
+monitoring_slurm_exporter_image: "docker.io/sckyzo/slurm-exporter:1.8.6"
 monitoring_prometheus_image: "docker.io/prom/prometheus:v3"
 monitoring_grafana_image: "docker.io/grafana/grafana:13.1"
 
@@ -128,7 +128,7 @@ The way out is an image whose client matches the cluster:
 ```yaml
 # the publisher tags per release; a client of the cluster's own major is what
 # this needs
-monitoring_slurm_exporter_image: "docker.io/sckyzo/slurm-exporter:1.8.4"
+monitoring_slurm_exporter_image: "docker.io/sckyzo/slurm-exporter:1.8.6"
 
 # their `-minimal` variants carry no slurm-client at all and run the host's
 # own binaries instead, which then have to be mounted and pointed at

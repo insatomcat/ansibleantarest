@@ -51,7 +51,7 @@ Creating the first user from the interface is the other thing that surprises: An
 
 ## Major database versions
 
-Third-party images are pinned to majors (`postgres:18`, `mariadb:11`, `redis:8`, `nginx:1.30`, `adminer:5`, `keycloak:26.7`) rather than `latest` to avoid accidental major upgrades. nginx is pinned on a minor because its major is always `1`, and on the stable branch rather than the mainline one, which stops being rebuilt as soon as the next mainline opens. Keycloak too: it has published nothing but `26.x` for two years, and it migrates its own schema on the first start of a new version without migrating back.
+Third-party images are pinned to majors (`postgres:18`, `mariadb:11`, `redis:8`, `nginx:1.30`, `adminer:5`, `keycloak:26.8`) rather than `latest` to avoid accidental major upgrades. nginx is pinned on a minor because its major is always `1`, and on the stable branch rather than the mainline one, which stops being rebuilt as soon as the next mainline opens. Keycloak too: it has published nothing but `26.x` for two years, and it migrates its own schema on the first start of a new version without migrating back.
 
 Since these tags are also the names of the archives `build.yml` produces, changing one invalidates the whole artifact set: re-run `build.yml` before the next `archive` deployment. The target says so explicitly rather than failing later on a missing image.
 

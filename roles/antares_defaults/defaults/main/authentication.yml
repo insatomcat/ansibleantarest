@@ -26,7 +26,7 @@ keycloak_enabled: false
 # receiving patch releases, and a major upgrade is a decision (Keycloak
 # migrates its own schema on the first start of a new version, and does not
 # migrate back).
-keycloak_image: "quay.io/keycloak/keycloak:26.7"
+keycloak_image: "quay.io/keycloak/keycloak:26.8"
 
 # Loopback port the front door proxies to, and the prefix it serves Keycloak
 # under. The prefix is also what Keycloak is told to build its own URLs with
