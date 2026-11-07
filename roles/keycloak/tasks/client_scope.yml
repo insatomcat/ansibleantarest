@@ -1,0 +1,84 @@
+---
+# Keycloak 26.8.2 checks the audience of every token the admin API receives:
+# the token has to carry the built-in `kc-admin-api` client scope. The upgrade
+# assigns it to admin-cli and to the console, never to a client of our own, so
+# the connector's service account gets a token Keycloak signed and then
+# refuses with a 401 when it reads the groups of the user who just logged in.
+# The password check before it still succeeds, which is what makes the failure
+# look like a wrong password from the login form.
+#
+# The realm file cannot carry the fix alone: it is imported at the first start
+# only, and a realm imported by an older Keycloak keeps its clients as they
+# were. So the scope is put on the client over the admin API, on every run,
+# which costs two GETs once it is there. A Keycloak older than 26.8.2 has no
+# such scope, and then there is nothing to do.
+
+- name: Log in to read the connector's client scopes
+  ansible.builtin.uri:
+    url: "{{ keycloak_local_url }}/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      client_id: admin-cli
+      grant_type: password
+      username: "{{ keycloak_admin_user }}"
+      password: "{{ keycloak_admin_password }}"
+    # Same reading as admin.yml: a master realm whose password was changed
+    # from the console is left alone, and said so below.
+    status_code: [200, 400, 401]
+  register: keycloak_scope_login
+  changed_when: false
+  no_log: true
+
+- name: Say the connector's client scopes were not checked
+  ansible.builtin.debug:
+    msg: >-
+      keycloak_admin_password no longer opens the master realm, so the
+      kc-admin-api scope of the {{ keycloak_client_id }} client was not
+      checked. Without it Keycloak 26.8.2 and later refuse the connector's
+      reads, and every external login fails.
+  when: keycloak_scope_login.status != 200
+
+- name: Find the connector client and the kc-admin-api scope
+  when: keycloak_scope_login.status == 200
+  block:
+    - name: Read the connector client
+      ansible.builtin.uri:
+        url: "{{ keycloak_local_url }}/admin/realms/{{ keycloak_realm }}/clients?clientId={{ keycloak_client_id | urlencode }}"
+        headers:
+          Authorization: "Bearer {{ keycloak_scope_login.json.access_token }}"
+      register: keycloak_scope_client
+      changed_when: false
+
+    - name: Read the client scopes of the realm
+      ansible.builtin.uri:
+        url: "{{ keycloak_local_url }}/admin/realms/{{ keycloak_realm }}/client-scopes"
+        headers:
+          Authorization: "Bearer {{ keycloak_scope_login.json.access_token }}"
+      register: keycloak_scope_all
+      changed_when: false
+
+    - name: Read the default client scopes of the connector client
+      ansible.builtin.uri:
+        url: "{{ keycloak_local_url }}/admin/realms/{{ keycloak_realm }}/clients/{{ keycloak_scope_client.json[0].id }}/default-client-scopes"
+        headers:
+          Authorization: "Bearer {{ keycloak_scope_login.json.access_token }}"
+      register: keycloak_scope_defaults
+      changed_when: false
+      when: keycloak_scope_client.json | length > 0
+
+    - name: Give the connector client the kc-admin-api scope
+      ansible.builtin.uri:
+        url: >-
+          {{ keycloak_local_url }}/admin/realms/{{ keycloak_realm }}/clients/{{
+          keycloak_scope_client.json[0].id }}/default-client-scopes/{{
+          (keycloak_scope_all.json | selectattr('name', 'equalto', 'kc-admin-api') | first).id }}
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ keycloak_scope_login.json.access_token }}"
+        status_code: [204]
+      changed_when: true
+      when:
+        - keycloak_scope_client.json | length > 0
+        - keycloak_scope_all.json | selectattr('name', 'equalto', 'kc-admin-api') | list | length > 0
+        - keycloak_scope_defaults.json | selectattr('name', 'equalto', 'kc-admin-api') | list | length == 0

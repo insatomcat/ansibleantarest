@@ -50,3 +50,6 @@
 - name: Replace the administrator Keycloak bootstrapped
   ansible.builtin.include_tasks: admin.yml
   when: keycloak_admin_permanent | bool
+
+- name: Let the connector read the admin API
+  ansible.builtin.include_tasks: client_scope.yml
