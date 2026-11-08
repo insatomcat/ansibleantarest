@@ -1086,9 +1086,14 @@
         label: "{{ item.version }}"
       when: slurm_enabled | bool and antares_xpansion_enabled | bool
 
+    # Compared on major.minor: the releases built from 1.3 on print the study
+    # format (`8.8`, `9.2`), 1.1.2 prints its full solver version (`8.6.3`),
+    # and a patch release reads the studies of its line all the same.
     - name: Check each of them bundles the solver its entry declares
       ansible.builtin.assert:
-        that: item.stdout | trim == item.item.study_version
+        that: >-
+          (item.stdout | trim).split('.')[:2] | join('.')
+          == item.item.study_version
         fail_msg: >-
           Antares-Xpansion {{ item.item.version }} bundles the solver
           {{ item.stdout | trim }} on {{ inventory_hostname }}, not
