@@ -13,6 +13,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
+{% if antares_auth_provider == 'keycloak' %}
+# The alignment job, run from the same image by a timer of its own (sync.yml).
+COPY sync.py .
+{% endif %}
 
 EXPOSE {{ antares_auth_port }}
 

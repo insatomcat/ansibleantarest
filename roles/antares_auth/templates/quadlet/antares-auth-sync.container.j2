@@ -1,0 +1,36 @@
+{{ ansible_managed | comment }}
+#
+# The alignment job of the Keycloak connector: the connector's image, run once
+# and gone, started by {{ antares_auth_sync_container }}.timer. What it does is
+# at the top of sync.py in the image.
+#
+# A unit of its own rather than an exec in the connector: the connector sits on
+# the login path and has no business holding the password of the Antares-Web
+# administrator or a database account.
+
+[Unit]
+Description=Align Antares-Web roles with Keycloak
+After={{ antares_auth_container }}.service antarest.service postgresql.service
+
+[Container]
+ContainerName={{ antares_auth_sync_container }}
+Image={{ antares_auth_image }}
+Network={{ antarest_service_name }}.network
+User={{ antares_uid }}:{{ antares_gid }}
+Exec=python /app/sync.py
+# Everything it is told is in an environment file readable by root alone: it
+# holds the password of the Antares-Web administrator, and the unit files of
+# /etc/containers/systemd are world readable. podman reads that file raw, one
+# VAR=value per line with no quoting, which is also what lets the JSON of the
+# group table through untouched.
+EnvironmentFile={{ antares_auth_sync_env_file }}
+# The run is attached to its unit, so systemd already puts its output in the
+# journal. journald as the log driver would write every line a second time.
+LogDriver=passthrough
+
+[Service]
+Type=oneshot
+# Exit 1 means some accounts could not be handled, 2 that the run was refused
+# before any change. Both leave the unit `failed`, which is what the monitoring
+# of failed units reports.
+TimeoutStartSec=600

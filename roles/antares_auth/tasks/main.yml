@@ -15,3 +15,13 @@
 - name: Deploy the authentication connector
   ansible.builtin.include_tasks: install.yml
   when: antares_auth_provider != 'none'
+
+- name: Deploy the alignment job of the Keycloak connector
+  ansible.builtin.include_tasks: sync.yml
+  when:
+    - antares_auth_provider == 'keycloak'
+    - antares_auth_sync_enabled | bool
+
+- name: Take the alignment job down where it is not wanted
+  ansible.builtin.include_tasks: sync_remove.yml
+  when: not (antares_auth_provider == 'keycloak' and antares_auth_sync_enabled | bool)

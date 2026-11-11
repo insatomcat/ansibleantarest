@@ -83,3 +83,20 @@ antares_auth_provider: none
 # One port for either connector: they never run together.
 antares_auth_port: 8870
 antares_auth_container: "antares-auth-{{ antares_auth_provider }}"
+
+# ---------------------------------------------------------------------------
+#  The alignment job of the Keycloak connector
+#
+#  The login hook only ever adds a group, with one role for every group. The
+#  job corrects Antares-Web from Keycloak on a timer: the role of each group,
+#  the groups a user left, the accounts disabled in Keycloak. See
+#  docs/authentication.md and roles/antares_auth/defaults/main.yml.
+#
+#  Here rather than in the role because the hardening role checks the password
+#  below against the value this repository ships.
+# ---------------------------------------------------------------------------
+antares_auth_sync_enabled: "{{ antares_auth_provider == 'keycloak' }}"
+
+# The PostgreSQL account the job reads users_ldap with, and nothing else.
+antares_auth_sync_db_password: "changeme-auth-sync-db"
+

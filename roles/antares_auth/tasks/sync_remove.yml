@@ -1,0 +1,30 @@
+---
+# The job turned off, or the connector is no longer Keycloak's: timer, unit and
+# configuration go. The database account stays, it can read one table and its
+# password is gone with the configuration.
+- name: Look for the timer of the alignment job
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ antares_auth_sync_container }}.timer"
+  register: antares_auth_sync_timer
+
+- name: Stop it
+  ansible.builtin.systemd:
+    name: "{{ antares_auth_sync_container }}.timer"
+    state: stopped
+    enabled: false
+  when: antares_auth_sync_timer.stat.exists
+
+- name: Remove the timer, the unit and the configuration
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/etc/systemd/system/{{ antares_auth_sync_container }}.timer"
+    - "/etc/containers/systemd/{{ antares_auth_sync_container }}.container"
+    - "{{ antares_auth_sync_env_file }}"
+  register: antares_auth_sync_removed
+
+- name: Reload systemd so the generator forgets them
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: antares_auth_sync_removed is changed

@@ -1,0 +1,14 @@
+{{ ansible_managed | comment }}
+
+[Unit]
+Description=Align Antares-Web roles with Keycloak, on a schedule
+
+[Timer]
+OnCalendar={{ antares_auth_sync_schedule }}
+# A run missed while the machine was down is made at boot.
+Persistent=true
+RandomizedDelaySec=60
+Unit={{ antares_auth_sync_container }}.service
+
+[Install]
+WantedBy=timers.target

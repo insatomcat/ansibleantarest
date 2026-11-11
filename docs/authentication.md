@@ -82,3 +82,39 @@ Turning `keycloak_enabled` back off stops and removes the container. It leaves t
 
 The CI deploys it on every pull request, in the three shapes and on every distribution it deploys at all: `inventory/ci-*.yml` all carry `keycloak_enabled: true` and `antares_auth_provider: keycloak`, the builder included, since that is what puts the Keycloak image and the connector image in the artefacts. What that covers is the deployment - the database created before the first start, the realm import, the temporary administrator replaced, the two containers up, the route through the front door and the discovery document answering under it - rather than a login, which needs a user somebody created.
 
+
+## Keeping roles aligned with Keycloak
+
+The login hook only ever adds. At each login it gives every group it has not seen yet for that user the one role `antarest_external_auth_default_group_role`, and that is all it does: a user meant to be writer arrives as reader, a group the user left in Keycloak stays in Antares-Web, and an account disabled in Keycloak cannot log in again but keeps its open session (the refresh token lives 30 days) and its API tokens.
+
+With the Keycloak connector, `antares_auth_sync_enabled` (on by default) deploys a job that corrects this on a timer, `antares_auth_sync_schedule`, hourly by default. It runs the connector's image as a oneshot unit, `antares-auth-sync.service`, started by `antares-auth-sync.timer`. Each run reads every account of the realm with the connector's service account, then for each account the login hook created:
+
+- **enabled in Keycloak:** in each managed group, the role the table gives is granted, a wrong role is replaced, and the groups the user left are withdrawn;
+- **disabled or deleted in Keycloak:** its API tokens are revoked, its roles withdrawn, its studies handed over to the `admin` account, then the account is deleted, which is what ends its session.
+
+The table is two variables. `antarest_external_auth_group_mapping`, which the login hook already reads, says which Keycloak group gives which Antares-Web group. `antares_auth_sync_roles` says with which role, for the groups whose role is not the default one:
+
+```yaml
+antarest_external_auth_group_mapping:
+  secretariat-admins: admin
+  modelling-team: modelling
+  tc-ess: tc-ess
+antares_auth_sync_roles:
+  admin: admin          # any role in the group `admin` makes an application administrator
+  modelling: writer
+```
+
+A managed group is one the mapping points to (every group, with `antarest_external_auth_add_ext_groups`). A role granted by hand in any other group is never touched, nor are local accounts, the administrator among them.
+
+The studies change owner before the account goes because Antares-Web cannot do otherwise: `study.owner_id` references the identity with no `ON DELETE`, so deleting an account that owns a study fails on the constraint. The new owner is `admin`; the studies keep their groups and their permissions. Antares-Web refuses to change the owner of an archived study, so a leaver who owns one keeps an account with no role and no token: the run logs which study blocks, ends in error, and completes the closure at the first run after the study is restored.
+
+Safeguards:
+
+- nothing is changed unless Keycloak, the database and the Antares-Web users were all read in full, and a realm that returns no account at all counts as unreadable;
+- a run that would close more than `antares_auth_sync_max_closures` accounts (10) is refused;
+- `antares_auth_sync_dry_run: true` logs every change and makes none: deploy with it, `systemctl start antares-auth-sync`, read `journalctl -u antares-auth-sync`;
+- the link between an Antares-Web account and its Keycloak username, `users_ldap.external_id`, is not in the administration API, so the job reads it from the database with an account of its own, `antares_auth_sync_db_user`, which can `SELECT` that table and nothing else. Its password is `antares_auth_sync_db_password`, which the hardening role refuses to leave at the shipped value. Every change goes through the API.
+
+The unit ends `failed` when a run was refused (exit 2) or when some account could not be handled (exit 1), so a failed-unit check is enough to be told. Its configuration, secrets included, is in `/etc/antares-web/antares-auth-sync.env`, root only.
+
+A new user's first login gives the default role in every group: a writer is a reader until the next run. Keep `antarest_external_auth_default_group_role` at reader so that this window errs on the restrictive side.

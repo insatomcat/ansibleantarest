@@ -1,0 +1,78 @@
+---
+# The alignment job of the Keycloak connector: a database account that can
+# read users_ldap, the configuration, a oneshot unit and its timer. Runs after
+# antares_web in site.yml, so the table exists and PostgreSQL is up.
+
+- name: Check the alignment job has a table to apply
+  ansible.builtin.assert:
+    that:
+      - antarest_external_auth_group_mapping | length > 0 or antarest_external_auth_add_ext_groups | bool
+    fail_msg: >-
+      antares_auth_sync_enabled is on but antarest_external_auth_group_mapping
+      is empty and add_ext_groups is off: no Keycloak group gives access to
+      anything, and the job would have nothing to manage. Fill the mapping, or
+      turn the job off.
+    quiet: true
+
+# Same path as the Keycloak database account (roles/keycloak/tasks/database.yml):
+# PostgreSQL publishes no port, the password goes through a psql variable on
+# stdin so that no quote in it can break the statement.
+- name: Create or update the database account of the alignment job
+  ansible.builtin.command:
+    argv:
+      - "{{ container_cmd }}"
+      - exec
+      - -i
+      - postgresql
+      - psql
+      - -U
+      - postgres
+      - -v
+      - ON_ERROR_STOP=1
+      - -v
+      - "pw={{ antares_auth_sync_db_password }}"
+      - -v
+      - "u={{ antares_auth_sync_db_user }}"
+    stdin: |
+      SELECT format('CREATE ROLE %I LOGIN', :'u')
+       WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'u') \gexec
+      SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', :'u', :'pw') \gexec
+      SELECT format('GRANT SELECT ON TABLE public.users_ldap TO %I', :'u') \gexec
+  # Every statement is idempotent and psql does not say whether the password
+  # actually changed: reporting `changed` on each run would be noise.
+  changed_when: false
+  no_log: true
+
+- name: Write the configuration of the alignment job
+  ansible.builtin.template:
+    src: antares-auth-sync.env.j2
+    dest: "{{ antares_auth_sync_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Deploy the unit of the alignment job
+  ansible.builtin.template:
+    src: quadlet/antares-auth-sync.container.j2
+    dest: "/etc/containers/systemd/{{ antares_auth_sync_container }}.container"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy its timer
+  ansible.builtin.template:
+    src: antares-auth-sync.timer.j2
+    dest: "/etc/systemd/system/{{ antares_auth_sync_container }}.timer"
+    owner: root
+    group: root
+    mode: "0644"
+
+# The timer only: the service is a oneshot the timer starts, and a run at
+# deploy time would apply a new table before anyone read its dry run.
+- name: Start the timer
+  ansible.builtin.systemd:
+    name: "{{ antares_auth_sync_container }}.timer"
+    state: started
+    enabled: true
+    daemon_reload: true

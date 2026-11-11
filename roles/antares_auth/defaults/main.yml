@@ -53,6 +53,53 @@ antares_auth_keycloak_url: >-
 antares_auth_keycloak_group_key: name
 
 # ---------------------------------------------------------------------------
+#  The alignment job (keycloak connector only)
+#
+#  Switched on by antares_auth_sync_enabled, in roles/antares_defaults/, with
+#  the password of its database account. Same image as the connector, its own
+#  unit, started by a timer. What it does and what it never touches is written
+#  at the top of files/kc-rest/sync.py.
+# ---------------------------------------------------------------------------
+
+antares_auth_sync_container: antares-auth-sync
+
+# When it runs, as a systemd OnCalendar expression. A run reads every account
+# of the realm and takes a few seconds for a hundred of them, so this can be
+# made shorter if the delay after a departure matters.
+antares_auth_sync_schedule: hourly
+
+# The role each Antares-Web group gives, for the groups whose role is not
+# antarest_external_auth_default_group_role. Keyed by the *Antares-Web* group
+# id, the value side of antarest_external_auth_group_mapping, which is the
+# other half of the table: that mapping says which Keycloak group gives which
+# Antares-Web group, this says with which role. A role is reader, runner,
+# writer or admin. Any role in the group `admin` makes an application
+# administrator.
+#
+#   antarest_external_auth_group_mapping:
+#     secretariat-admins: admin
+#     modelling-team: modelling
+#     tc-ess: tc-ess
+#   antares_auth_sync_roles:
+#     admin: admin
+#     modelling: writer
+antares_auth_sync_roles: {}
+
+# A run that would close more accounts than this is refused, nothing changed:
+# a realm emptied by mistake must not empty Antares-Web with it. Raise it for
+# one run, on the command line, when a mass departure is real.
+antares_auth_sync_max_closures: 10
+
+# Log every change the job would make and make none. The way to check a new
+# table before it applies: deploy with this on, then
+# `systemctl start antares-auth-sync` and read its journal.
+antares_auth_sync_dry_run: false
+
+# The PostgreSQL role the job reads with. SELECT on users_ldap and nothing
+# more, granted by the role.
+antares_auth_sync_db_user: antares_auth_sync
+
+# ---------------------------------------------------------------------------
 #  ldap connector
 #
 #  Nothing here has a usable default: a directory is something that already

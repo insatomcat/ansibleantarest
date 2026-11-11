@@ -28,3 +28,6 @@ antares_auth_archive: antares-auth-image.tar.gz
 antares_auth_all_containers:
   - antares-auth-keycloak
   - antares-auth-ldap
+
+# The configuration of the alignment job, secrets included. Root only.
+antares_auth_sync_env_file: "/etc/antares-web/{{ antares_auth_sync_container }}.env"
