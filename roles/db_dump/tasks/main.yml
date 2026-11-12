@@ -1,0 +1,92 @@
+---
+# The role runs whatever db_dump_enabled says, so that turning it off takes
+# the timer away instead of leaving it dumping behind a deployment that no
+# longer knows about it. The dumps already written stay: removing them is an
+# operator's decision.
+
+- name: Work out which databases this machine holds
+  ansible.builtin.set_fact:
+    db_dump_postgres: "{{ inventory_hostname in (groups['antares_web'] | default([])) }}"
+    db_dump_mariadb: >-
+      {{ inventory_hostname in (groups['slurm_frontend'] | default([]))
+         and slurm_enabled | default(false) | bool
+         and slurmdbd_enabled | default(false) | bool }}
+
+- name: Install the dump
+  when: db_dump_enabled | bool and (db_dump_postgres | bool or db_dump_mariadb | bool)
+  block:
+    - name: Install the dump script
+      ansible.builtin.template:
+        src: antares-db-dump.sh.j2
+        dest: /usr/local/sbin/antares-db-dump
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Install the dump unit and its timer
+      ansible.builtin.template:
+        src: "{{ item }}.j2"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - antares-db-dump.service
+        - antares-db-dump.timer
+      register: db_dump_units
+
+    # Readable by root only: a dump holds every password hash of the
+    # application and of the identity provider.
+    - name: Create the dump directory
+      ansible.builtin.file:
+        path: "{{ db_dump_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Create the directory the metrics are left in
+      ansible.builtin.file:
+        path: "{{ db_dump_metrics_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Enable the dump timer
+      ansible.builtin.systemd:
+        name: antares-db-dump.timer
+        state: started
+        enabled: true
+        daemon_reload: "{{ db_dump_units.changed }}"
+
+- name: Remove the dump
+  when: not (db_dump_enabled | bool and (db_dump_postgres | bool or db_dump_mariadb | bool))
+  block:
+    - name: Look for the dump timer
+      ansible.builtin.stat:
+        path: /etc/systemd/system/antares-db-dump.timer
+      register: db_dump_stale
+
+    - name: Stop the dump timer
+      ansible.builtin.systemd:
+        name: antares-db-dump.timer
+        state: stopped
+        enabled: false
+      when: db_dump_stale.stat.exists
+
+    - name: Remove the dump script, unit and timer
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/antares-db-dump.timer
+        - /etc/systemd/system/antares-db-dump.service
+        - /usr/local/sbin/antares-db-dump
+        - "{{ db_dump_metrics_dir }}/antares_db_dump.prom"
+      register: db_dump_removed
+
+    - name: Reload systemd after the removal
+      ansible.builtin.systemd:
+        daemon_reload: true
+      when: db_dump_removed.changed

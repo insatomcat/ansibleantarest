@@ -26,7 +26,7 @@ than grepping the tree:
 | nftables, fail2ban, sshd, unattended updates, journal | `docs/hardening.md` |
 | Node exporters everywhere, the Slurm exporter, Prometheus, Grafana behind the front door | `docs/monitoring.md` |
 | Build once, deploy with `archive` | `docs/build-and-deploy.md` |
-| What `verify.yml` proves, changing the admin password, Postgres major upgrades | `docs/operations.md` |
+| What `verify.yml` proves, changing the admin password, the daily database dumps and their restore, Postgres major upgrades | `docs/operations.md` |
 | Known limitations, where this diverges from the reference PDF | `docs/limitations.md` |
 | How to re-run only one part | `README.md`, "Useful tags" |
 
@@ -96,6 +96,7 @@ commented.
 | `monitoring_node` | The node exporter, on every machine of the inventory. Also owns the shared `load_artifacts.yml` the other two monitoring roles include |
 | `monitoring_slurm` | The Slurm exporter, on the front-end, next to the controller it reads. Refuses to deploy one whose Slurm client is ahead of that controller |
 | `monitoring_server` | Prometheus and Grafana, on the web machine, in the host network namespace and behind the front door |
+| `db_dump` | Daily dump of PostgreSQL and of the Slurm accounting MariaDB to the data volume, systemd timer, retention, textfile metrics |
 
 `roles/antares_web/tasks/` is split by concern (`data_volume`, `checkout`,
 `build_frontend`, `build_image`, `config`, `service`, `nginx`, `migrate`,

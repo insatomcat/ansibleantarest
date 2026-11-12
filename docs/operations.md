@@ -49,6 +49,61 @@ It takes effect on the next login, no restart needed. The variable is still wort
 
 Creating the first user from the interface is the other thing that surprises: AntaREST inserts its admin with an explicit id and so never advances the sequence the other identities are numbered from, which then hands out that same id and is rejected. The deployment recalls that sequence in `roles/antares_web/tasks/migrate.yml`, before the backend starts, so it does not happen here.
 
+## Daily database dumps
+
+The `db_dump` role, on by default (`db_dump_enabled`), installs a systemd timer that dumps every database of the machine once a day into `db_dump_dir`, `/var/antares-web/data/backups/db` by default, one directory per day:
+
+| File | What it holds |
+|---|---|
+| `postgres-globals.sql` | The PostgreSQL roles and their passwords, which `pg_dump` leaves out |
+| `postgres-postgres.dump` | Antares-Web, in the custom format `pg_restore` reads |
+| `postgres-keycloak.dump` | Keycloak, when it is on: realms, users, groups, credentials |
+| `mariadb-slurm_acct_db.sql.gz` | The Slurm accounting, on the front-end |
+| `SHA256SUMS` | The checksums of the above, `sha256sum -c SHA256SUMS` to check them |
+
+The timer fires at `db_dump_schedule` (01:30, machine time) and is persistent: a machine that was off then dumps at its next boot. A day is written to a hidden `.partial-` directory and renamed once every dump in it succeeded, so a directory named after a date is complete. `db_dump_retention_days` (30) days are kept, today's included, and only a successful run removes the old ones. A failed run leaves `antares-db-dump.service` failed and removes nothing. Each success writes `antares_db_dump_last_success_timestamp_seconds` and `antares_db_dump_last_size_bytes` to `db_dump_metrics_dir`, for the node exporter's textfile collector and an alert on a dump that stopped coming.
+
+The dumps stay on the machine, on the data volume, so that whatever backs that volume up carries them. On their own they cover a dropped table, a bad migration or a user deleted by mistake; the loss of the disk is the volume backup's job. The Slurm accounting is the one database whose files live outside the data volume (in the `slurmdb-data` podman volume, on the system disk), so its dump is the only copy of it there.
+
+```bash
+systemctl start antares-db-dump.service          # dump now
+journalctl -u antares-db-dump                    # what the last runs said
+systemctl list-timers antares-db-dump.timer      # when the next one is
+```
+
+Restoring a day, as root on the machine. Antares-Web, with the same precautions as a major upgrade below, the backend stopped and the schema empty before the restore:
+
+```bash
+D=/var/antares-web/data/backups/db/2026-11-20
+systemctl stop antares-web.target
+systemctl start postgresql.service
+podman exec postgresql psql -v ON_ERROR_STOP=1 -U postgres \
+    -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+podman exec -i postgresql pg_restore -U postgres -d postgres --exit-on-error < $D/postgres-postgres.dump
+systemctl start antares-web.target
+```
+
+Keycloak, into a database recreated for it:
+
+```bash
+systemctl stop keycloak.service
+podman exec postgresql psql -v ON_ERROR_STOP=1 -U postgres \
+    -c 'DROP DATABASE keycloak' -c 'CREATE DATABASE keycloak OWNER keycloak'
+podman exec -i postgresql pg_restore -U postgres -d keycloak --exit-on-error < $D/postgres-keycloak.dump
+systemctl start keycloak.service
+```
+
+On a rebuilt machine the playbook has created the `keycloak` and `antares_auth_sync` roles again, with the passwords of the inventory. `postgres-globals.sql` is there for a cluster that has lost them. The Slurm accounting, `slurmdbd` stopped:
+
+```bash
+systemctl stop slurmdbd
+zcat $D/mariadb-slurm_acct_db.sql.gz | podman exec -i slurmdb-mariadb \
+    sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
+systemctl start slurmdbd
+```
+
+To check a dump without touching anything, restore it into a scratch database (`CREATE DATABASE restore_test`, then `pg_restore -d restore_test --no-owner`) and drop it afterwards.
+
 ## Major database versions
 
 Third-party images are pinned to majors (`postgres:18`, `mariadb:11`, `redis:8`, `nginx:1.30`, `adminer:5`, `keycloak:26.8`) rather than `latest` to avoid accidental major upgrades. nginx is pinned on a minor because its major is always `1`, and on the stable branch rather than the mainline one, which stops being rebuilt as soon as the next mainline opens. Keycloak too: it has published nothing but `26.x` for two years, and it migrates its own schema on the first start of a new version without migrating back.

@@ -1,0 +1,23 @@
+---
+# ===========================================================================
+#  Database dumps
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+#  A daily logical dump of every database the deployment runs, kept on the
+#  data volume: PostgreSQL on the web machine (Antares-Web, and Keycloak when
+#  it is on), the MariaDB of the Slurm accounting on the front-end. A copy of
+#  the disk taken while a database writes is crash-consistent at best; a dump
+#  is a state the database itself vouches for, restorable into an empty
+#  cluster of the same major or the next one.
+#
+#  The dumps stay on the machine, next to the studies, so that whatever
+#  backs up the data volume (a block volume backup policy, a snapshot, a copy
+#  elsewhere) carries them too. On their own they cover a dropped table or a
+#  bad migration; losing the disk is the volume backup's job. See
+#  docs/operations.md.
+#
+#  Here rather than in the role so that other roles can read it: the alert
+#  on a dump that stopped coming keys on it.
+# ---------------------------------------------------------------------------
+db_dump_enabled: true

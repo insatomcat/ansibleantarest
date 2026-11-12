@@ -1,0 +1,18 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Dump the Antares databases into {{ db_dump_dir }}
+# The dumps go to the data volume: if it is not mounted, fail rather than
+# fill the mount point on the system disk.
+RequiresMountsFor={{ db_dump_dir }}
+{% if db_dump_postgres %}
+After={{ db_dump_postgres_container }}.service
+{% endif %}
+{% if db_dump_mariadb %}
+After={{ db_dump_mariadb_container }}.service
+{% endif %}
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/antares-db-dump
+Nice=10
+IOSchedulingClass=idle

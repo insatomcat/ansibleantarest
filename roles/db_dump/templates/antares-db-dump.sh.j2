@@ -1,0 +1,82 @@
+#!/bin/bash
+# {{ ansible_managed }}
+#
+# Daily dump of the databases of this machine into {{ db_dump_dir }},
+# one directory per day. Run by antares-db-dump.service; see docs/operations.md
+# for what is in a day and how to restore it.
+#
+# A day is written to a hidden directory and renamed only once every dump in
+# it succeeded, so a directory named after a date is always complete. A
+# failed run exits non-zero, leaves the unit failed and the metrics of the
+# last good run in place, and removes nothing.
+set -euo pipefail
+umask 077
+
+root={{ db_dump_dir | quote }}
+day=$(date +%F)
+partial="$root/.partial-$day"
+dest="$root/$day"
+
+mkdir -p "$root"
+rm -rf "$partial"
+mkdir "$partial"
+trap 'rm -rf "$partial"' EXIT
+
+{% if db_dump_postgres %}
+# PostgreSQL: the roles and their passwords first (pg_dump leaves them out),
+# then every database that accepts connections, each in the custom format
+# pg_restore reads. Over the container's local socket, as postgres, which the
+# image trusts there.
+podman exec {{ db_dump_postgres_container }} \
+    pg_dumpall -U postgres --globals-only > "$partial/postgres-globals.sql"
+# An assignment rather than the list of the loop: a substitution that fails
+# in a for list is silently empty, in an assignment it stops the run.
+dbs=$(podman exec {{ db_dump_postgres_container }} \
+    psql -U postgres -Atc "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate ORDER BY 1")
+[[ -n "$dbs" ]] || { echo "no database to dump in {{ db_dump_postgres_container }}" >&2; exit 1; }
+for db in $dbs; do
+    podman exec {{ db_dump_postgres_container }} \
+        pg_dump -U postgres --format=custom "$db" > "$partial/postgres-$db.dump"
+done
+{% endif %}
+{% if db_dump_mariadb %}
+# MariaDB of the Slurm accounting. Its data lives in a podman volume on the
+# system disk, not on the data volume: this dump is what brings it there.
+# The root password is read inside the container, from the environment the
+# unit gave it, so it never appears on a command line of this machine.
+podman exec {{ db_dump_mariadb_container }} sh -c \
+    'exec mariadb-dump -uroot -p"$MARIADB_ROOT_PASSWORD" --single-transaction --routines --triggers --databases {{ db_dump_mariadb_database }}' \
+    | gzip > "$partial/mariadb-{{ db_dump_mariadb_database }}.sql.gz"
+{% endif %}
+
+(cd "$partial" && sha256sum -- * > SHA256SUMS)
+rm -rf "$dest"
+mv "$partial" "$dest"
+trap - EXIT
+
+# Retention, by name: a day older than the window goes. Only the dated
+# directories are considered, so nothing else under $root is ever touched.
+cutoff=$(date -d "-$(( {{ db_dump_retention_days | int }} - 1 )) days" +%F)
+for d in "$root"/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]; do
+    [[ -d "$d" ]] || continue
+    [[ "$(basename "$d")" < "$cutoff" ]] && rm -rf -- "$d"
+done
+
+metrics={{ db_dump_metrics_dir | quote }}
+# 0755 by hand: the umask of this script would make it 0700, and the node
+# exporter, which does not run as root, could not read it.
+if install -d -m 0755 "$metrics" 2>/dev/null; then
+    size=$(du -sb "$dest" | cut -f1)
+    cat > "$metrics/.antares_db_dump.prom" <<EOF
+# HELP antares_db_dump_last_success_timestamp_seconds Time the last complete database dump finished.
+# TYPE antares_db_dump_last_success_timestamp_seconds gauge
+antares_db_dump_last_success_timestamp_seconds $(date +%s)
+# HELP antares_db_dump_last_size_bytes Size of the last complete database dump.
+# TYPE antares_db_dump_last_size_bytes gauge
+antares_db_dump_last_size_bytes $size
+EOF
+    chmod 0644 "$metrics/.antares_db_dump.prom"
+    mv "$metrics/.antares_db_dump.prom" "$metrics/antares_db_dump.prom"
+fi
+
+echo "dump $day complete in $dest ($(du -sh "$dest" | cut -f1))"

@@ -255,3 +255,19 @@
       tags: monitoring
     - role: antares_edge
       tags: edge
+
+# ---------------------------------------------------------------------------
+#  Database dumps
+#
+#  Last, once every database it reads is running: PostgreSQL on the web
+#  machine, the MariaDB of the Slurm accounting on the front-end. Not guarded
+#  by db_dump_enabled, the role handles both answers, so that turning it off
+#  takes the timer away. See docs/operations.md.
+# ---------------------------------------------------------------------------
+- name: Daily database dumps
+  hosts: antares_web:slurm_frontend
+  become: true
+  tags: backup
+  roles:
+    - antares_defaults
+    - db_dump

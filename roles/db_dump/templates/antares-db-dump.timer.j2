@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Daily dump of the Antares databases
+
+[Timer]
+OnCalendar={{ db_dump_schedule }}
+# A machine that was off at that hour dumps at its next boot.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

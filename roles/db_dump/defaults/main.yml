@@ -1,0 +1,31 @@
+---
+# Where the dumps go: one directory per day, named YYYY-MM-DD. On the data
+# volume by default, which is the point: whatever backs that volume up takes
+# the dumps with it. antarest_data_dir is a default of the antares_web role,
+# invisible from a play that does not run it, hence the fallback, which is
+# that default spelled out.
+db_dump_dir: "{{ antarest_data_dir | default(antarest_base_dir ~ '/data') }}/backups/db"
+
+# When, as a systemd OnCalendar expression, in the time zone of the machine.
+# Before the volume backup of the night rather than after it, so that the
+# backup carries the dump of the same day. The timer is persistent: a machine
+# that was off at that hour (a qualification environment stopped overnight)
+# dumps at its next boot instead of skipping the day.
+db_dump_schedule: "*-*-* 01:30:00"
+
+# How many daily dumps are kept, today's included. Older ones are removed by
+# the run that writes a new one, and only by a run that succeeded: a dump
+# that keeps failing never eats into the dumps still there.
+db_dump_retention_days: 30
+
+# Where the run leaves its outcome for the node exporter's textfile
+# collector: the time of the last successful dump and its size. Written
+# whether or not monitoring is on; it is a few bytes, and it is what an
+# alert on a stale dump reads.
+db_dump_metrics_dir: /var/lib/node_exporter/textfile
+
+# The containers and the database the script reads. They are the names the
+# antares_web and slurm_frontend roles give them.
+db_dump_postgres_container: postgresql
+db_dump_mariadb_container: slurmdb-mariadb
+db_dump_mariadb_database: slurm_acct_db

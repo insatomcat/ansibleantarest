@@ -141,6 +141,7 @@ ansible-playbook site.yml --tags solver          # (re)install solvers
 ansible-playbook site.yml --tags xpansion        # (re)install Antares-Xpansion (needs antares_xpansion_enabled)
 ansible-playbook site.yml --tags monitoring      # the exporters, Prometheus and Grafana
 ansible-playbook site.yml --tags hardening       # firewall, fail2ban, sshd, updates
+ansible-playbook site.yml --tags backup          # the daily database dumps
 ansible-playbook site.yml -e antarest_force_rebuild=true   # full rebuild
 ```
 
