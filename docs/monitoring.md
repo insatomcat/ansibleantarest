@@ -28,6 +28,8 @@ monitoring_node_exporter_image: "docker.io/prom/node-exporter:v1"
 monitoring_slurm_exporter_image: "docker.io/sckyzo/slurm-exporter:1.8.6"
 monitoring_prometheus_image: "docker.io/prom/prometheus:v3"
 monitoring_grafana_image: "docker.io/grafana/grafana:13.1"
+monitoring_alertmanager_image: "docker.io/prom/alertmanager:v0.35.0"
+monitoring_blackbox_image: "docker.io/prom/blackbox-exporter:v0.29.1"
 
 # The exporters answer on the machine's own address, Prometheus and Grafana
 # on 127.0.0.1 alone
@@ -35,10 +37,17 @@ monitoring_node_exporter_port: 9100
 monitoring_slurm_exporter_port: 9341
 monitoring_prometheus_port: 8084
 monitoring_grafana_port: 8083
+monitoring_alertmanager_port: 8086
+monitoring_blackbox_port: 8087
 
 monitoring_grafana_path: /grafana
 monitoring_prometheus_path: /prometheus
 monitoring_prometheus_public: false
+monitoring_alertmanager_path: /alertmanager
+monitoring_alertmanager_public: false
+
+monitoring_alerting_enabled: "{{ monitoring_enabled }}"
+monitoring_node_textfile_dir: /var/lib/node_exporter/textfile
 
 monitoring_scrape_interval: 30s
 monitoring_prometheus_retention: 30d
@@ -101,7 +110,7 @@ Or publish it behind the front door, where it lands under `monitoring_prometheus
 monitoring_prometheus_public: true
 ```
 
-That also sets `--web.external-url`, without which Prometheus builds its links at the root and answers 404 on its own static files. Note that it puts an unauthenticated endpoint on the internet on a machine reachable from it: nginx is where a `auth_basic` belongs if that is not wanted.
+That also sets `--web.external-url`, without which Prometheus builds its links at the root and answers 404 on its own static files. The route sits in the administration tier of the front door, so it asks for `antares_edge_basic_auth_admin_users` when that list is set; without it, this is an unauthenticated read of every metric, open to the internet.
 
 `monitoring_prometheus_retention` (30 days) is what decides the size of the database, and it lives under `antarest_data_dir` - on the block device when there is one, see [Antares-Web](antares-web.md). A dozen machines at a 30 second interval cost a couple of gigabytes a month.
 
@@ -177,7 +186,14 @@ monitoring_alert_smtp_username: "..."        # with OCI Email Delivery, the SMTP
 monitoring_alert_smtp_password: "..."
 ```
 
-One mail per alert name and machine, a resolved mail when it clears, a reminder every `monitoring_alert_repeat_interval` (12h) while it lasts. Alertmanager's data directory keeps the silences and the notification log across restarts. To look at it or silence an alert during planned work: `ssh -L 8086:127.0.0.1:8086 <the web machine>`, then `http://127.0.0.1:8086/`.
+One mail per alert name and machine, a resolved mail when it clears, a reminder every `monitoring_alert_repeat_interval` (12h) while it lasts. Alertmanager's data directory keeps the silences and the notification log across restarts. Every mail carries two links: "View in Alertmanager" and "Source", the rule's expression in Prometheus. Both point at the loopback of the machine unless the two consoles are published behind the front door, in its administration tier like Grafana:
+
+```yaml
+monitoring_alertmanager_public: true     # under monitoring_alertmanager_path, /alertmanager
+monitoring_prometheus_public: true       # under monitoring_prometheus_path, /prometheus
+```
+
+Each is then told its public address (`--web.external-url`) and builds its links from it. Off by default: past the administration password, Prometheus reads every metric and Alertmanager can silence any alert. Without them, reach Alertmanager with a tunnel to silence an alert during planned work: `ssh -L 8086:127.0.0.1:8086 <the web machine>`, then `http://127.0.0.1:8086/`.
 
 ## Operating it
 

@@ -85,12 +85,12 @@ monitoring_slurm_exporter_port: 9341
 monitoring_prometheus_port: 8084
 monitoring_grafana_port: 8083
 monitoring_alertmanager_port: 8086
+monitoring_blackbox_port: 8087
 
 # Where the node exporter reads *.prom files that other parts of the
 # deployment leave it (the database dump, for one): its textfile collector.
 # Here because both sides read it.
 monitoring_node_textfile_dir: /var/lib/node_exporter/textfile
-monitoring_blackbox_port: 8087
 
 # The path the front door serves Grafana under. It is also what Grafana is
 # told to build its own URLs with (GF_SERVER_SERVE_FROM_SUB_PATH), so the two
@@ -109,6 +109,17 @@ monitoring_grafana_path: /grafana
 # static files.
 monitoring_prometheus_public: false
 monitoring_prometheus_path: /prometheus
+
+# Alertmanager through the front door, under monitoring_alertmanager_path,
+# behind the administration password like the other consoles. Off by
+# default for the same reason as Prometheus, and because its interface also
+# writes: anyone past the door can silence an alert. On, it is told its
+# public address, so the "View in Alertmanager" link of every alert mail
+# opens it; the "Source" link of the same mail opens Prometheus, and works
+# when monitoring_prometheus_public is on too. Off, both links point at the
+# loopback of the machine.
+monitoring_alertmanager_public: false
+monitoring_alertmanager_path: /alertmanager
 
 # Secrets - CHANGE THIS.
 #

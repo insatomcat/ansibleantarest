@@ -107,4 +107,10 @@ antares_edge_routes: >-
           'name': 'Prometheus',
           'auth': 'admin'}]
         if (monitoring_enabled | bool and monitoring_prometheus_public | bool) else [])
+     + ([{'path': monitoring_alertmanager_path,
+          'upstream': '127.0.0.1:' ~ monitoring_alertmanager_port,
+          'name': 'Alertmanager',
+          'auth': 'admin'}]
+        if (monitoring_enabled | bool and monitoring_alerting_enabled | bool
+            and monitoring_alertmanager_public | bool) else [])
      + antares_edge_extra_routes }}

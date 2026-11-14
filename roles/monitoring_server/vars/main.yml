@@ -136,11 +136,24 @@ monitoring_alertmanager_volumes: >-
       monitoring_server_data_dir ~ '/alertmanager:/alertmanager:rw']
      | map('regex_replace', '$', _monitoring_volume_opts) | list }}
 
+monitoring_alertmanager_public_url: >-
+  {{ _monitoring_scheme ~ '://' ~ _monitoring_public_host | trim
+     ~ ((':' ~ _monitoring_public_port)
+        if _monitoring_public_port | int != _monitoring_default_port | int else '')
+     ~ monitoring_alertmanager_path }}
+
+# The path the API and the interface answer under on the loopback: the
+# public path when it is published (an external URL with a path moves the
+# routes under it), the root otherwise.
+monitoring_alertmanager_prefix: "{{ monitoring_alertmanager_path if monitoring_alertmanager_public | bool else '' }}"
+
 monitoring_alertmanager_flags: >-
   --config.file=/etc/alertmanager/alertmanager.yml
   --storage.path=/alertmanager
   --web.listen-address=127.0.0.1:{{ monitoring_alertmanager_port }}
   --cluster.listen-address=
+  {{ ('--web.external-url=' ~ monitoring_alertmanager_public_url | trim)
+     if monitoring_alertmanager_public | bool else '' }}
 
 monitoring_blackbox_volumes: >-
   {{ [monitoring_server_dir ~ '/blackbox.yml:/etc/blackbox_exporter/config.yml:ro']
