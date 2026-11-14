@@ -1,0 +1,124 @@
+{{ ansible_managed | comment }}
+#
+# The alerting rules of the deployment, read by Prometheus from
+# /etc/prometheus/rules. Each alert carries a severity: critical when a user
+# can no longer work, warning when they soon will not.
+
+groups:
+  - name: antares
+    rules:
+
+      # A machine whose node exporter stopped answering: the machine is down,
+      # unreachable or stopped. Alertmanager mutes everything else on it.
+      - alert: MachineDown
+        expr: up{job="node"} == 0
+        for: {{ monitoring_alert_for }}
+        labels:
+          severity: critical
+        annotations:
+          summary: {% raw %}"{{ $labels.instance }} does not answer"{% endraw %}
+
+          description: "Its node exporter has not answered for {{ monitoring_alert_for }}: the machine is down, stopped or unreachable."
+
+      # Any other scrape target: the Slurm exporter, Prometheus itself, and
+      # the blackbox exporter, whose silence would hide every probe below.
+      - alert: ExporterDown
+        expr: up{job!="node"} == 0
+        for: {{ monitoring_alert_for }}
+        labels:
+          severity: warning
+        annotations:
+          summary: {% raw %}"{{ $labels.job }} on {{ $labels.instance }} does not answer"{% endraw %}
+
+          description: "Prometheus cannot scrape it, so what it measures is no longer watched."
+
+      # The services probed from the web machine: the Antares-Web API, the
+      # realm of Keycloak, the front door. See monitoring_probes.
+      - alert: ServiceDown
+        expr: probe_success == 0
+        for: {{ monitoring_alert_for }}
+        labels:
+          severity: critical
+        annotations:
+          summary: {% raw %}"{{ $labels.service }} is down on {{ $labels.instance }}"{% endraw %}
+
+          description: {% raw %}"The probe of {{ $labels.service }} has failed for {% endraw %}{{ monitoring_alert_for }}{% raw %}."{% endraw %}
+
+      - alert: CertificateExpiring
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < {{ monitoring_alert_cert_min_days }}
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: {% raw %}"The certificate of {{ $labels.instance }} expires in {{ $value | printf \"%.0f\" }} days"{% endraw %}
+
+          description: "Its renewal runs 30 days ahead and has not succeeded. Look at the certbot timer and its journal."
+
+      - alert: DiskSpaceLow
+        expr: >-
+          node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|vfat"}
+          / node_filesystem_size_bytes{fstype!~"tmpfs|ramfs|vfat"} < {{ monitoring_alert_disk_warning }}
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: {% raw %}"{{ $labels.mountpoint }} on {{ $labels.instance }} has {{ $value | humanizePercentage }} free"{% endraw %}
+
+          description: "A simulation writes tens of GB at once; extend the volume or free space before one fills it."
+
+      - alert: DiskSpaceCritical
+        expr: >-
+          node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|vfat"}
+          / node_filesystem_size_bytes{fstype!~"tmpfs|ramfs|vfat"} < {{ monitoring_alert_disk_critical }}
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: {% raw %}"{{ $labels.mountpoint }} on {{ $labels.instance }} has {{ $value | humanizePercentage }} free"{% endraw %}
+
+          description: "The next simulation or import will fail on a full disk, and a full data volume stops the platform."
+
+      - alert: MemoryExhausted
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.05
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: {% raw %}"{{ $labels.instance }} has {{ $value | humanizePercentage }} of its memory available"{% endraw %}
+
+          description: "A simulation larger than the machine ends killed by the kernel. Check the running jobs, or resize."
+{% if slurm_enabled | bool and monitoring_slurm_enabled | bool %}
+
+      - alert: SlurmNodeUnavailable
+        expr: sum by (cluster, instance) (slurm_nodes_down + slurm_nodes_drain + slurm_nodes_fail) > 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: {% raw %}"{{ $value }} Slurm node(s) down, drained or failed on {{ $labels.cluster }}"{% endraw %}
+
+          description: "Simulations queue and never start. `sinfo -R` on the front-end gives the reason."
+{% endif %}
+{% if db_dump_enabled | default(false) | bool %}
+
+      # The dump writes the time of its last success for the textfile
+      # collector (roles/db_dump). Too old means the dumps stopped; absent
+      # means none has ever succeeded on that machine.
+      - alert: DatabaseDumpStale
+        expr: time() - antares_db_dump_last_success_timestamp_seconds > {{ monitoring_alert_dump_max_age_hours | int * 3600 }}
+        labels:
+          severity: warning
+        annotations:
+          summary: {% raw %}"No database dump on {{ $labels.instance }} for {{ $value | humanizeDuration }}"{% endraw %}
+
+          description: "journalctl -u antares-db-dump on the machine says why."
+
+      - alert: DatabaseDumpMissing
+        expr: absent(antares_db_dump_last_success_timestamp_seconds)
+        for: {{ monitoring_alert_dump_max_age_hours }}h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No database dump has ever succeeded"
+          description: "Nothing has written the dump metrics for {{ monitoring_alert_dump_max_age_hours }} hours. journalctl -u antares-db-dump on the machine says why."
+{% endif %}

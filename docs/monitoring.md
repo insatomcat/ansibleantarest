@@ -148,6 +148,37 @@ What the exporter needs from the machine is `/etc/slurm` and the munge socket, b
 
 The munge *key* is not mounted, although the image's documentation lists it: a client does not read it, `munged` signs the credentials and `munged` is on the host.
 
+## Alerting
+
+`monitoring_alerting_enabled`, which follows `monitoring_enabled`, adds two containers next to Prometheus on the web machine, both in the host network namespace on the loopback: Alertmanager (`monitoring_alertmanager_port`, 8086), which routes the alerts, and the blackbox exporter (`monitoring_blackbox_port`, 8087), which probes the services that publish no metrics of their own. Both are pinned on the patch (`prom/alertmanager:v0.35.0`, `prom/blackbox-exporter:v0.29.1`): they are pre-1.0 and their minors have changed the configuration before.
+
+What is probed, from the web machine (`monitoring_probes`): the health route of the Antares-Web API through its nginx (`/api/health`, which has to say `available`), the realm of Keycloak when it is on, and the front door on 127.0.0.1 under the public name, which answers 401 or 200 and serves the certificate the internet sees. One Prometheus job per probe, `probe-<service>`, so that `up` says the exporter answered and `probe_success` says the service did.
+
+The rules, in `roles/monitoring_server/templates/antares.rules.yml.j2`:
+
+| Alert | Severity | Raised when |
+|---|---|---|
+| `MachineDown` | critical | A node exporter has not answered for `monitoring_alert_for` (5m). Mutes every other alert of that machine |
+| `ExporterDown` | warning | Any other scrape target is down: the Slurm exporter, a probe job, Prometheus |
+| `ServiceDown` | critical | A probe has failed for `monitoring_alert_for` |
+| `CertificateExpiring` | warning | The served certificate has less than `monitoring_alert_cert_min_days` (14) left: the renewal, 30 days ahead, failed |
+| `DiskSpaceLow`, `DiskSpaceCritical` | warning, critical | A filesystem has less than `monitoring_alert_disk_warning` (15 %), then `monitoring_alert_disk_critical` (5 %), free |
+| `MemoryExhausted` | warning | Less than 5 % of the memory available for 15 minutes |
+| `SlurmNodeUnavailable` | critical | A Slurm node down, drained or failed for 15 minutes |
+| `DatabaseDumpStale`, `DatabaseDumpMissing` | warning | The last database dump is older than `monitoring_alert_dump_max_age_hours` (30), or none ever succeeded. Read from the metrics the `db_dump` role leaves for the textfile collector (`monitoring_node_textfile_dir`) |
+
+Alertmanager sends e-mail through an authenticated SMTP relay, STARTTLS on the submission port. With no recipient the alerts still fire and show in Alertmanager and Grafana, and go nowhere:
+
+```yaml
+monitoring_alert_email_to: [ops@example.org]
+monitoring_alert_email_from: antares-alerts@example.org
+monitoring_alert_smtp_smarthost: smtp.email.eu-frankfurt-1.oci.oraclecloud.com:587
+monitoring_alert_smtp_username: "..."        # with OCI Email Delivery, the SMTP credential's user name
+monitoring_alert_smtp_password: "..."
+```
+
+One mail per alert name and machine, a resolved mail when it clears, a reminder every `monitoring_alert_repeat_interval` (12h) while it lasts. Alertmanager's data directory keeps the silences and the notification log across restarts. To look at it or silence an alert during planned work: `ssh -L 8086:127.0.0.1:8086 <the web machine>`, then `http://127.0.0.1:8086/`.
+
 ## Operating it
 
 The units are independent of each other and of everything else on the machine, which is what makes them worth trusting during an incident. There is no target grouping them:

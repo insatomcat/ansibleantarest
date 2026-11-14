@@ -22,7 +22,7 @@ db_dump_retention_days: 30
 # collector: the time of the last successful dump and its size. Written
 # whether or not monitoring is on; it is a few bytes, and it is what an
 # alert on a stale dump reads.
-db_dump_metrics_dir: /var/lib/node_exporter/textfile
+db_dump_metrics_dir: "{{ monitoring_node_textfile_dir }}"
 
 # The containers and the database the script reads. They are the names the
 # antares_web and slurm_frontend roles give them.

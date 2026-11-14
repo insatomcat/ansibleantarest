@@ -1,0 +1,38 @@
+{{ ansible_managed | comment }}
+#
+# The probes of the blackbox exporter. Prometheus names the module and the
+# target on each scrape; see monitoring_probes in roles/monitoring_server/vars.
+
+modules:
+  # Any 2xx.
+  http_2xx:
+    prober: http
+    timeout: 10s
+    http:
+      preferred_ip_protocol: ip4
+
+  # The health route of the Antares-Web API, which answers 200 with
+  # {"status":"available"} once the backend is up. A 200 from the nginx in
+  # front of it with any other body (its own error page, the front-end) is a
+  # failure.
+  antares_api:
+    prober: http
+    timeout: 10s
+    http:
+      preferred_ip_protocol: ip4
+      fail_if_body_not_matches_regexp: ['"status": *"available"']
+
+  # The front door on the loopback, under the public name so that it serves
+  # the certificate the internet sees and the probe can read its expiry. It
+  # answers 401 to a request without the front door password, 200 when there
+  # is none: both mean it is up.
+  front_door:
+    prober: http
+    timeout: 10s
+    http:
+      preferred_ip_protocol: ip4
+      valid_status_codes: [200, 401]
+      headers:
+        Host: {{ antarest_tls_domain | default('', true) | to_json }}
+      tls_config:
+        server_name: {{ antarest_tls_domain | default('', true) | to_json }}

@@ -89,6 +89,7 @@ _monitoring_volume_opts: "{{ container_volume_opts | trim }}"
 
 monitoring_prometheus_volumes: >-
   {{ [monitoring_server_dir ~ '/prometheus.yml:/etc/prometheus/prometheus.yml:ro',
+      monitoring_server_dir ~ '/rules:/etc/prometheus/rules:ro',
       monitoring_server_data_dir ~ '/prometheus:/prometheus:rw']
      | map('regex_replace', '$', _monitoring_volume_opts) | list }}
 
@@ -116,3 +117,50 @@ monitoring_prometheus_flags: >-
   --web.console.templates=/usr/share/prometheus/consoles
   {{ ('--web.external-url=' ~ monitoring_prometheus_public_url | trim)
      if monitoring_prometheus_public | bool else '' }}
+
+# The containers of this role, in the order they start. Alertmanager and the
+# blackbox exporter only when alerting is on; the removal walks all four
+# whatever the switches say, so that turning one off takes it down.
+monitoring_server_containers: >-
+  {{ [monitoring_prometheus_container, monitoring_grafana_container]
+     + ([monitoring_alertmanager_container, monitoring_blackbox_container]
+        if monitoring_alerting_enabled | bool else []) }}
+monitoring_server_all_containers:
+  - "{{ monitoring_prometheus_container }}"
+  - "{{ monitoring_grafana_container }}"
+  - "{{ monitoring_alertmanager_container }}"
+  - "{{ monitoring_blackbox_container }}"
+
+monitoring_alertmanager_volumes: >-
+  {{ [monitoring_server_dir ~ '/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro',
+      monitoring_server_data_dir ~ '/alertmanager:/alertmanager:rw']
+     | map('regex_replace', '$', _monitoring_volume_opts) | list }}
+
+monitoring_alertmanager_flags: >-
+  --config.file=/etc/alertmanager/alertmanager.yml
+  --storage.path=/alertmanager
+  --web.listen-address=127.0.0.1:{{ monitoring_alertmanager_port }}
+  --cluster.listen-address=
+
+monitoring_blackbox_volumes: >-
+  {{ [monitoring_server_dir ~ '/blackbox.yml:/etc/blackbox_exporter/config.yml:ro']
+     | map('regex_replace', '$', _monitoring_volume_opts) | list }}
+
+monitoring_blackbox_flags: >-
+  --config.file=/etc/blackbox_exporter/config.yml
+  --web.listen-address=127.0.0.1:{{ monitoring_blackbox_port }}
+
+# What the blackbox exporter probes, from the web machine itself: the API of
+# Antares-Web through its own nginx, Keycloak's realm, and the front door on
+# the loopback under the public name, which is what yields the expiry of the
+# certificate the internet is served.
+monitoring_probes: >-
+  {{ [{'name': 'antares-web', 'module': 'antares_api',
+       'target': 'http://127.0.0.1:' ~ antarest_nginx_port ~ '/api/health'}]
+     + ([{'name': 'keycloak', 'module': 'http_2xx',
+          'target': 'http://127.0.0.1:' ~ keycloak_port ~ keycloak_relative_path ~ '/realms/' ~ keycloak_realm}]
+        if keycloak_enabled | default(false) | bool else [])
+     + ([{'name': 'front-door', 'module': 'front_door',
+          'target': 'https://127.0.0.1:' ~ antarest_https_port ~ '/'}]
+        if antarest_tls_enabled | bool else []) }}
+

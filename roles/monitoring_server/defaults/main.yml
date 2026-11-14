@@ -82,3 +82,43 @@ monitoring_grafana_check_updates: false
 # dozen machines at 30s costs a couple of gigabytes a month.
 monitoring_scrape_interval: 30s
 monitoring_prometheus_retention: 30d
+
+# ---------------------------------------------------------------------------
+#  Alerting (monitoring_alerting_enabled)
+# ---------------------------------------------------------------------------
+monitoring_alertmanager_container: alertmanager
+monitoring_blackbox_container: blackbox-exporter
+# Alertmanager runs as nobody, like Prometheus.
+monitoring_alertmanager_uid: 65534
+
+# Where the alerts go: e-mail, through an authenticated SMTP relay on the
+# submission port with STARTTLS. With no recipient, Alertmanager keeps the
+# alerts to itself.
+#
+#   monitoring_alert_email_to: [ops@example.org]
+#   monitoring_alert_email_from: antares-alerts@example.org
+#   monitoring_alert_smtp_smarthost: smtp.email.eu-frankfurt-1.oci.oraclecloud.com:587
+#   monitoring_alert_smtp_username: "ocid1.user.oc1..xxxx@ocid1.tenancy.oc1..xxxx"
+#   monitoring_alert_smtp_password: "..."
+monitoring_alert_email_to: []
+monitoring_alert_email_from: ""
+monitoring_alert_smtp_smarthost: ""
+monitoring_alert_smtp_username: ""
+monitoring_alert_smtp_password: ""
+
+# How long a problem has to last before it is an alert, and how often a
+# firing alert is sent again. A restart, a resize or an update takes a few
+# minutes: five keeps them quiet.
+monitoring_alert_for: 5m
+monitoring_alert_repeat_interval: 12h
+
+# Thresholds. Free space under which a filesystem warns, then is critical,
+# as a fraction; how old the last database dump may get (one day and a
+# margin, so that a dump late by a reboot does not page); how close the
+# certificate may come to its expiry (the renewal runs 30 days ahead, so 14
+# days left means it failed twice).
+monitoring_alert_disk_warning: 0.15
+monitoring_alert_disk_critical: 0.05
+monitoring_alert_dump_max_age_hours: 30
+monitoring_alert_cert_min_days: 14
+

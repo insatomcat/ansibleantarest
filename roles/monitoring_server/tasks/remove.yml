@@ -10,12 +10,10 @@
 - name: Look for the monitoring units
   ansible.builtin.stat:
     path: "/etc/containers/systemd/{{ item }}.container"
-  loop:
-    - "{{ monitoring_prometheus_container }}"
-    - "{{ monitoring_grafana_container }}"
+  loop: "{{ monitoring_server_remove | default(monitoring_server_all_containers) }}"
   register: monitoring_server_stale_units
 
-- name: Stop Prometheus and Grafana
+- name: Stop the monitoring services
   ansible.builtin.systemd:
     name: "{{ item.item }}.service"
     state: stopped
@@ -27,9 +25,7 @@
   ansible.builtin.file:
     path: "/etc/containers/systemd/{{ item }}.container"
     state: absent
-  loop:
-    - "{{ monitoring_prometheus_container }}"
-    - "{{ monitoring_grafana_container }}"
+  loop: "{{ monitoring_server_remove | default(monitoring_server_all_containers) }}"
   register: monitoring_server_units_removed
 
 - name: Reload systemd so the generator forgets them

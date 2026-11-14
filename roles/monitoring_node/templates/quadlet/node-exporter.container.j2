@@ -35,7 +35,7 @@ PodmanArgs={{ monitoring_node_exporter_podman_args | trim }}
 # expands `$` on a command line; `$$` is how it is told to pass one through.
 # Doubled or not the expressions mean the same thing to node-exporter, which
 # reads them with RE2, where `$$` is two end-of-text anchors in a row.
-Exec=--path.rootfs=/host --web.listen-address={{ monitoring_node_exporter_bind | trim }}:{{ monitoring_node_exporter_port }} --collector.filesystem.mount-points-exclude={{ monitoring_node_exporter_mount_exclude | trim | replace('$', '$$') }} --collector.filesystem.fs-types-exclude={{ monitoring_node_exporter_fs_exclude | trim | replace('$', '$$') }}
+Exec=--path.rootfs=/host --web.listen-address={{ monitoring_node_exporter_bind | trim }}:{{ monitoring_node_exporter_port }} --collector.filesystem.mount-points-exclude={{ monitoring_node_exporter_mount_exclude | trim | replace('$', '$$') }} --collector.filesystem.fs-types-exclude={{ monitoring_node_exporter_fs_exclude | trim | replace('$', '$$') }} --collector.textfile.directory=/host{{ monitoring_node_textfile_dir }}
 
 [Service]
 # on-failure, not always: a container that keeps dying exhausts the budget in

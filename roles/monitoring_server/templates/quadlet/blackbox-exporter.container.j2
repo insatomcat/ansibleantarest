@@ -1,0 +1,27 @@
+{{ ansible_managed | comment }}
+#
+# The blackbox exporter, in the host network namespace on the loopback: it
+# probes the services of this machine on their loopback ports, and the front
+# door on 127.0.0.1 under the public name. Stateless.
+
+[Unit]
+Description=Prometheus blackbox exporter
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Container]
+ContainerName={{ monitoring_blackbox_container }}
+Image={{ monitoring_blackbox_image }}
+Network=host
+{% for volume in monitoring_blackbox_volumes %}
+Volume={{ volume }}
+{% endfor %}
+
+Exec={{ monitoring_blackbox_flags | trim | replace('\n', ' ') }}
+
+[Service]
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

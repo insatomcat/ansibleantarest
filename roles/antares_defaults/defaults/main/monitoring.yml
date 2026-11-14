@@ -46,6 +46,12 @@ monitoring_enabled: false
 # docs/monitoring.md; this flag is how an operator says no to it outright.
 monitoring_slurm_enabled: "{{ slurm_enabled }}"
 
+# Alerting rules, Alertmanager and the blackbox probes, on the web machine next
+# to Prometheus. Follows monitoring_enabled. Without recipients
+# (monitoring_alert_email_to, in roles/monitoring_server/) the alerts still
+# fire and show in Grafana and in Alertmanager; they are just sent nowhere.
+monitoring_alerting_enabled: "{{ monitoring_enabled }}"
+
 # Images, fully qualified and pinned like every other third-party image here.
 # Not under container_registry: none of these live in docker.io/library.
 #
@@ -60,6 +66,13 @@ monitoring_prometheus_image: "docker.io/prom/prometheus:v3"
 monitoring_grafana_image: "docker.io/grafana/grafana:13.1"
 monitoring_slurm_exporter_image: "docker.io/sckyzo/slurm-exporter:1.8.6"
 
+# Alerting: Alertmanager, which routes what the rules of Prometheus raise, and
+# the blackbox exporter, which probes the services that publish no metrics of
+# their own. Both are pre-1.0 and their minors have changed the configuration
+# before, so they are pinned on the patch, like the Slurm exporter.
+monitoring_alertmanager_image: "docker.io/prom/alertmanager:v0.35.0"
+monitoring_blackbox_image: "docker.io/prom/blackbox-exporter:v0.29.1"
+
 # Where each exporter listens. node-exporter and the Slurm exporter are on the
 # machine's own address, not on the loopback: Prometheus runs on the web
 # machine and has to reach them across the network. What keeps them private is
@@ -71,6 +84,13 @@ monitoring_node_exporter_port: 9100
 monitoring_slurm_exporter_port: 9341
 monitoring_prometheus_port: 8084
 monitoring_grafana_port: 8083
+monitoring_alertmanager_port: 8086
+
+# Where the node exporter reads *.prom files that other parts of the
+# deployment leave it (the database dump, for one): its textfile collector.
+# Here because both sides read it.
+monitoring_node_textfile_dir: /var/lib/node_exporter/textfile
+monitoring_blackbox_port: 8087
 
 # The path the front door serves Grafana under. It is also what Grafana is
 # told to build its own URLs with (GF_SERVER_SERVE_FROM_SUB_PATH), so the two
@@ -111,6 +131,8 @@ monitoring_grafana_admin_user: admin
 monitoring_images: >-
   {{ ([monitoring_node_exporter_image, monitoring_prometheus_image,
        monitoring_grafana_image]
+      + ([monitoring_alertmanager_image, monitoring_blackbox_image]
+         if monitoring_alerting_enabled | bool else [])
       + ([monitoring_slurm_exporter_image]
          if (slurm_enabled | bool and monitoring_slurm_enabled | bool) else []))
      | unique if monitoring_enabled | bool else [] }}

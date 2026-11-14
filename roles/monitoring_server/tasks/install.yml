@@ -37,12 +37,29 @@
     group: "0"
     mode: "0750"
 
+- name: Create the Alertmanager directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ monitoring_server_dir }}/rules", owner: root, mode: "0755"}
+    - {path: "{{ monitoring_server_data_dir }}/alertmanager", owner: "{{ monitoring_alertmanager_uid }}", mode: "0750"}
+  loop_control:
+    label: "{{ item.path }}"
+  when: monitoring_alerting_enabled | bool
+
 - name: Load the Prometheus and Grafana images from the artefacts
   ansible.builtin.include_role:
     name: monitoring_node
     tasks_from: load_artifacts
   vars:
-    monitoring_load_images: "{{ [monitoring_prometheus_image, monitoring_grafana_image] }}"
+    monitoring_load_images: >-
+      {{ [monitoring_prometheus_image, monitoring_grafana_image]
+         + ([monitoring_alertmanager_image, monitoring_blackbox_image]
+            if monitoring_alerting_enabled | bool else []) }}
   when: antarest_image_source == 'archive'
 
 - name: Render the configuration
@@ -72,10 +89,38 @@
   register: monitoring_grafana_unit
   notify: Restart Grafana
 
+- name: Deploy the Alertmanager and blackbox exporter quadlet units
+  ansible.builtin.template:
+    src: "quadlet/{{ item.template }}"
+    dest: "/etc/containers/systemd/{{ item.container }}.container"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - {template: alertmanager.container.j2, container: "{{ monitoring_alertmanager_container }}"}
+    - {template: blackbox-exporter.container.j2, container: "{{ monitoring_blackbox_container }}"}
+  loop_control:
+    label: "{{ item.container }}"
+  register: monitoring_alerting_units
+  notify:
+    - Restart Alertmanager
+    - Restart the blackbox exporter
+  when: monitoring_alerting_enabled | bool
+
+# Alerting turned off with the rest of monitoring left on: the two units go,
+# the configuration and the silences stay.
+- name: Remove the alerting units
+  ansible.builtin.include_tasks: remove.yml
+  vars:
+    monitoring_server_remove: "{{ [monitoring_alertmanager_container, monitoring_blackbox_container] }}"
+  when: not monitoring_alerting_enabled | bool
+
 - name: Reload systemd so the quadlet generator picks the units up
   ansible.builtin.systemd:
     daemon_reload: true
-  when: monitoring_prometheus_unit.changed or monitoring_grafana_unit.changed
+  when: >-
+    monitoring_prometheus_unit.changed or monitoring_grafana_unit.changed
+    or monitoring_alerting_units.changed | default(false)
 
 - name: Start Prometheus and Grafana
   ansible.builtin.include_tasks: service.yml

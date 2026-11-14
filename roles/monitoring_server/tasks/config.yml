@@ -21,6 +21,43 @@
     mode: "0644"
   notify: Restart Prometheus
 
+- name: Deploy the alerting rules
+  ansible.builtin.template:
+    src: antares.rules.yml.j2
+    dest: "{{ monitoring_server_dir }}/rules/antares.yml"
+    owner: root
+    group: root
+    mode: "0644"
+    # Checked by promtool from the image itself, the one tool that knows
+    # what a rule is. Mounted where the template is, read as the file name.
+    validate: >-
+      podman run --rm --network=none -v %s:/rules.yml:ro{{ _monitoring_volume_opts }}
+      --entrypoint=promtool {{ monitoring_prometheus_image }} check rules /rules.yml
+  notify: Restart Prometheus
+  when: monitoring_alerting_enabled | bool
+
+# 0640, readable by the group of the uid Alertmanager runs as: the file
+# holds the SMTP password.
+- name: Deploy the Alertmanager configuration
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: "{{ monitoring_server_dir }}/alertmanager.yml"
+    owner: root
+    group: "{{ monitoring_alertmanager_uid }}"
+    mode: "0640"
+  notify: Restart Alertmanager
+  when: monitoring_alerting_enabled | bool
+
+- name: Deploy the blackbox exporter configuration
+  ansible.builtin.template:
+    src: blackbox.yml.j2
+    dest: "{{ monitoring_server_dir }}/blackbox.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart the blackbox exporter
+  when: monitoring_alerting_enabled | bool
+
 - name: Deploy the Grafana provisioning
   ansible.builtin.template:
     src: "grafana/{{ item }}.j2"

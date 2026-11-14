@@ -15,18 +15,14 @@
       in /etc/containers/systemd:
       {{ monitoring_server_quadlet_check.stdout | regex_findall('---(.+?)---') | join(', ') }}
     quiet: true
-  loop:
-    - "{{ monitoring_prometheus_container }}"
-    - "{{ monitoring_grafana_container }}"
+  loop: "{{ monitoring_server_containers }}"
 
 # A container that exhausted its start budget stays `failed` and systemd
 # refuses to start it again until StartLimitIntervalSec has run, so the run
 # that fixes the cause would fail on the previous run's verdict.
 - name: Look for the units a previous run left failed
   ansible.builtin.command: "systemctl is-failed {{ item }}.service"
-  loop:
-    - "{{ monitoring_prometheus_container }}"
-    - "{{ monitoring_grafana_container }}"
+  loop: "{{ monitoring_server_containers }}"
   register: monitoring_server_failed
   changed_when: false
   failed_when: false
@@ -42,14 +38,12 @@
 # Started, not enabled: systemctl refuses to enable a unit the quadlet
 # generator produced, and the WantedBy= inside each .container file is what
 # brings them back after a reboot.
-- name: Start Prometheus and Grafana
+- name: Start the monitoring services
   ansible.builtin.systemd:
     name: "{{ item }}.service"
     state: started
     daemon_reload: true
-  loop:
-    - "{{ monitoring_prometheus_container }}"
-    - "{{ monitoring_grafana_container }}"
+  loop: "{{ monitoring_server_containers }}"
 
 - name: Apply the pending restarts now
   ansible.builtin.meta: flush_handlers

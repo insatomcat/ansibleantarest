@@ -23,6 +23,19 @@ global:
   external_labels:
     deployment: {{ inventory_hostname }}
 
+{% if monitoring_alerting_enabled | bool %}
+# The rules in /etc/prometheus/rules (roles/monitoring_server/templates/
+# antares.rules.yml.j2) and the Alertmanager they are sent to, on the
+# loopback like everything else here.
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["127.0.0.1:{{ monitoring_alertmanager_port }}"]
+
+{% endif %}
 scrape_configs:
 
 {% macro host_role(host) %}
@@ -71,6 +84,29 @@ scrape_configs:
 {% endif %}
 {% endif %}
 
+{% if monitoring_alerting_enabled | bool %}
+  # The probes of the blackbox exporter, one job per service so that `up`
+  # tells the exporter answered and probe_success tells the service did. The
+  # target is handed to the exporter as a parameter; the scrape itself goes
+  # to the exporter on the loopback.
+{% for probe in monitoring_probes %}
+  - job_name: probe-{{ probe.name }}
+    metrics_path: /probe
+    params:
+      module: [{{ probe.module }}]
+    static_configs:
+      - targets: ["{{ probe.target }}"]
+        labels:
+          instance: "{{ inventory_hostname }}"
+          service: "{{ probe.name }}"
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - target_label: __address__
+        replacement: "127.0.0.1:{{ monitoring_blackbox_port }}"
+{% endfor %}
+
+{% endif %}
   # Prometheus itself, on the loopback. It is the one target whose absence
   # nothing else can report.
   - job_name: prometheus

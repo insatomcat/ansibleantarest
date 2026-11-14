@@ -13,3 +13,15 @@
     name: "{{ monitoring_grafana_container }}.service"
     state: restarted
     daemon_reload: true
+
+- name: Restart Alertmanager
+  ansible.builtin.systemd:
+    name: "{{ monitoring_alertmanager_container }}.service"
+    state: restarted
+    daemon_reload: true
+
+- name: Restart the blackbox exporter
+  ansible.builtin.systemd:
+    name: "{{ monitoring_blackbox_container }}.service"
+    state: restarted
+    daemon_reload: true

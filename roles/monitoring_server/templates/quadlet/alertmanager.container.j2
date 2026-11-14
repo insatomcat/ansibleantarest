@@ -1,0 +1,31 @@
+{{ ansible_managed | comment }}
+#
+# Alertmanager, in the host network namespace on the loopback, next to the
+# Prometheus that sends it the alerts. Its data directory holds the silences
+# and the notification log, so that a restart neither forgets a silence nor
+# sends the same mail twice.
+
+[Unit]
+Description=Alertmanager
+StartLimitIntervalSec=300
+StartLimitBurst=5
+{% if antarest_data_device %}
+RequiresMountsFor={{ antarest_data_dir }}
+{% endif %}
+
+[Container]
+ContainerName={{ monitoring_alertmanager_container }}
+Image={{ monitoring_alertmanager_image }}
+Network=host
+{% for volume in monitoring_alertmanager_volumes %}
+Volume={{ volume }}
+{% endfor %}
+
+Exec={{ monitoring_alertmanager_flags | trim | replace('\n', ' ') }}
+
+[Service]
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
