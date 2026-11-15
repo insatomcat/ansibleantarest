@@ -53,3 +53,6 @@
 
 - name: Let the connector read the admin API
   ansible.builtin.include_tasks: client_scope.yml
+
+- name: Apply the settings of the realm
+  ansible.builtin.include_tasks: realm_settings.yml

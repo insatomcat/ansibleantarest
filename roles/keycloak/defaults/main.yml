@@ -68,3 +68,40 @@ keycloak_admin_permanent: true
 # between two tasks of the same run, and the run deletes it whenever it finds
 # one.
 keycloak_admin_rotate_user: "{{ keycloak_admin_user }}-rotate"
+
+# ---------------------------------------------------------------------------
+#  Realm settings, applied over the admin API on every run (realm_settings.yml)
+#
+#  The realm file is imported at the first start only, so whatever has to
+#  hold on a realm that already exists is put there by the role instead.
+# ---------------------------------------------------------------------------
+
+# Keycloak's own syntax. Length over complexity rules, and no periodic
+# expiry: both follow current guidance (NIST SP 800-63B), and an expiry
+# mostly produces passwords written down.
+keycloak_password_policy: "length(12) and maxLength(128) and notUsername and notEmail and passwordHistory(3)"
+
+# Temporary lockout of an account after repeated failed logins, whatever the
+# address they come from: the per-address banning in front of the login form
+# (roles/hardening) does not see a guess spread over many addresses. After
+# keycloak_brute_force_failures failures the account waits
+# keycloak_brute_force_wait seconds, doubled at each new failure up to
+# keycloak_brute_force_max_wait; the count is forgotten after
+# keycloak_brute_force_reset seconds without a failure. Never permanent: a
+# permanent lockout lets anyone who knows a username shut its owner out.
+keycloak_brute_force_enabled: true
+keycloak_brute_force_failures: 10
+keycloak_brute_force_wait: 60
+keycloak_brute_force_max_wait: 900
+keycloak_brute_force_reset: 43200
+
+# The event log: logins, failed logins, password changes, and every change
+# made in the administration console, kept keycloak_events_retention days.
+# Keycloak stores none of it by default.
+keycloak_events_enabled: true
+keycloak_events_retention: 365
+
+# The groups the realm must have. The default is the left side of the
+# group mapping Antares-Web reads, so that every group the mapping names
+# exists; groups created from the console stay, this only adds.
+keycloak_realm_groups: "{{ (antarest_external_auth_group_mapping | default({})).keys() | list }}"

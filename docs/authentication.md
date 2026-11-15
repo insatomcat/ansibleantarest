@@ -83,6 +83,23 @@ Turning `keycloak_enabled` back off stops and removes the container. It leaves t
 The CI deploys it on every pull request, in the three shapes and on every distribution it deploys at all: `inventory/ci-*.yml` all carry `keycloak_enabled: true` and `antares_auth_provider: keycloak`, the builder included, since that is what puts the Keycloak image and the connector image in the artefacts. What that covers is the deployment - the database created before the first start, the realm import, the temporary administrator replaced, the two containers up, the route through the front door and the discovery document answering under it - rather than a login, which needs a user somebody created.
 
 
+## The account pages and the realm settings
+
+**The account pages.** Antares-Web has no page where a user sets or changes a password, and its login form cannot answer a required action: an account created with a temporary password, or with `UPDATE_PASSWORD` among its required actions, is refused there (`Bad username or password`) until the password is set. Keycloak's account pages are where that happens, at `https://<domain>/auth/realms/<realm>/account/`. With `keycloak_account_public` (on by default) the front door serves them, with the login pages around them and Keycloak's static files (`/auth/resources/`), behind the password tier of the application, so that the people who use it reach them with the credential they already have. Everything else under `/auth` stays in the administration tier: the console, the `master` realm, the other realms.
+
+So a new account goes like this: an administrator creates it in the console with a temporary password, the user opens the account page, logs in with it, is made to choose a password that meets the policy, and logs in to Antares-Web with that one. Changing it later is the same page.
+
+**The realm settings.** The realm file is imported at the first start only, so what has to hold on a realm that already exists is applied by `roles/keycloak/tasks/realm_settings.yml` over the admin API on every run, written only when it differs:
+
+| Setting | Variable | Default |
+|---|---|---|
+| Password policy, in Keycloak's syntax | `keycloak_password_policy` | `length(12) and maxLength(128) and notUsername and notEmail and passwordHistory(3)`. Length over complexity and no periodic expiry, after NIST SP 800-63B |
+| Temporary lockout after repeated failed logins | `keycloak_brute_force_enabled`, `keycloak_brute_force_failures`, `_wait`, `_max_wait`, `_reset` | On; after 10 failures, 60 s doubling up to 15 min, forgotten after 12 h. Never permanent, which would let anyone who knows a username lock its owner out |
+| Event log: logins, failures, password changes, console changes | `keycloak_events_enabled`, `keycloak_events_retention` | On, 365 days |
+| Groups that must exist | `keycloak_realm_groups` | The Keycloak side of `antarest_external_auth_group_mapping`. Only adds; groups created from the console stay |
+
+The lockout is per account and counts failures from every address, which the per-address banning in front of the login form (see [Hardening](hardening.md)) cannot see. Keycloak sees the connector's address rather than the user's, since every login goes through it. To lift a lockout before it expires: Users > the user > the banner, or `kcadm.sh delete attack-detection/brute-force/users/<id> -r <realm>`.
+
 ## Keeping roles aligned with Keycloak
 
 The login hook only ever adds. At each login it gives every group it has not seen yet for that user the one role `antarest_external_auth_default_group_role`, and that is all it does: a user meant to be writer arrives as reader, a group the user left in Keycloak stays in Antares-Web, and an account disabled in Keycloak cannot log in again but keeps its open session (the refresh token lives 30 days) and its API tokens.

@@ -1,0 +1,105 @@
+---
+# The settings of the realm that have to hold on a realm that already
+# exists, which the realm file cannot do: it is imported at the first start
+# only. Password policy, lockout after repeated failures, the event log, and
+# the groups the mapping of Antares-Web names. Read first, written only when
+# something differs, so a run on a realm in order costs a few GETs.
+#
+# Same login as client_scope.yml, and the same answer to a master realm
+# whose password was changed from the console: said so, and left alone.
+
+- name: Log in to read the realm settings
+  ansible.builtin.uri:
+    url: "{{ keycloak_local_url }}/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      client_id: admin-cli
+      grant_type: password
+      username: "{{ keycloak_admin_user }}"
+      password: "{{ keycloak_admin_password }}"
+    status_code: [200, 400, 401]
+  register: keycloak_settings_login
+  changed_when: false
+  no_log: true
+
+- name: Say the realm settings were not checked
+  ansible.builtin.debug:
+    msg: >-
+      keycloak_admin_password no longer opens the master realm, so the password
+      policy, the lockout, the event log and the groups of the
+      {{ keycloak_realm }} realm were not checked.
+  when: keycloak_settings_login.status != 200
+
+- name: Apply the realm settings
+  when: keycloak_settings_login.status == 200
+  vars:
+    _keycloak_auth: "Bearer {{ keycloak_settings_login.json.access_token }}"
+    _keycloak_realm_url: "{{ keycloak_local_url }}/admin/realms/{{ keycloak_realm }}"
+    _keycloak_wanted:
+      passwordPolicy: "{{ keycloak_password_policy }}"
+      bruteForceProtected: "{{ keycloak_brute_force_enabled | bool }}"
+      permanentLockout: false
+      failureFactor: "{{ keycloak_brute_force_failures | int }}"
+      waitIncrementSeconds: "{{ keycloak_brute_force_wait | int }}"
+      maxFailureWaitSeconds: "{{ keycloak_brute_force_max_wait | int }}"
+      maxDeltaTimeSeconds: "{{ keycloak_brute_force_reset | int }}"
+      eventsEnabled: "{{ keycloak_events_enabled | bool }}"
+      eventsExpiration: "{{ keycloak_events_retention | int * 86400 }}"
+      adminEventsEnabled: "{{ keycloak_events_enabled | bool }}"
+      adminEventsDetailsEnabled: "{{ keycloak_events_enabled | bool }}"
+  block:
+    - name: Read the realm
+      ansible.builtin.uri:
+        url: "{{ _keycloak_realm_url }}"
+        headers:
+          Authorization: "{{ _keycloak_auth }}"
+      register: keycloak_settings_realm
+      changed_when: false
+
+    # Compared as strings, lowercased: what the API returns is JSON
+    # (true, 60), what the variables give can be YAML or text.
+    - name: Work out which realm settings differ
+      ansible.builtin.set_fact:
+        keycloak_settings_differ: >-
+          {% for key, value in _keycloak_wanted.items()
+             if (keycloak_settings_realm.json[key] | default('') | string | lower)
+                != (value | string | lower) %}{{ key }} {% endfor %}
+
+    # A partial representation: Keycloak updates the fields it is given and
+    # leaves the others as they are.
+    - name: Set the password policy, the lockout and the event log
+      ansible.builtin.uri:
+        url: "{{ _keycloak_realm_url }}"
+        method: PUT
+        headers:
+          Authorization: "{{ _keycloak_auth }}"
+        body_format: json
+        body: "{{ _keycloak_wanted }}"
+        status_code: [204]
+      changed_when: true
+      # An empty result comes back as null, hence the default.
+      when: keycloak_settings_differ | default('', true) | trim | length > 0
+
+    - name: Read the groups of the realm
+      ansible.builtin.uri:
+        url: "{{ _keycloak_realm_url }}/groups?briefRepresentation=true&max=1000"
+        headers:
+          Authorization: "{{ _keycloak_auth }}"
+      register: keycloak_settings_groups
+      changed_when: false
+
+    - name: Create the groups the mapping names
+      ansible.builtin.uri:
+        url: "{{ _keycloak_realm_url }}/groups"
+        method: POST
+        headers:
+          Authorization: "{{ _keycloak_auth }}"
+        body_format: json
+        body:
+          name: "{{ item }}"
+        status_code: [201]
+      changed_when: true
+      loop: >-
+        {{ keycloak_realm_groups
+           | difference(keycloak_settings_groups.json | map(attribute='name') | list) }}

@@ -39,6 +39,16 @@ keycloak_relative_path: /auth
 keycloak_realm: antares
 keycloak_client_id: antares-auth
 
+# The account pages of the realm (/auth/realms/<realm>/account/ and the
+# login pages around them) for the people who use the application, behind
+# its password tier rather than the administration one that guards the rest
+# of /auth. They are where a user sets the password of a new account at the
+# first login and changes it afterwards: Antares-Web has no page for that,
+# and its login form cannot answer a required action. The administration
+# console, the master realm and everything else under /auth stay in the
+# administration tier.
+keycloak_account_public: true
+
 # Secrets - CHANGE THESE.
 #
 # keycloak_admin_password seeds the first administrator of the master realm and
