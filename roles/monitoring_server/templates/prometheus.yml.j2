@@ -111,6 +111,9 @@ scrape_configs:
   # Prometheus itself, on the loopback. It is the one target whose absence
   # nothing else can report.
   - job_name: prometheus
+    # Published behind the front door, Prometheus serves everything under
+    # its path, its own metrics included.
+    metrics_path: "{{ monitoring_prometheus_path if monitoring_prometheus_public | bool else '' }}/metrics"
     static_configs:
       - targets: ["127.0.0.1:{{ monitoring_prometheus_port }}"]
         labels:
