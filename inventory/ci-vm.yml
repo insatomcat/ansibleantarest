@@ -74,6 +74,7 @@ all:
       keycloak_admin_password: "ci-keycloak-not-a-secret"
       keycloak_db_password: "ci-keycloak-db-not-a-secret"
       keycloak_client_secret: "ci-keycloak-client-not-a-secret"
+      antares_auth_sync_db_password: "ci-auth-sync-db-not-a-secret"
 
       # ---------------------------------------------------------------
       #  Keycloak, and the connector that puts it to use. Deployed on every

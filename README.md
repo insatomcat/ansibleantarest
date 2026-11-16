@@ -92,6 +92,9 @@ Set secrets in your inventory (or in an ansible-vault encrypted file):
 | `antarest_db_password` | `somepass` | PostgreSQL password |
 | `slurmdbd_db_password` | `changeme-slurm-acct` | MariaDB password for Slurm accounting |
 | `monitoring_grafana_admin_password` | `admin` | Grafana administrator, when `monitoring_enabled` is on |
+| `keycloak_admin_password` | `admin` | Keycloak's master realm administrator, when `keycloak_enabled` is on |
+| `keycloak_db_password`, `keycloak_client_secret` | `changeme-keycloak-db`, `changeme-keycloak-client` | Keycloak's database account and the connector's client, same condition |
+| `antares_auth_sync_db_password` | `changeme-auth-sync-db` | The read-only database account of the Keycloak alignment job, when `antares_auth_provider` is `keycloak` |
 
 The PostgreSQL password is read only at the first initialization of the data volume; changing it later requires clearing `/var/antares-web/data/db`.
 
