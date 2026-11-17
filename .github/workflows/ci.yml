@@ -295,7 +295,7 @@ jobs:
             {
               "name":  "rocky9",
               "label": "Rocky Linux 9",
-              "image": "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2",
+              "image": "https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base-9.9-20261112.0.x86_64.qcow2",
               "slurm": "always",
               "web_mb": 2560,
               "node_mb": 768
@@ -303,7 +303,7 @@ jobs:
             {
               "name":  "rocky10",
               "label": "Rocky Linux 10",
-              "image": "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2",
+              "image": "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.3-20261112.0.x86_64.qcow2",
               "slurm": "always",
               "web_mb": 2560,
               "node_mb": 768
