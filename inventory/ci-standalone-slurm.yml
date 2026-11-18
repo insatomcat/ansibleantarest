@@ -103,6 +103,10 @@ all:
       # ---------------------------------------------------------------
       keycloak_enabled: true
       antares_auth_provider: keycloak
+      # One group, so that the alignment job has a table to apply and is
+      # deployed like it would be anywhere: it refuses an empty mapping.
+      antarest_external_auth_group_mapping:
+        ci-readers: ci-readers
 
       # ---------------------------------------------------------------
       #  Monitoring, on the shape where one machine is the whole fleet:

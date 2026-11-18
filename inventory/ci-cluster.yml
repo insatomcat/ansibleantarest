@@ -99,6 +99,10 @@ all:
       # ---------------------------------------------------------------
       keycloak_enabled: true
       antares_auth_provider: keycloak
+      # One group, so that the alignment job has a table to apply and is
+      # deployed like it would be anywhere: it refuses an empty mapping.
+      antarest_external_auth_group_mapping:
+        ci-readers: ci-readers
 
       keycloak_admin_password: "ci-keycloak-not-a-secret"
       keycloak_db_password: "ci-keycloak-db-not-a-secret"
