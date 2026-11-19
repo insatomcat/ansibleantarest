@@ -35,6 +35,18 @@
        | map(attribute='item') | list }}
   changed_when: true
 
+# The pending restarts first, the start after. The other way round, a first
+# deployment starts Grafana and restarts it a second later for the
+# configuration it was notified about, which interrupts its first start in
+# the middle of seeding its database. Grafana 13.1.10 leaves a lock row
+# behind when that happens and refuses every later start while it lasts
+# ("there is already a lock for this actionName: oss-ac-basic-role-seeder",
+# grafana/grafana#135481), long enough to exhaust the start limit of the
+# unit. A restart asked of a unit that is not running starts it, so the
+# task below then has nothing left to do on a first run.
+- name: Apply the pending restarts now
+  ansible.builtin.meta: flush_handlers
+
 # Started, not enabled: systemctl refuses to enable a unit the quadlet
 # generator produced, and the WantedBy= inside each .container file is what
 # brings them back after a reboot.
@@ -44,9 +56,6 @@
     state: started
     daemon_reload: true
   loop: "{{ monitoring_server_containers }}"
-
-- name: Apply the pending restarts now
-  ansible.builtin.meta: flush_handlers
 
 # /-/ready and not the port: Prometheus binds before it has replayed its
 # write-ahead log, which on a database with a month of samples in it is not
