@@ -395,17 +395,25 @@
     # is under test is the route, and a realm that answers proves at the same
     # time that Keycloak is up, that its database was created and that the
     # realm the connector authenticates against was imported.
+    #
+    # With keycloak_account_public the realm's own paths are in the tier of
+    # the application rather than the administration one (they hold the
+    # account pages users set their password on), so the probe goes with the
+    # application's account there.
     - name: Ask Keycloak for the realm the connector uses
+      vars:
+        _verify_realm_tier_web: "{{ keycloak_account_public | default(false) | bool }}"
       ansible.builtin.uri:
         url: >-
-          {{ verify_admin_probe_url | trim }}{{ keycloak_relative_path }}/realms/{{ keycloak_realm }}/.well-known/openid-configuration
-        headers: "{{ verify_admin_auth }}"
+          {{ (verify_web_probe_url if _verify_realm_tier_web else verify_admin_probe_url) | trim
+          }}{{ keycloak_relative_path }}/realms/{{ keycloak_realm }}/.well-known/openid-configuration
+        headers: "{{ verify_web_auth if _verify_realm_tier_web else verify_admin_auth }}"
         validate_certs: false
       register: verify_keycloak
       retries: 12
       delay: 5
       until: verify_keycloak.status | default(0) == 200
-      delegate_to: "{{ verify_admin_probe_from }}"
+      delegate_to: "{{ verify_web_probe_from if _verify_realm_tier_web else verify_admin_probe_from }}"
       become: false
       when: keycloak_enabled | default(false) | bool
 
