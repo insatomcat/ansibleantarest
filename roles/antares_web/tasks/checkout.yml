@@ -28,6 +28,56 @@
 # force: true so that a re-run can move the checkout to another tag even when
 # the build left artefacts behind. Nothing we generate lives in the checkout,
 # only build outputs (webapp/dist, node_modules), which git leaves alone.
+# ansible-core 2.22.0 broke the git module on a checkout that sits on a tag
+# with no branch, which is what a pinned version and a shallow clone make:
+# its new branch-name check reads refs/remotes/origin/HEAD, which a
+# single-ref clone does not have, and fails on None.startswith. The first
+# run clones and never gets there; every run after it does. So when the
+# checkout is already clean and on the pinned tag or commit, the module is
+# not called at all. A branch is never taken as current here: moving it to
+# its latest commit is what the module is for.
+- name: Read the commit the checkout is on and the one asked for
+  ansible.builtin.command:
+    argv:
+      - git
+      - -C
+      - "{{ antarest_dir }}"
+      - rev-parse
+      - HEAD
+      - >-
+        {{ antarest_version if antarest_version is match('^[0-9a-f]{40}$')
+           else 'refs/tags/' ~ antarest_version }}^{commit}
+  environment:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: safe.directory
+    GIT_CONFIG_VALUE_0: "{{ antarest_dir }}"
+  register: antarest_checkout_head
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read whether the checkout holds local changes
+  ansible.builtin.command:
+    argv: [git, -C, "{{ antarest_dir }}", status, --porcelain, --untracked-files=no]
+  environment:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: safe.directory
+    GIT_CONFIG_VALUE_0: "{{ antarest_dir }}"
+  register: antarest_checkout_dirty
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: antarest_checkout_head.rc == 0
+
+- name: Work out whether the checkout is already where it should be
+  ansible.builtin.set_fact:
+    antarest_checkout_current: >-
+      {{ antarest_checkout_head.rc == 0
+         and antarest_checkout_head.stdout_lines | length == 2
+         and antarest_checkout_head.stdout_lines[0] == antarest_checkout_head.stdout_lines[1]
+         and antarest_checkout_dirty.rc | default(1) == 0
+         and antarest_checkout_dirty.stdout | default('x') | length == 0 }}
+
 - name: Clone or update the AntaREST repository
   ansible.builtin.git:
     repo: "{{ antarest_repo }}"
@@ -46,7 +96,17 @@
     GIT_CONFIG_COUNT: "1"
     GIT_CONFIG_KEY_0: safe.directory
     GIT_CONFIG_VALUE_0: "{{ antarest_dir }}"
-  register: antarest_checkout
+  register: antarest_checkout_git
+  when: not antarest_checkout_current
+
+# The git module's own result, or, when it was skipped above, the same two
+# keys the rest of the role reads from it: nothing changed, and the commit
+# the checkout is on.
+- name: Record what the checkout is on
+  ansible.builtin.set_fact:
+    antarest_checkout: >-
+      {{ antarest_checkout_git if not antarest_checkout_current
+         else {'changed': false, 'after': antarest_checkout_head.stdout_lines[0]} }}
 
 # Cloned as root and chowned afterwards rather than cloned as the antares
 # account directly. `become_user` to an unprivileged user needs a sudoers runas
