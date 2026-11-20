@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Put this node back in service if Slurm took it out for missing resources
+After=slurmctld.service slurmd.service
+Wants=slurmctld.service slurmd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/antares-slurm-node-resume
+
+[Install]
+WantedBy=multi-user.target

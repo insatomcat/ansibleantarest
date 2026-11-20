@@ -1,0 +1,35 @@
+#!/bin/bash
+# {{ ansible_managed }}
+#
+# Rewrites the line of this node in slurm.conf from what the machine really
+# has, before slurmctld and slurmd start: slurmd -C for the CPU topology,
+# and the same {{ slurm_node_memory_ratio | default(95) }} % of MemTotal the
+# playbook uses for RealMemory. Run by antares-slurm-node-size.service.
+set -euo pipefail
+conf={{ (slurm_conf_dir ~ '/slurm.conf') | quote }}
+node={{ slurm_node_name | quote }}
+
+hw=$(slurmd -C | head -1)
+get() { sed -n "s/.* $1=\([0-9]*\).*/\1/p" <<<"$hw"; }
+cpus=$(get CPUs); sockets=$(get SocketsPerBoard); cores=$(get CoresPerSocket); threads=$(get ThreadsPerCore)
+mem=$(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo) / 1024 * {{ slurm_node_memory_ratio | default(95) }} / 100 ))
+[[ -n $cpus && -n $sockets && -n $cores && -n $threads && $mem -gt 0 ]] \
+  || { echo "slurmd -C gave nothing usable: $hw" >&2; exit 1; }
+
+old=$(grep -m1 "^NodeName=$node " "$conf") || { echo "no NodeName=$node line in $conf" >&2; exit 1; }
+new=$(sed -E \
+  -e "s/ CPUs=[0-9]+/ CPUs=$cpus/" \
+  -e "s/ SocketsPerBoard=[0-9]+/ SocketsPerBoard=$sockets/" \
+  -e "s/ CoresPerSocket=[0-9]+/ CoresPerSocket=$cores/" \
+  -e "s/ ThreadsPerCore=[0-9]+/ ThreadsPerCore=$threads/" \
+  -e "s/ RealMemory=[0-9]+/ RealMemory=$mem/" <<<"$old")
+
+if [[ $new == "$old" ]]; then
+  echo "slurm.conf already describes $node as it is: CPUs=$cpus RealMemory=$mem"
+  exit 0
+fi
+tmp=$(mktemp "$conf.XXXXXX")
+awk -v node="NodeName=$node " -v line="$new" 'index($0, node) == 1 { print line; next } { print }' "$conf" > "$tmp"
+chmod 0644 "$tmp"
+mv "$tmp" "$conf"
+echo "slurm.conf rewritten for $node: $old -> $new"

@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Describe this node to Slurm as it really is
+After=local-fs.target
+Before=slurmctld.service slurmd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/antares-slurm-node-size
+
+[Install]
+WantedBy=multi-user.target

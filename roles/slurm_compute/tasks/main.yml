@@ -44,6 +44,55 @@
   failed_when: false
   when: inventory_hostname not in (groups['slurm_frontend'] | default([]))
 
+- name: Install the boot-time description of the node
+  when: slurm_node_autosize | bool
+  block:
+    - name: Install the scripts that describe the node and put it back in service
+      ansible.builtin.template:
+        src: "{{ item }}.sh.j2"
+        dest: "/usr/local/sbin/{{ item }}"
+        owner: root
+        group: root
+        mode: "0755"
+      loop: [antares-slurm-node-size, antares-slurm-node-resume]
+
+    - name: Install their units
+      ansible.builtin.template:
+        src: "{{ item }}.service.j2"
+        dest: "/etc/systemd/system/{{ item }}.service"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: [antares-slurm-node-size, antares-slurm-node-resume]
+      register: slurm_autosize_units
+
+    - name: Enable them for the next boot
+      ansible.builtin.systemd:
+        name: "{{ item }}.service"
+        enabled: true
+        daemon_reload: "{{ slurm_autosize_units.changed }}"
+      loop: [antares-slurm-node-size, antares-slurm-node-resume]
+
+- name: Remove the boot-time description of the node
+  when: not slurm_node_autosize | bool
+  block:
+    - name: Disable its units
+      ansible.builtin.systemd:
+        name: "{{ item }}.service"
+        enabled: false
+      loop: [antares-slurm-node-size, antares-slurm-node-resume]
+      failed_when: false
+
+    - name: Remove its units and scripts
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/antares-slurm-node-size.service
+        - /etc/systemd/system/antares-slurm-node-resume.service
+        - /usr/local/sbin/antares-slurm-node-size
+        - /usr/local/sbin/antares-slurm-node-resume
+
 - name: Start and enable slurmd
   ansible.builtin.systemd:
     name: slurmd

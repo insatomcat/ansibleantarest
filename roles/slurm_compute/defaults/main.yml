@@ -13,3 +13,20 @@ _slurmd_packages_by_repo:
 # families, and comes from EPEL on EL.
 slurm_compute_packages:
   - 7zip
+
+# A machine that is its own and only Slurm node (the standalone shape)
+# describes itself to Slurm again at every boot, from what it really has:
+# resized by the provider, it would otherwise keep the CPUs and memory
+# slurm.conf was rendered with, use none of what it gained, and be taken out
+# of service by Slurm when it shrank. Off on a cluster, where slurm.conf has
+# to be the same on every node and only a playbook run may change it. See
+# docs/slurm.md.
+slurm_node_autosize: >-
+  {{ (groups['slurm_compute'] | default([]) | length == 1)
+     and inventory_hostname in (groups['slurm_frontend'] | default([])) }}
+
+# The share of MemTotal given to Slurm as RealMemory by that rewrite. The
+# example inventories render slurm_node_real_memory with the same 95 %: keep
+# the two equal, or the playbook and the boot will keep rewriting each other.
+slurm_node_memory_ratio: 95
+

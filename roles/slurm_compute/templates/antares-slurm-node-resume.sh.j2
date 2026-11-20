@@ -1,0 +1,21 @@
+#!/bin/bash
+# {{ ansible_managed }}
+#
+# Once slurmctld and slurmd are up, puts this node back in service if Slurm
+# took it out itself for lacking the resources slurm.conf gave it (a reason
+# starting with "Low ", as after a shrink seen before the rewrite). A node
+# drained by an operator, for any other reason, is left as it is. Run by
+# antares-slurm-node-resume.service.
+set -uo pipefail
+node={{ slurm_node_name | quote }}
+for _ in $(seq 1 24); do
+  line=$(scontrol show node "$node" 2>/dev/null) && [[ $line == *"State="* ]] && break
+  sleep 5
+done
+state=$(sed -n 's/.*State=\([^ ]*\).*/\1/p' <<<"$line" | head -1)
+reason=$(sed -n 's/.*Reason=\(.*\) \[.*/\1/p' <<<"$line" | head -1)
+if [[ $state == *DRAIN* || $state == *INVAL* ]] && [[ $reason == Low\ * ]]; then
+  scontrol update nodename="$node" state=resume && echo "$node resumed, it was $state: $reason"
+else
+  echo "$node is $state, nothing to do"
+fi

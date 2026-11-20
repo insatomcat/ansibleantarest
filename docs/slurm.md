@@ -104,6 +104,14 @@ What it costs, in the order the costs actually bite:
 
 The CI deploys this shape on every distribution that can carry a Slurm node, on every pull request: see the `standalone-slurm` job of `.github/workflows/ci.yml` and `inventory/ci-standalone-slurm.yml`. `verify.yml` runs on it whole, the firewall included, which is where the one thing that is genuinely new gets checked - a single ruleset that is the union of the three a cluster spreads over three machines.
 
+## A machine resized by its provider
+
+Slurm does not measure the node: it reads its CPUs and memory from `slurm.conf`, which the playbook renders from the facts of the run. A machine resized afterwards keeps the old description. Grown, its jobs get none of what was added; shrunk, Slurm finds less than it was told and takes the node out of service (`Low CPUs, Low RealMemory`), and no job starts until a playbook run renders `slurm.conf` again.
+
+On the single-machine shape, where the web machine is also the only compute node, `slurm_node_autosize` (on there, off on a cluster) installs two oneshot units. `antares-slurm-node-size`, before `slurmctld` and `slurmd` at every boot, rewrites the line of the node from `slurmd -C` and `slurm_node_memory_ratio` (95) % of `MemTotal`, the rule the example inventories render `slurm_node_real_memory` with, so that a playbook run afterwards finds nothing to change. `antares-slurm-node-resume`, once both are up, resumes the node if Slurm drained it itself for missing resources (a reason starting with `Low `), and leaves alone a drain an operator made for any other reason. A resize through the provider's console or API, which restarts the machine, then needs nothing else: measured on a mock-up, Slurm was at the new size and idle about two minutes after the resize was asked for, both ways.
+
+On a cluster, `slurm.conf` has to be the same on every node, so a node rewriting its own line would split it: resize, then run the playbook.
+
 ## The launch script and what a failed run looks like
 
 `launchAntares.sh` is rendered on the front-end from `roles/slurm_launch_script/templates/launchAntares.sh.j2` and is the script Antares-Web names in `slurm_script_path`. It is derived from `launchAntares_v1.1.2.sh` of antares-launcher, which is a template with site-specific holes in it (`/path/to/...`, `module load xpress|ampl|R`), not a runnable program.
