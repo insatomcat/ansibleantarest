@@ -48,6 +48,17 @@
       eventsExpiration: "{{ keycloak_events_retention | int * 86400 }}"
       adminEventsEnabled: "{{ keycloak_events_enabled | bool }}"
       adminEventsDetailsEnabled: "{{ keycloak_events_enabled | bool }}"
+      resetPasswordAllowed: "{{ keycloak_reset_password_allowed | bool }}"
+    # Keycloak keeps every value of smtpServer as a string, and answers the
+    # password masked: it is left out of the comparison and sent with the
+    # rest whenever anything else differs. Changing the password alone is
+    # therefore not seen; see docs/authentication.md.
+    _keycloak_smtp_wanted: >-
+      {{ {} if keycloak_smtp_host | length == 0 else
+         {'host': keycloak_smtp_host, 'port': keycloak_smtp_port | string,
+          'from': keycloak_smtp_from, 'fromDisplayName': keycloak_smtp_from_display_name,
+          'auth': (keycloak_smtp_user | length > 0) | string | lower,
+          'user': keycloak_smtp_user, 'starttls': 'true', 'ssl': 'false'} }}
   block:
     - name: Read the realm
       ansible.builtin.uri:
@@ -80,6 +91,29 @@
       changed_when: true
       # An empty result comes back as null, hence the default.
       when: keycloak_settings_differ | default('', true) | trim | length > 0
+
+    - name: Work out whether the mail settings of the realm differ
+      ansible.builtin.set_fact:
+        keycloak_smtp_differ: >-
+          {{ (keycloak_settings_realm.json.smtpServer | default({}) | dict2items
+              | rejectattr('key', 'equalto', 'password') | items2dict)
+             != _keycloak_smtp_wanted }}
+
+    - name: Set the mail settings of the realm
+      ansible.builtin.uri:
+        url: "{{ _keycloak_realm_url }}"
+        method: PUT
+        headers:
+          Authorization: "{{ _keycloak_auth }}"
+        body_format: json
+        body:
+          smtpServer: >-
+            {{ _keycloak_smtp_wanted | combine({'password': keycloak_smtp_password})
+               if _keycloak_smtp_wanted | length > 0 else {} }}
+        status_code: [204]
+      changed_when: true
+      when: keycloak_smtp_differ | bool
+      no_log: true
 
     - name: Read the groups of the realm
       ansible.builtin.uri:

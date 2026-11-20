@@ -105,3 +105,19 @@ keycloak_events_retention: 365
 # group mapping Antares-Web reads, so that every group the mapping names
 # exists; groups created from the console stay, this only adds.
 keycloak_realm_groups: "{{ (antarest_external_auth_group_mapping | default({})).keys() | list }}"
+
+# Mail sent by the realm: the "forgot password" link of the login page, and
+# any action an administrator sends from the console (set a password, verify
+# an e-mail). Empty host, no mail at all and no reset link on the login page.
+# The relay is the same kind the alerts use: authenticated, STARTTLS on the
+# submission port. Each user needs an e-mail address in Keycloak to get one.
+keycloak_smtp_host: ""
+keycloak_smtp_port: 587
+keycloak_smtp_from: ""
+keycloak_smtp_from_display_name: "Antares"
+keycloak_smtp_user: ""
+keycloak_smtp_password: ""
+
+# The "Forgot password?" link of the login page. Follows the relay: offering
+# it without a way to send the mail would only produce errors.
+keycloak_reset_password_allowed: "{{ keycloak_smtp_host | length > 0 }}"
