@@ -60,6 +60,22 @@
         enabled: true
         daemon_reload: "{{ db_dump_units.changed }}"
 
+    # The metrics of the last dump live on the system disk: a machine built
+    # or rebuilt from a backup has none until the timer fires, and the alert
+    # on a missing dump cannot tell "not yet" from "broken" for up to a day.
+    # So a deployment that finds no metrics dumps once, there and then, which
+    # also proves the dump works on that machine.
+    - name: Look for the metrics of a previous dump
+      ansible.builtin.stat:
+        path: "{{ db_dump_metrics_dir }}/antares_db_dump.prom"
+      register: db_dump_metrics
+
+    - name: Dump now when no dump has run on this machine yet
+      ansible.builtin.systemd:
+        name: antares-db-dump.service
+        state: started
+      when: not db_dump_metrics.stat.exists
+
 - name: Remove the dump
   when: not (db_dump_enabled | bool and (db_dump_postgres | bool or db_dump_mariadb | bool))
   block:

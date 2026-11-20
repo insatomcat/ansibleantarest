@@ -23,7 +23,7 @@ groups:
       # Any other scrape target: the Slurm exporter, Prometheus itself, and
       # the blackbox exporter, whose silence would hide every probe below.
       - alert: ExporterDown
-        expr: up{job!="node"} == 0
+        expr: up{job!~"node|slurm"} == 0
         for: {{ monitoring_alert_for }}
         labels:
           severity: warning
@@ -88,6 +88,19 @@ groups:
 
           description: "A simulation larger than the machine ends killed by the kernel. Check the running jobs, or resize."
 {% if slurm_enabled | bool and monitoring_slurm_enabled | bool %}
+
+      # The Slurm exporter answers only while it can read the controller:
+      # its silence is first of all a controller that is down, which stops
+      # every simulation from starting.
+      - alert: SlurmControllerDown
+        expr: up{job="slurm"} == 0
+        for: {{ monitoring_alert_for }}
+        labels:
+          severity: critical
+        annotations:
+          summary: {% raw %}"The Slurm controller on {{ $labels.instance }} does not answer"{% endraw %}
+
+          description: "Simulations cannot start. Look at systemctl status slurmctld and its journal on the front-end, then at the slurm-exporter container."
 
       - alert: SlurmNodeUnavailable
         expr: sum by (cluster, instance) (slurm_nodes_down + slurm_nodes_drain + slurm_nodes_fail) > 0

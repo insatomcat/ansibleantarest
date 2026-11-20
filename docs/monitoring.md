@@ -168,7 +168,8 @@ The rules, in `roles/monitoring_server/templates/antares.rules.yml.j2`:
 | Alert | Severity | Raised when |
 |---|---|---|
 | `MachineDown` | critical | A node exporter has not answered for `monitoring_alert_for` (5m). Mutes every other alert of that machine |
-| `ExporterDown` | warning | Any other scrape target is down: the Slurm exporter, a probe job, Prometheus |
+| `ExporterDown` | warning | Any other scrape target is down: a probe job, Prometheus |
+| `SlurmControllerDown` | critical | The Slurm exporter has not answered for `monitoring_alert_for`: it answers only while it can read the controller, so this is first of all `slurmctld` down, and no simulation can start |
 | `ServiceDown` | critical | A probe has failed for `monitoring_alert_for` |
 | `CertificateExpiring` | warning | The served certificate has less than `monitoring_alert_cert_min_days` (14) left: the renewal, 30 days ahead, failed |
 | `DiskSpaceLow`, `DiskSpaceCritical` | warning, critical | A filesystem has less than `monitoring_alert_disk_warning` (15 %), then `monitoring_alert_disk_critical` (5 %), free |
