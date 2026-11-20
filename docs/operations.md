@@ -106,6 +106,12 @@ systemctl stop slurmdbd
 zcat $D/mariadb-slurm_acct_db.sql.gz | podman exec -i slurmdb-mariadb \
     sh -c 'exec mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
 systemctl start slurmdbd
+# On a rebuilt machine, slurmctld registered a cluster of its own before the
+# import and wrote its id to its state directory: it would refuse its next
+# start with "CLUSTER ID MISMATCH". Drop that id so it takes the one of the
+# restored accounting.
+rm -f /var/spool/slurm/ctld/clustername
+systemctl restart slurmctld
 ```
 
 To check a dump without touching anything, restore it into a scratch database (`CREATE DATABASE restore_test`, then `pg_restore -d restore_test --no-owner`) and drop it afterwards.
