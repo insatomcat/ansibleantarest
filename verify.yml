@@ -82,6 +82,36 @@
       {{ 'https' if antarest_tls_enabled | default(false) | bool else 'http' }}://{{
          hostvars[inventory_hostname].ansible_host | default(inventory_hostname) }}:{{
          antarest_https_port if antarest_tls_enabled | default(false) | bool else antarest_http_port }}
+    # The paths of the exposure checks, with the tier of the route each one
+    # is under, and the prefixes a bearer token is let through on. They
+    # follow the routes antares_edge renders (roles/antares_edge/vars), which
+    # a playbook that does not run the role cannot read.
+    verify_exposure_paths: >-
+      {{ [{'path': '/', 'tier': 'app'},
+          {'path': '/api/health', 'tier': 'app'},
+          {'path': '/verify-yml-exists-nowhere', 'tier': 'app'}]
+         + ([{'path': keycloak_relative_path ~ '/', 'tier': 'admin'},
+             {'path': keycloak_relative_path ~ '/admin/', 'tier': 'admin'}]
+            + ([{'path': keycloak_relative_path ~ '/realms/' ~ keycloak_realm ~ '/account/', 'tier': 'app'}]
+               if keycloak_account_public | default(false) | bool else [])
+            if keycloak_enabled | default(false) | bool else [])
+         + ([{'path': monitoring_grafana_path ~ '/', 'tier': 'admin'}]
+            + ([{'path': monitoring_prometheus_path ~ '/', 'tier': 'admin'}]
+               if monitoring_prometheus_public | default(false) | bool else [])
+            + ([{'path': monitoring_alertmanager_path ~ '/', 'tier': 'admin'}]
+               if (monitoring_alerting_enabled | default(false) | bool
+                   and monitoring_alertmanager_public | default(false) | bool) else [])
+            if monitoring_enabled | default(false) | bool else []) }}
+    verify_exposure_bearer_prefixes: >-
+      {{ ['/api/']
+         + ([keycloak_relative_path ~ '/admin/']
+            + ([keycloak_relative_path ~ '/realms/' ~ keycloak_realm ~ '/account/']
+               if keycloak_account_public | default(false) | bool else [])
+            if keycloak_enabled | default(false) | bool else []) }}
+    # What a stranger must not read on the door's own answers: the
+    # components behind it. Add the name of the application here when the
+    # realm names have been made neutral.
+    verify_exposure_names: [AntaREST, Keycloak, Grafana, Prometheus, Alertmanager]
     # The same front door asked from the machine itself, which is in
     # antares_edge_basic_auth_trusted and so is never asked for a password.
     verify_edge_local_url: >-
@@ -498,6 +528,119 @@
       when:
         - keycloak_enabled | default(false) | bool
         - verify_admin_gated | bool
+
+    # ---------------------------------------------------------------
+    # What a stranger sees: the answers of the door itself, asked from the
+    # controller with no credential, on one path of every route and on one
+    # that exists nowhere. Each has to be the password challenge of its
+    # tier, and none may name a version or a component behind the door:
+    # verify_exposure_names lists the names looked for, the realm names are
+    # the operator's choice and are not. The word "nginx" in the Server
+    # header is the one thing the stock image cannot drop; a version next to
+    # it can.
+    # ---------------------------------------------------------------
+    - name: Ask the front door for every route with no credential
+      vars:
+        _tier_gated: "{{ verify_web_gated if item.tier == 'app' else verify_admin_gated }}"
+      ansible.builtin.uri:
+        url: "{{ verify_web_url | trim }}{{ item.path }}"
+        status_code: [401]
+        return_content: true
+        follow_redirects: none
+        validate_certs: false
+      loop: "{{ verify_exposure_paths }}"
+      loop_control:
+        label: "{{ item.path }}"
+      register: verify_exposure_anonymous
+      delegate_to: localhost
+      become: false
+      when: _tier_gated | bool
+
+    - name: Check those answers name neither a version nor a component
+      ansible.builtin.assert:
+        that:
+          - item.server | default('') is not search('[0-9]')
+          - item.content | default('') is not search('nginx/[0-9]')
+          - >-
+            (item.content | default('') ~ ' ' ~ item.www_authenticate | default('') ~ ' '
+             ~ item.server | default(''))
+            is not search(verify_exposure_names | map('regex_escape') | join('|'), ignorecase=true)
+        fail_msg: >-
+          {{ item.item.path }} tells a stranger more than it should. Server:
+          {{ item.server | default('') }}; challenge: {{ item.www_authenticate | default('') }};
+          body: {{ item.content | default('') | truncate(200) }}
+        quiet: true
+      loop: "{{ verify_exposure_anonymous.results | rejectattr('skipped', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+
+    # The two lists are two lists: the account of one tier is refused by
+    # every route of the other. Only with the two probe accounts at hand.
+    - name: Ask the routes of each tier with the account of the other
+      ansible.builtin.uri:
+        url: "{{ verify_web_url | trim }}{{ item.path }}"
+        headers: "{{ verify_web_auth if item.tier == 'admin' else verify_admin_auth }}"
+        status_code: [401]
+        follow_redirects: none
+        validate_certs: false
+      loop: "{{ verify_exposure_paths }}"
+      loop_control:
+        label: "{{ item.path }} with the {{ 'application' if item.tier == 'admin' else 'administration' }} account"
+      delegate_to: localhost
+      become: false
+      when:
+        - verify_web_auth | length > 0
+        - verify_admin_auth | length > 0
+
+    # The only way past the door without its password is a bearer token, on
+    # the prefixes whose clients carry one (see antares_edge_routes). This
+    # sends a token nothing can validate to every path above: those under an
+    # exempted prefix reach the service behind, which refuses it on its own
+    # terms; every other path still gets the door's challenge. The list of
+    # what passed is printed, so the run states which paths are exempted.
+    - name: Ask every route with a bearer token nothing can validate
+      vars:
+        _tier_gated: "{{ verify_web_gated if item.tier == 'app' else verify_admin_gated }}"
+      ansible.builtin.uri:
+        url: "{{ verify_web_url | trim }}{{ item.path }}"
+        headers:
+          Authorization: "Bearer verify-yml-not-a-token"
+        status_code: "{{ range(100, 600) | list }}"
+        follow_redirects: none
+        validate_certs: false
+      loop: "{{ verify_exposure_paths }}"
+      loop_control:
+        label: "{{ item.path }}"
+      register: verify_exposure_bearer
+      delegate_to: localhost
+      become: false
+      when: _tier_gated | bool
+
+    - name: Check a bearer token passes the door under the exempted prefixes only
+      vars:
+        _passed: >-
+          {{ not (item.status == 401 and item.www_authenticate | default('') is search('^Basic')) }}
+        _exempt: >-
+          {{ item.item.path is search('^(' ~ (verify_exposure_bearer_prefixes | map('regex_escape') | join('|')) ~ ')') }}
+      ansible.builtin.assert:
+        that: _passed | bool == _exempt | bool
+        fail_msg: >-
+          {{ item.item.path }} {{ 'let a bearer token through' if _passed | bool else 'asked for the password' }},
+          and it {{ 'is' if _exempt | bool else 'is not' }} under an exempted prefix
+          ({{ verify_exposure_bearer_prefixes | join(', ') }}).
+        quiet: true
+      loop: "{{ verify_exposure_bearer.results | rejectattr('skipped', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+
+    - name: Say which paths a bearer token takes past the door
+      ansible.builtin.debug:
+        msg: >-
+          Past the door with a bearer token and no password, to the service
+          behind: {{ verify_exposure_bearer.results | rejectattr('skipped', 'defined')
+                     | rejectattr('status', 'equalto', 401) | map(attribute='item.path') | list | join(', ')
+                     | default('none', true) }}.
+      when: verify_exposure_bearer.results is defined
 
     # The connector publishes no port - only the containers of the stack have
     # any business calling it - so this is asked from inside it. What it proves

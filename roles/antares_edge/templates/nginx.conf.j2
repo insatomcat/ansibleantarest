@@ -1,4 +1,9 @@
 {{ ansible_managed | comment }}
+
+# What a stranger learns from the door itself: nothing about the version of
+# nginx, in the Server header or on the pages it writes. The word `nginx`
+# stays in that header, which the stock image cannot drop.
+server_tokens off;
 #
 # Mounted as /etc/nginx/conf.d/default.conf in the {{ antares_edge_container }}
 # container, which runs in the host network namespace: what is written
@@ -129,6 +134,18 @@ map $http_authorization $antares_edge_upstream_auth {
     }
 {% endfor %}
 {% endmacro %}
+{% macro neutral_errors() %}
+
+    # The page that goes with a password challenge, in place of nginx's own,
+    # which names it. The WWW-Authenticate header the challenge set is kept,
+    # so browsers still ask. Answers from the services behind are passed on
+    # as they are: error_page only applies to what nginx writes itself.
+    error_page 401 @antares_edge_401;
+    location @antares_edge_401 {
+      default_type text/plain;
+      return 401 "Authentication required\n";
+    }
+{% endmacro %}
 {% macro acme_challenge() %}
 {% if antarest_tls_enabled | bool and antarest_tls_provider == 'letsencrypt' %}
     # Left served over plain http on purpose: this is the only path certbot
@@ -143,6 +160,7 @@ map $http_authorization $antares_edge_upstream_auth {
 server {
     listen       {{ antarest_http_port }};
     server_name  {{ antarest_tls_domain | default('', true) | trim or '_' }};
+{{ neutral_errors() }}
 {{ acme_challenge() }}
 {% if antarest_tls_active | bool and antarest_tls_redirect_http | bool %}
 
@@ -178,6 +196,7 @@ server {
     # on the domain, and the header is hard to take back once it is cached.
     add_header Strict-Transport-Security "max-age={{ antarest_tls_hsts_max_age }}" always;
 {% endif %}
+{{ neutral_errors() }}
 {{ routes() }}
 }
 {% endif %}

@@ -32,6 +32,12 @@ On the command line rather than in the inventory, since these are passwords in t
 
 Either way, the door is checked from the controller for what it is: a `401` carrying a `Basic` challenge on the interface, on the Keycloak console and on Grafana. And two checks ask what it forwards, by carrying a basic credential the way a browser does once it has been let through: the answer has to be the service's own rather than a complaint about the `Authorization` header. Put the controller's address in `antares_edge_basic_auth_trusted` to have every probe come from outside again.
 
+**What a stranger sees**, the part an exposure test asks about, is checked from the controller on one path of every route (`verify_exposure_paths`) and on one that exists nowhere:
+
+- with no credential, every path gets the challenge of its tier, and nothing in the answer, headers or body, carries a version or a name from `verify_exposure_names` (the components behind the door; add the application's name once the realm names are neutral, see [The password in front of the password](edge-and-tls.md#the-password-in-front-of-the-password));
+- with the account of one tier, every route of the other answers `401`, when both probe accounts are given;
+- with a bearer token nothing can validate, the paths under the exempted prefixes (`verify_exposure_bearer_prefixes`: `/api/`, the Keycloak admin API and, with `keycloak_account_public`, the account API) reach the service behind, and every other path still gets the door's challenge. The run prints the list of paths that went through, which is the list an exposure report has to state.
+
 The same playbook runs in CI, on five virtual machines booted on one GitHub runner: see the `slurm` job of `.github/workflows/ci.yml` and `inventory/ci-cluster.yml`. It also runs on the single machine of the `standalone-slurm` job, where the cluster half is the machine itself: two of its checks become tautologies there - the shared `/home` is read on the machine that exported it, and the submitted job lands on the node it was submitted from - and everything else, the firewall included, asks exactly what it asks of a cluster.
 
 ## Changing the admin password

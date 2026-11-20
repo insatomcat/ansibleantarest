@@ -91,6 +91,8 @@ Whatever the door authenticates with, the service behind never sees. nginx forwa
 
 The consequence worth knowing: an interface's own basic authentication is not reachable through the front door. Grafana's API, for one, is normally usable with `curl -u`; behind the gate it is not, and a Grafana service account token (a bearer) is the way in.
 
+**What the door says about itself.** `server_tokens off` keeps the version of nginx out of the `Server` header and of every page nginx writes, and the challenge comes with a page of its own, `Authentication required`, in place of nginx's, which names it. The word `nginx` stays in the `Server` header (and in the body of the http to https redirect): the stock image cannot drop it. The realm names the browser shows in its prompt, `antares_edge_basic_auth_realm` and `antares_edge_basic_auth_admin_realm` (`Antares-Web` and `Antares administration`), are worth making neutral on a deployment that should not name itself to a stranger, `Restricted` and `Restricted (operations)` for instance; keep the two different, since a browser offers the credential it remembers for a realm name to every path that asks with the same one.
+
 ## TLS
 
 TLS is terminated by the front door, the one container that holds a port of the machine (see [The front door](#the-front-door)). Switching it on makes it listen on `antarest_https_port` as well and, by default, redirect http to it. Everything it proxies to is served over https without having to know about it.
