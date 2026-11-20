@@ -129,3 +129,13 @@ keycloak_reset_password_allowed: "{{ keycloak_smtp_host | length > 0 }}"
 # administrator sends from the console have their own lifespan, twelve
 # hours by default.
 keycloak_action_token_lifespan: 1800
+
+# The fields of their own account a user may change from the account page,
+# among username, email, firstName and lastName. None by default: accounts
+# belong to whoever administers the realm. A user who can change the e-mail
+# address can point the password reset of the account at an address of
+# their own, and keep it; one who can change the names can appear under
+# someone else's in Antares-Web, which shows the name the connector hands
+# over at each login. They still see all four, and change their password.
+keycloak_profile_user_editable: []
+

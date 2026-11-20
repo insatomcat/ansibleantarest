@@ -116,6 +116,45 @@
       when: keycloak_smtp_differ | bool
       no_log: true
 
+    # The user profile is a document of its own: read it, set the edit
+    # permission of the four fields of an account, and write it back only
+    # when that changed anything. The rest of it (validations, groups, the
+    # policy on unmanaged attributes) is left as the realm has it.
+    - name: Read the user profile of the realm
+      ansible.builtin.uri:
+        url: "{{ _keycloak_realm_url }}/users/profile"
+        headers:
+          Authorization: "{{ _keycloak_auth }}"
+      register: keycloak_settings_profile
+      changed_when: false
+
+    - name: Work out who may edit each field of an account
+      ansible.builtin.set_fact:
+        keycloak_profile_wanted: >-
+          {%- set out = [] -%}
+          {%- for a in keycloak_settings_profile.json.attributes -%}
+          {%- if a.name in ['username', 'email', 'firstName', 'lastName'] -%}
+          {%- set _ = out.append(a | combine({'permissions': {
+                'view': ['admin', 'user'],
+                'edit': ['admin'] + (['user'] if a.name in keycloak_profile_user_editable else [])}})) -%}
+          {%- else -%}
+          {%- set _ = out.append(a) -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {{ keycloak_settings_profile.json | combine({'attributes': out}) }}
+
+    - name: Set who may edit each field of an account
+      ansible.builtin.uri:
+        url: "{{ _keycloak_realm_url }}/users/profile"
+        method: PUT
+        headers:
+          Authorization: "{{ _keycloak_auth }}"
+        body_format: json
+        body: "{{ keycloak_profile_wanted }}"
+        status_code: [200]
+      changed_when: true
+      when: keycloak_profile_wanted.attributes != keycloak_settings_profile.json.attributes
+
     - name: Read the groups of the realm
       ansible.builtin.uri:
         url: "{{ _keycloak_realm_url }}/groups?briefRepresentation=true&max=1000"

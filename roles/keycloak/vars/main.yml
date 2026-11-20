@@ -57,28 +57,28 @@ keycloak_user_profile:
         length: {min: 3, max: 255}
         username-prohibited-characters: {}
         up-username-not-idn-homograph: {}
-      permissions: {view: [admin, user], edit: [admin, user]}
+      permissions: {view: [admin, user], edit: "{{ ['admin'] + (['user'] if 'username' in keycloak_profile_user_editable else []) }}"}
       multivalued: false
     - name: email
       displayName: "${email}"
       validations:
         email: {}
         length: {max: 255}
-      permissions: {view: [admin, user], edit: [admin, user]}
+      permissions: {view: [admin, user], edit: "{{ ['admin'] + (['user'] if 'email' in keycloak_profile_user_editable else []) }}"}
       multivalued: false
     - name: firstName
       displayName: "${firstName}"
       validations:
         length: {max: 255}
         person-name-prohibited-characters: {}
-      permissions: {view: [admin, user], edit: [admin, user]}
+      permissions: {view: [admin, user], edit: "{{ ['admin'] + (['user'] if 'firstName' in keycloak_profile_user_editable else []) }}"}
       multivalued: false
     - name: lastName
       displayName: "${lastName}"
       validations:
         length: {max: 255}
         person-name-prohibited-characters: {}
-      permissions: {view: [admin, user], edit: [admin, user]}
+      permissions: {view: [admin, user], edit: "{{ ['admin'] + (['user'] if 'lastName' in keycloak_profile_user_editable else []) }}"}
       multivalued: false
   groups:
     - name: user-metadata

@@ -97,6 +97,7 @@ So a new account goes like this: an administrator creates it in the console with
 | Temporary lockout after repeated failed logins | `keycloak_brute_force_enabled`, `keycloak_brute_force_failures`, `_wait`, `_max_wait`, `_reset` | On; after 10 failures, 60 s doubling up to 15 min, forgotten after 12 h. Never permanent, which would let anyone who knows a username lock its owner out |
 | Event log: logins, failures, password changes, console changes | `keycloak_events_enabled`, `keycloak_events_retention` | On, 365 days |
 | Mail relay and the "Forgot password?" link | `keycloak_smtp_*`, `keycloak_reset_password_allowed` | Off, on when `keycloak_smtp_host` is set |
+| Fields of their account a user may change on the account page | `keycloak_profile_user_editable` | None of username, e-mail, first and last name: a user who changes the address takes the password reset of the account with it, one who changes the names appears under someone else's in Antares-Web. They still see them, and change their password |
 | How long a mailed link stays valid | `keycloak_action_token_lifespan` | 1800 s. Keycloak's own 300 s expires before many users have read the mail |
 | Groups that must exist | `keycloak_realm_groups` | The Keycloak side of `antarest_external_auth_group_mapping`. Only adds; groups created from the console stay |
 
