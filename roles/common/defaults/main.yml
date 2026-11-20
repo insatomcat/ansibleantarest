@@ -90,3 +90,8 @@ distro_check_enabled: true
 
 # Write the cluster nodes into /etc/hosts so every node can resolve the others.
 manage_etc_hosts: true
+
+# Grow an LVM root to the end of its disk when the image left most of the
+# boot volume unused, which the EL cloud images do. See tasks/grow_root.yml.
+common_grow_root: true
+

@@ -10,6 +10,10 @@
   ansible.builtin.include_tasks: packages.yml
   tags: always
 
+- name: Grow the root filesystem to the end of its disk
+  ansible.builtin.include_tasks: grow_root.yml
+  when: common_grow_root | bool
+
 - name: Install the base packages
   ansible.builtin.package:
     name: "{{ common_packages }}"

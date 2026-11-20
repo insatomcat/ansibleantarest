@@ -1,0 +1,58 @@
+---
+# A cloud image is a few GB; the boot volume it is put on is often much
+# larger. Debian and Ubuntu images grow their root at the first boot; the
+# Oracle Linux and other EL images put the root on LVM, grow nothing, and
+# some do not carry oci-growfs: the machine runs on 30 GB of a 300 GB disk,
+# which a solver writing tens of GB of temporary files fills. So when the
+# root is a logical volume on a single partition that does not reach the end
+# of its disk, the partition, the physical volume and the root are grown to
+# take it all, online. Anything else is left alone.
+
+- name: Read what the root filesystem sits on
+  ansible.builtin.shell: |
+    set -eu
+    src=$(findmnt -no SOURCE /)
+    lvs --noheadings -o vg_name "$src" >/dev/null 2>&1 || { echo "not-lvm"; exit 0; }
+    vg=$(lvs --noheadings -o vg_name "$src" | tr -d ' ')
+    pvs=$(pvs --noheadings -o pv_name -S "vg_name=$vg" | tr -d ' ')
+    [ "$(echo "$pvs" | wc -l)" -eq 1 ] || { echo "several-pvs"; exit 0; }
+    [ -e "/sys/class/block/${pvs##*/}/partition" ] || { echo "not-a-partition"; exit 0; }
+    echo "$src /dev/$(lsblk -dno pkname "$pvs") $(cat /sys/class/block/${pvs##*/}/partition) $pvs"
+  args:
+    executable: /bin/bash
+  register: common_root_layout
+  changed_when: false
+  check_mode: false
+
+- name: Grow the root to the end of its disk
+  when: common_root_layout.stdout.split() | length == 4
+  vars:
+    _root_lv: "{{ common_root_layout.stdout.split()[0] }}"
+    _root_disk: "{{ common_root_layout.stdout.split()[1] }}"
+    _root_partition: "{{ common_root_layout.stdout.split()[2] }}"
+    _root_pv: "{{ common_root_layout.stdout.split()[3] }}"
+  block:
+    - name: Install growpart
+      ansible.builtin.package:
+        name: "{{ 'cloud-guest-utils' if ansible_facts.os_family == 'Debian' else 'cloud-utils-growpart' }}"
+        state: present
+
+    # growpart answers 0 when the partition can grow, 1 with NOCHANGE when it
+    # already reaches the end of the disk.
+    - name: Ask whether the root partition can grow
+      ansible.builtin.command:
+        argv: [growpart, --dry-run, "{{ _root_disk }}", "{{ _root_partition }}"]
+      register: common_root_growable
+      changed_when: false
+      failed_when: common_root_growable.rc not in [0, 1]
+      check_mode: false
+
+    - name: Grow the partition, the physical volume and the root
+      ansible.builtin.shell: |
+        set -eu
+        growpart {{ _root_disk | quote }} {{ _root_partition | quote }}
+        pvresize {{ _root_pv | quote }}
+        lvextend -r -l +100%FREE {{ _root_lv | quote }}
+      args:
+        executable: /bin/bash
+      when: common_root_growable.rc == 0
