@@ -49,6 +49,7 @@
       adminEventsEnabled: "{{ keycloak_events_enabled | bool }}"
       adminEventsDetailsEnabled: "{{ keycloak_events_enabled | bool }}"
       resetPasswordAllowed: "{{ keycloak_reset_password_allowed | bool }}"
+      actionTokenGeneratedByUserLifespan: "{{ keycloak_action_token_lifespan | int }}"
     # Keycloak keeps every value of smtpServer as a string, and answers the
     # password masked: it is left out of the comparison and sent with the
     # rest whenever anything else differs. Changing the password alone is

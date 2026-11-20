@@ -121,3 +121,11 @@ keycloak_smtp_password: ""
 # The "Forgot password?" link of the login page. Follows the relay: offering
 # it without a way to send the mail would only produce errors.
 keycloak_reset_password_allowed: "{{ keycloak_smtp_host | length > 0 }}"
+
+# How long a link the realm mails to a user stays valid, in seconds: the
+# password reset, and the actions a user asks for themselves. Keycloak's
+# default is 300, five minutes, which a mail that takes a minute to arrive
+# and a user who reads it a few minutes later already exceed. Links an
+# administrator sends from the console have their own lifespan, twelve
+# hours by default.
+keycloak_action_token_lifespan: 1800
