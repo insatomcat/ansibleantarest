@@ -94,3 +94,17 @@ antares_edge_basic_auth_probe_user: ""
 antares_edge_basic_auth_probe_password: ""
 antares_edge_basic_auth_admin_probe_user: ""
 antares_edge_basic_auth_admin_probe_password: ""
+
+# ---------------------------------------------------------------------------
+#  The health route of an external availability probe
+#
+#  A probe outside the machine has no password to give the front door, and
+#  should learn nothing from it anyway. With a path set here, the door serves
+#  it to anybody, and answers it itself: it asks the health route of the
+#  Antares-Web API behind it through an internal sub-request, and returns an
+#  empty 204 when that answered, a bare 503 when it did not. No content of
+#  the application, no name, no version: the status code is the whole answer.
+#  Empty, the route does not exist. verify.yml reads it, hence its place here.
+# ---------------------------------------------------------------------------
+antares_edge_health_path: ""
+

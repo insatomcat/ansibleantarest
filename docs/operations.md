@@ -36,6 +36,7 @@ Either way, the door is checked from the controller for what it is: a `401` carr
 
 - with no credential, every path gets the challenge of its tier, and nothing in the answer, headers or body, carries a version or a name from `verify_exposure_names` (the components behind the door; add the application's name once the realm names are neutral, see [The password in front of the password](edge-and-tls.md#the-password-in-front-of-the-password));
 - with the account of one tier, every route of the other answers `401`, when both probe accounts are given;
+- with `antares_edge_health_path` set, that path answers anybody an empty `204`, and nothing else;
 - with a bearer token nothing can validate, the paths under the exempted prefixes (`verify_exposure_bearer_prefixes`: `/api/`, the Keycloak admin API and, with `keycloak_account_public`, the account API) reach the service behind, and every other path still gets the door's challenge. The run prints the list of paths that went through, which is the list an exposure report has to state.
 
 The same playbook runs in CI, on five virtual machines booted on one GitHub runner: see the `slurm` job of `.github/workflows/ci.yml` and `inventory/ci-cluster.yml`. It also runs on the single machine of the `standalone-slurm` job, where the cluster half is the machine itself: two of its checks become tautologies there - the shared `/home` is read on the machine that exported it, and the submitted job lands on the node it was submitted from - and everything else, the firewall included, asks exactly what it asks of a cluster.

@@ -574,6 +574,31 @@
       loop_control:
         label: "{{ item.item.path }}"
 
+    # The health route of the external probe, when there is one: open to
+    # anybody, and an empty 204 the only thing it ever says when all is well.
+    - name: Ask the front door for the health route of the external probe
+      ansible.builtin.uri:
+        url: "{{ verify_web_url | trim }}{{ antares_edge_health_path }}"
+        status_code: [204]
+        return_content: true
+        follow_redirects: none
+        validate_certs: false
+      register: verify_exposure_health
+      delegate_to: localhost
+      become: false
+      when: antares_edge_health_path | default('', true) | length > 0
+
+    - name: Check it says nothing but its status
+      ansible.builtin.assert:
+        that:
+          - verify_exposure_health.content | default('') | length == 0
+          - verify_exposure_health.server | default('') is not search('[0-9]')
+        fail_msg: >-
+          {{ antares_edge_health_path }} answered with more than a status:
+          {{ verify_exposure_health.content | default('') | truncate(200) }}
+        quiet: true
+      when: antares_edge_health_path | default('', true) | length > 0
+
     # The two lists are two lists: the account of one tier is refused by
     # every route of the other. Only with the two probe accounts at hand.
     - name: Ask the routes of each tier with the account of the other

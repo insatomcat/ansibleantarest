@@ -146,6 +146,35 @@ map $http_authorization $antares_edge_upstream_auth {
       return 401 "Authentication required\n";
     }
 {% endmacro %}
+{% macro health_route() %}
+{% if antares_edge_health_path | default('', true) | length > 0 %}
+
+    # The route an external availability probe polls, open to anybody, see
+    # antares_edge_health_path. auth_request runs in the access phase and
+    # try_files after it, so the empty 204 is only written once the health
+    # route of the API behind has answered 2xx; anything else from it, or no
+    # answer at all, becomes the bare 503 below.
+    location = {{ antares_edge_health_path }} {
+      auth_basic           off;
+      auth_request         /.antares-edge-health;
+      error_page 401 403 500 502 503 504 =503 @antares_edge_unavailable;
+      try_files            /.antares-edge-health-nothing =204;
+    }
+    location = /.antares-edge-health {
+      internal;
+      proxy_pass              http://127.0.0.1:{{ antarest_nginx_port }}/api/health;
+      proxy_pass_request_body off;
+      proxy_set_header        Content-Length "";
+      proxy_set_header        Authorization "";
+      proxy_connect_timeout   5s;
+      proxy_read_timeout      10s;
+    }
+    location @antares_edge_unavailable {
+      default_type text/plain;
+      return 503 "Unavailable\n";
+    }
+{% endif %}
+{% endmacro %}
 {% macro acme_challenge() %}
 {% if antarest_tls_enabled | bool and antarest_tls_provider == 'letsencrypt' %}
     # Left served over plain http on purpose: this is the only path certbot
@@ -168,6 +197,7 @@ server {
       return 301 https://$host$request_uri;
     }
 {% else %}
+{{ health_route() }}
 {{ routes() }}
 {% endif %}
 }
@@ -197,6 +227,7 @@ server {
     add_header Strict-Transport-Security "max-age={{ antarest_tls_hsts_max_age }}" always;
 {% endif %}
 {{ neutral_errors() }}
+{{ health_route() }}
 {{ routes() }}
 }
 {% endif %}
