@@ -86,7 +86,7 @@ Anything else worth scraping next to it goes in `monitoring_extra_scrape_jobs`, 
 
 ## Grafana
 
-Three dashboards are provisioned, in the `Antares` folder: **Antares fleet** (the machines), **Antares Slurm cluster** (the queue and the nodes, only where there is a cluster being scraped) and **Antares service**, which answers the questions an operations report asks:
+Four dashboards are provisioned, in the `Antares` folder: **Antares fleet** (every machine at a glance), **Antares node** (one machine in detail: CPU by mode and load, memory and its cache, swap and paging, filesystems, disk throughput, operations, busy time and latency, network traffic, errors, drops and TCP connections, the podman networks left out), **Antares Slurm cluster** (the queue and the nodes, only where there is a cluster being scraped) and **Antares service**, which answers the questions an operations report asks:
 
 - **availability**, the share of successful probes (front door, API, Keycloak) over the chosen period, and the days left on the certificate. Seen from the machine: Prometheus goes down with it and cannot count the time it is down, so the reference figure is an external probe, which the panel says;
 - **the data volume** (`$mountpoint`, `/var/antares-web/data` by default): used space and its evolution, growth per day over the last seven days, and the days left before it is full at that pace; the system disk next to it, where the solver writes its temporary files;
