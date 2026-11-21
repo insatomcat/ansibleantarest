@@ -39,12 +39,24 @@
     daemon_reload: true
   when: oom_protect_dropins is changed
 
-# OOMScoreAdjust applies to the processes a unit starts, so a service whose
-# drop-in is new is restarted once to run under it.
-- name: Restart the services whose score changed
-  ansible.builtin.systemd:
-    name: "{{ item.item.item }}.service"
-    state: restarted
+# OOMScoreAdjust applies to the processes a unit starts from now on. The ones
+# already running get the score written directly, every process of the unit's
+# cgroup, the container started by podman included, since it sits in that
+# cgroup too. A restart would do the same, and on a first install it would
+# restart the whole platform at the very end of the run, leaving it to come
+# up again after the deployment has said it is ready. A process already lower
+# (conmon, which podman puts at -1000) is left where it is.
+- name: Give the running processes of those services the same score
+  ansible.builtin.shell: |
+    set -eu
+    cg=$(systemctl show --property=ControlGroup --value {{ item.item.item | quote }}.service)
+    [ -n "$cg" ] && [ -d "/sys/fs/cgroup$cg" ] || exit 0
+    find "/sys/fs/cgroup$cg" -name cgroup.procs -exec cat {} + | while read -r pid; do
+      cur=$(cat "/proc/$pid/oom_score_adj" 2>/dev/null) || continue
+      [ "$cur" -gt {{ oom_protect_score_adjust | int }} ] || continue
+      echo {{ oom_protect_score_adjust | int }} > "/proc/$pid/oom_score_adj" 2>/dev/null || true
+    done
   loop: "{{ oom_protect_dropins.results | selectattr('changed') | list }}"
   loop_control:
     label: "{{ item.item.item }}"
+  changed_when: true
