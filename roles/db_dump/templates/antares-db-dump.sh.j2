@@ -17,6 +17,27 @@ day=$(date +%F)
 partial="$root/.partial-$day"
 dest="$root/$day"
 
+# A machine that was off at the scheduled hour runs this at boot, as soon as
+# the database units have started: a container is up some seconds before the
+# server in it accepts connections. Wait for each server, within a bound, so
+# a dump at boot does not fail on a socket that is about to appear.
+wait_for() {
+    local what=$1; shift
+    local deadline=$(( SECONDS + {{ db_dump_wait_seconds | int }} ))
+    until "$@" >/dev/null 2>&1; do
+        (( SECONDS < deadline )) || { echo "$what does not answer, no dump" >&2; exit 1; }
+        sleep 5
+    done
+}
+{% if db_dump_postgres %}
+wait_for {{ db_dump_postgres_container }} \
+    podman exec {{ db_dump_postgres_container }} pg_isready -U postgres
+{% endif %}
+{% if db_dump_mariadb %}
+wait_for {{ db_dump_mariadb_container }} \
+    podman exec {{ db_dump_mariadb_container }} sh -c 'exec mariadb-admin -uroot -p"$MARIADB_ROOT_PASSWORD" ping'
+{% endif %}
+
 mkdir -p "$root"
 rm -rf "$partial"
 mkdir "$partial"

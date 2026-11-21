@@ -18,6 +18,11 @@ db_dump_schedule: "*-*-* 01:30:00"
 # that keeps failing never eats into the dumps still there.
 db_dump_retention_days: 30
 
+# How long a run waits for each database server to accept connections before
+# it gives up. It matters at boot, where the persistent timer fires as soon as
+# the database units have started and the servers in them are still opening.
+db_dump_wait_seconds: 300
+
 # Where the run leaves its outcome for the node exporter's textfile
 # collector: the time of the last successful dump and its size. Written
 # whether or not monitoring is on; it is a few bytes, and it is what an
