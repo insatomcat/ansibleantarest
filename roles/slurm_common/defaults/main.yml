@@ -73,7 +73,7 @@ _slurm_openhpc_release_by_major:
 # the --cpus-per-task sent by antares-launcher meaningful. Switch to
 # `select/linear` for exclusive whole-node allocation.
 slurm_select_type: "select/cons_tres"
-slurm_select_type_parameters: "CR_Core_Memory"
+slurm_select_type_parameters: "CR_Core"
 
 # Memory confinement: slurm_confine_memory and the reserves are in
 # roles/antares_defaults/, since the boot-time description of a standalone

@@ -1,0 +1,30 @@
+---
+# When the memory of a machine runs out, the kernel kills the process with
+# the highest oom_score. Every simulation is held to the memory Slurm gave
+# it, but several of them together can still fill a machine; this makes sure
+# the kernel then takes a simulation, never the platform. Each service below
+# that exists on the machine gets OOMScoreAdjust in a systemd drop-in, which
+# its processes (and the containers podman starts for it) inherit. slurmd is
+# left out on purpose: the simulations are its children and would inherit it.
+oom_protect_score_adjust: -800
+oom_protect_units:
+  - antarest
+  - antarest-celery-worker
+  - antarest-celery-beat
+  - postgresql
+  - redis
+  - antares-nginx
+  - antares-edge
+  - keycloak
+  - antares-auth-keycloak
+  - antares-auth-ldap
+  - prometheus
+  - grafana
+  - alertmanager
+  - blackbox-exporter
+  - node-exporter
+  - slurm-exporter
+  - slurmdb-mariadb
+  - slurmctld
+  - slurmdbd
+  - munge

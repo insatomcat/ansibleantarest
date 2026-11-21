@@ -1,0 +1,50 @@
+---
+- name: Find which of the platform services exist on this machine
+  ansible.builtin.command:
+    argv: [systemctl, show, --property=LoadState, --value, "{{ item }}.service"]
+  loop: "{{ oom_protect_units }}"
+  register: oom_protect_found
+  changed_when: false
+  check_mode: false
+
+- name: Create their drop-in directories
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item.item }}.service.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ oom_protect_found.results | selectattr('stdout', 'equalto', 'loaded') | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Give each of them a low OOM score
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item.item }}.service.d/50-antares-oom.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/oom_protect): when memory runs out, the
+      # kernel kills a simulation before this service.
+      [Service]
+      OOMScoreAdjust={{ oom_protect_score_adjust }}
+  loop: "{{ oom_protect_found.results | selectattr('stdout', 'equalto', 'loaded') | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: oom_protect_dropins
+
+- name: Reload systemd after a new drop-in
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: oom_protect_dropins is changed
+
+# OOMScoreAdjust applies to the processes a unit starts, so a service whose
+# drop-in is new is restarted once to run under it.
+- name: Restart the services whose score changed
+  ansible.builtin.systemd:
+    name: "{{ item.item.item }}.service"
+    state: restarted
+  loop: "{{ oom_protect_dropins.results | selectattr('changed') | list }}"
+  loop_control:
+    label: "{{ item.item.item }}"

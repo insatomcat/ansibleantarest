@@ -65,17 +65,18 @@ SlurmdLogFile={{ slurm_log_dir }}/slurmd.log
    node keeps memory for its jobs and Slurm a valid configuration. #}
 {% set reserve = [(slurm_mem_reserve_mb_web if host in (groups['antares_web'] | default([])) else slurm_mem_reserve_mb) | int,
                   (h.slurm_node_real_memory | int) // 4] | min %}
-{% set ns.mem_per_cpu = ns.mem_per_cpu + [((h.slurm_node_real_memory | int) - (reserve | int)) // (h.slurm_node_cpus | int)] %}
+{% set node_memory = (h.slurm_node_real_memory | int) - (reserve | int) if slurm_confine_memory | bool else h.slurm_node_real_memory %}
+{% set ns.mem_per_cpu = ns.mem_per_cpu + [(node_memory | int) // (h.slurm_node_cpus | int)] %}
 {% set cpus = h.slurm_node_cpus | int %}
 {% set sockets = h.slurm_node_sockets | int %}
 {% set cores = h.slurm_node_cores_per_socket | int %}
 {% set threads = h.slurm_node_threads_per_core | int %}
 {% if sockets * cores * threads == cpus %}
-NodeName={{ h.slurm_node_name }} NodeAddr={{ h.slurm_node_ip }} CPUs={{ cpus }} Boards=1 SocketsPerBoard={{ sockets }} CoresPerSocket={{ cores }} ThreadsPerCore={{ threads }} RealMemory={{ h.slurm_node_real_memory }} MemSpecLimit={{ reserve }} State=UNKNOWN
+NodeName={{ h.slurm_node_name }} NodeAddr={{ h.slurm_node_ip }} CPUs={{ cpus }} Boards=1 SocketsPerBoard={{ sockets }} CoresPerSocket={{ cores }} ThreadsPerCore={{ threads }} RealMemory={{ node_memory }} State=UNKNOWN
 {% else %}
 {# The detected topology is inconsistent with the CPU count; let slurmd sort
    it out from CPUs alone rather than writing a config it would reject. #}
-NodeName={{ h.slurm_node_name }} NodeAddr={{ h.slurm_node_ip }} CPUs={{ cpus }} RealMemory={{ h.slurm_node_real_memory }} MemSpecLimit={{ reserve }} State=UNKNOWN
+NodeName={{ h.slurm_node_name }} NodeAddr={{ h.slurm_node_ip }} CPUs={{ cpus }} RealMemory={{ node_memory }} State=UNKNOWN
 {% endif %}
 {% endfor %}
 

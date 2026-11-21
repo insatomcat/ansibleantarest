@@ -17,8 +17,12 @@ mem=$(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo) / 1024 * {{ slurm_node_mem
   || { echo "slurmd -C gave nothing usable: $hw" >&2; exit 1; }
 
 # The reserve kept out of reach of the jobs, never more than a quarter of the
-# node: the rule slurm.conf is rendered with.
+# node: the rule slurm.conf is rendered with. Slurm is told the rest.
+{% if slurm_confine_memory | default(true) | bool %}
 reserve={{ (slurm_mem_reserve_mb_web if inventory_hostname in (groups['antares_web'] | default([])) else slurm_mem_reserve_mb) | int }}
+{% else %}
+reserve=0
+{% endif %}
 (( reserve > mem / 4 )) && reserve=$(( mem / 4 ))
 old=$(grep -m1 "^NodeName=$node " "$conf") || { echo "no NodeName=$node line in $conf" >&2; exit 1; }
 new=$(sed -E \
@@ -26,10 +30,9 @@ new=$(sed -E \
   -e "s/ SocketsPerBoard=[0-9]+/ SocketsPerBoard=$sockets/" \
   -e "s/ CoresPerSocket=[0-9]+/ CoresPerSocket=$cores/" \
   -e "s/ ThreadsPerCore=[0-9]+/ ThreadsPerCore=$threads/" \
-  -e "s/ RealMemory=[0-9]+/ RealMemory=$mem/" \
-  -e "s/ MemSpecLimit=[0-9]+/ MemSpecLimit=$reserve/" <<<"$old")
+  -e "s/ RealMemory=[0-9]+/ RealMemory=$(( mem - reserve ))/" <<<"$old")
 
-{% if 'Memory' in slurm_select_type_parameters | default('CR_Core_Memory') %}
+{% if 'Memory' in slurm_select_type_parameters | default('CR_Core') %}
 # The memory each CPU brings to a job that asks for none, on the partition
 # line: what is left once the reserve is set aside, shared by the CPUs.
 per_cpu=$(( (mem - reserve) / cpus ))
@@ -40,7 +43,7 @@ part_old=""; part_new=""
 {% endif %}
 
 if [[ $new == "$old" && $part_new == "$part_old" ]]; then
-  echo "slurm.conf already describes $node as it is: CPUs=$cpus RealMemory=$mem"
+  echo "slurm.conf already describes $node as it is: CPUs=$cpus RealMemory=$(( mem - reserve ))"
   exit 0
 fi
 tmp=$(mktemp "$conf.XXXXXX")

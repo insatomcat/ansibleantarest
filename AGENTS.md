@@ -97,6 +97,7 @@ commented.
 | `monitoring_slurm` | The Slurm exporter, on the front-end, next to the controller it reads. Refuses to deploy one whose Slurm client is ahead of that controller |
 | `monitoring_server` | Prometheus and Grafana, on the web machine, in the host network namespace and behind the front door |
 | `db_dump` | Daily dump of PostgreSQL and of the Slurm accounting MariaDB to the data volume, systemd timer, retention, textfile metrics |
+| `oom_protect` | systemd drop-ins giving the platform services a low OOM score, so that the kernel kills a simulation first when memory runs out |
 
 `roles/antares_web/tasks/` is split by concern (`data_volume`, `checkout`,
 `build_frontend`, `build_image`, `config`, `service`, `nginx`, `migrate`,

@@ -271,3 +271,19 @@
   roles:
     - antares_defaults
     - db_dump
+
+# ---------------------------------------------------------------------------
+#  The platform before the simulations, when memory runs out
+#
+#  Last, once every service it protects exists. See roles/oom_protect and
+#  docs/slurm.md.
+# ---------------------------------------------------------------------------
+- name: Keep the platform alive when the simulations fill the memory
+  hosts: antares_web:slurm_frontend
+  become: true
+  tags: [slurm, antares_web]
+  roles:
+    - antares_defaults
+    - role: oom_protect
+      when: slurm_confine_memory | default(true) | bool
+
