@@ -102,3 +102,19 @@ slurm_frontend_ip: >-
   {{ (hostvars[_slurm_frontend_host].slurm_node_ip
       | default(hostvars[_slurm_frontend_host].ansible_facts.default_ipv4.address
       | default(hostvars[_slurm_frontend_host].ansible_host | default('')))) if _slurm_frontend_host else '' }}
+
+# Memory confinement. With memory counted by the scheduler (the _Memory
+# above), a job that asks for no memory - antares-launcher sends
+# --cpus-per-task and no --mem - gets DefMemPerCPU for each of its CPUs, the
+# node's memory shared out in proportion to its CPUs. With
+# slurm_confine_memory, task/cgroup holds every job to what it was given: a
+# study too large for the machine is killed by the kernel inside its own
+# cgroup and ends OUT_OF_MEMORY, instead of taking the whole machine with it,
+# which is what a machine without swap does otherwise.
+#
+# MemSpecLimit keeps part of each node out of reach of the jobs: the system,
+# and on a node that is also the web machine, Antares-Web, PostgreSQL,
+# Keycloak and the monitoring, about 7 GB.
+slurm_confine_memory: true
+slurm_mem_reserve_mb: 1024
+slurm_mem_reserve_mb_web: 7168

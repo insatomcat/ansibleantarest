@@ -1,0 +1,7 @@
+{{ ansible_managed | comment }}
+# Read by slurmd on every node. Holds each job to the CPUs and the memory the
+# scheduler gave it; see slurm_confine_memory.
+CgroupPlugin=autodetect
+ConstrainCores=yes
+ConstrainRAMSpace=yes
+ConstrainSwapSpace=no

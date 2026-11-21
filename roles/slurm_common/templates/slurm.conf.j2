@@ -12,7 +12,13 @@ StateSaveLocation={{ slurm_spool_dir }}/ctld
 SlurmdSpoolDir={{ slurm_spool_dir }}/d
 SlurmctldPidFile=/run/slurmctld.pid
 SlurmdPidFile=/run/slurmd.pid
+{% if slurm_confine_memory | bool %}
+# Jobs live in cgroups, which is what holds each to the memory it was given.
+ProctrackType=proctrack/cgroup
+TaskPlugin=task/cgroup,task/affinity
+{% else %}
 ProctrackType=proctrack/pgid
+{% endif %}
 ReturnToService=2
 
 # Resource selection. cons_tres honours the --cpus-per-task that
@@ -52,19 +58,23 @@ SlurmdLogFile={{ slurm_log_dir }}/slurmd.log
 {% endfor %}
 
 # COMPUTE NODES
+{% set ns = namespace(mem_per_cpu=[]) %}
 {% for host in (groups['slurm_compute'] | default([])) | sort %}
 {% set h = hostvars[host] %}
+{% set reserve = slurm_mem_reserve_mb_web if host in (groups['antares_web'] | default([])) else slurm_mem_reserve_mb %}
+{% set ns.mem_per_cpu = ns.mem_per_cpu + [((h.slurm_node_real_memory | int) - (reserve | int)) // (h.slurm_node_cpus | int)] %}
 {% set cpus = h.slurm_node_cpus | int %}
 {% set sockets = h.slurm_node_sockets | int %}
 {% set cores = h.slurm_node_cores_per_socket | int %}
 {% set threads = h.slurm_node_threads_per_core | int %}
 {% if sockets * cores * threads == cpus %}
-NodeName={{ h.slurm_node_name }} NodeAddr={{ h.slurm_node_ip }} CPUs={{ cpus }} Boards=1 SocketsPerBoard={{ sockets }} CoresPerSocket={{ cores }} ThreadsPerCore={{ threads }} RealMemory={{ h.slurm_node_real_memory }} State=UNKNOWN
+NodeName={{ h.slurm_node_name }} NodeAddr={{ h.slurm_node_ip }} CPUs={{ cpus }} Boards=1 SocketsPerBoard={{ sockets }} CoresPerSocket={{ cores }} ThreadsPerCore={{ threads }} RealMemory={{ h.slurm_node_real_memory }} MemSpecLimit={{ reserve }} State=UNKNOWN
 {% else %}
 {# The detected topology is inconsistent with the CPU count; let slurmd sort
    it out from CPUs alone rather than writing a config it would reject. #}
-NodeName={{ h.slurm_node_name }} NodeAddr={{ h.slurm_node_ip }} CPUs={{ cpus }} RealMemory={{ h.slurm_node_real_memory }} State=UNKNOWN
+NodeName={{ h.slurm_node_name }} NodeAddr={{ h.slurm_node_ip }} CPUs={{ cpus }} RealMemory={{ h.slurm_node_real_memory }} MemSpecLimit={{ reserve }} State=UNKNOWN
 {% endif %}
 {% endfor %}
 
-PartitionName={{ slurm_partition }} Nodes=ALL Default=YES MaxTime=INFINITE State=UP
+{# The smallest share of any node, so that a job fits wherever it lands. #}
+PartitionName={{ slurm_partition }} Nodes=ALL Default=YES MaxTime=INFINITE State=UP{% if 'Memory' in slurm_select_type_parameters and ns.mem_per_cpu %} DefMemPerCPU={{ ns.mem_per_cpu | min }}{% endif %}

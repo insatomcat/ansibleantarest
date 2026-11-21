@@ -66,3 +66,20 @@
     group: root
     mode: "0644"
   register: slurm_conf
+
+- name: Deploy cgroup.conf
+  ansible.builtin.template:
+    src: cgroup.conf.j2
+    dest: "{{ slurm_conf_dir }}/cgroup.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  register: slurm_cgroup_conf
+  when: slurm_confine_memory | bool
+
+# The daemons restart on slurm_conf.changed; a cgroup.conf that changed alone
+# needs the same.
+- name: Count a changed cgroup.conf as a changed configuration
+  ansible.builtin.set_fact:
+    slurm_conf: "{{ slurm_conf | combine({'changed': true}) }}"
+  when: slurm_cgroup_conf is changed

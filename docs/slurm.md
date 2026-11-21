@@ -104,6 +104,18 @@ What it costs, in the order the costs actually bite:
 
 The CI deploys this shape on every distribution that can carry a Slurm node, on every pull request: see the `standalone-slurm` job of `.github/workflows/ci.yml` and `inventory/ci-standalone-slurm.yml`. `verify.yml` runs on it whole, the firewall included, which is where the one thing that is genuinely new gets checked - a single ruleset that is the union of the three a cluster spreads over three machines.
 
+## Memory: what a job may take
+
+Without confinement, a job can take all the memory of its node, and on a machine without swap a study too large for it takes the machine down, the web application with it, until a hard reset. That is what happened on a mock-up of 4 OCPU and 32 GB when a 231-area study was launched on all its CPUs.
+
+`slurm_confine_memory` (on by default) prevents it, with three settings working together:
+
+- **Memory is counted by the scheduler** (`slurm_select_type_parameters: CR_Core_Memory`). antares-launcher sends `--cpus-per-task` and no `--mem`, so a job gets `DefMemPerCPU` for each of its CPUs: the node's memory, less its reserve, shared out in proportion to its CPUs. Several studies still run side by side, each with its share.
+- **A reserve stays out of reach of the jobs** (`MemSpecLimit`): `slurm_mem_reserve_mb_web` (7168) on a node that is also the web machine, for Antares-Web, PostgreSQL, Keycloak and the monitoring; `slurm_mem_reserve_mb` (1024) on a compute node.
+- **Every job lives in a cgroup** (`proctrack/cgroup`, `task/cgroup`, `cgroup.conf` with `ConstrainRAMSpace=yes`), which holds it to that share. A study that goes over is killed by the kernel inside its own cgroup and ends `OUT_OF_MEMORY`; the machine and the platform carry on. In Antares-Web the job shows as failed, and its error log ends on the kill.
+
+On the same mock-up, the same launch then ended `OUT_OF_MEMORY` after a minute, with the platform answering throughout. How many years a study runs in parallel, and so how much memory it needs, is set per study; the scheduler bounds the cost of a wrong guess to that one run. On the single-machine shape, the boot-time description of the node (below) recomputes `DefMemPerCPU` with the CPUs and memory.
+
 ## A machine resized by its provider
 
 Slurm does not measure the node: it reads its CPUs and memory from `slurm.conf`, which the playbook renders from the facts of the run. A machine resized afterwards keeps the old description. Grown, its jobs get none of what was added; shrunk, Slurm finds less than it was told and takes the node out of service (`Low CPUs, Low RealMemory`), and no job starts until a playbook run renders `slurm.conf` again.

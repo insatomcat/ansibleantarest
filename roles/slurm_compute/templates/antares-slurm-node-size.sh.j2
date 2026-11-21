@@ -24,12 +24,24 @@ new=$(sed -E \
   -e "s/ ThreadsPerCore=[0-9]+/ ThreadsPerCore=$threads/" \
   -e "s/ RealMemory=[0-9]+/ RealMemory=$mem/" <<<"$old")
 
-if [[ $new == "$old" ]]; then
+{% if 'Memory' in slurm_select_type_parameters | default('CR_Core_Memory') %}
+# The memory each CPU brings to a job that asks for none, on the partition
+# line: what is left once the reserve is set aside, shared by the CPUs.
+reserve={{ (slurm_mem_reserve_mb_web if inventory_hostname in (groups['antares_web'] | default([])) else slurm_mem_reserve_mb) | int }}
+per_cpu=$(( (mem - reserve) / cpus ))
+part_old=$(grep -m1 "^PartitionName=" "$conf" || true)
+part_new=$(sed -E "s/ DefMemPerCPU=[0-9]+/ DefMemPerCPU=$per_cpu/" <<<"$part_old")
+{% else %}
+part_old=""; part_new=""
+{% endif %}
+
+if [[ $new == "$old" && $part_new == "$part_old" ]]; then
   echo "slurm.conf already describes $node as it is: CPUs=$cpus RealMemory=$mem"
   exit 0
 fi
 tmp=$(mktemp "$conf.XXXXXX")
-awk -v node="NodeName=$node " -v line="$new" 'index($0, node) == 1 { print line; next } { print }' "$conf" > "$tmp"
+awk -v node="NodeName=$node " -v line="$new" -v pold="$part_old" -v pnew="$part_new" \
+  'index($0, node) == 1 { print line; next } pold != "" && $0 == pold { print pnew; next } { print }' "$conf" > "$tmp"
 chmod 0644 "$tmp"
 mv "$tmp" "$conf"
-echo "slurm.conf rewritten for $node: $old -> $new"
+echo "slurm.conf rewritten for $node: $old -> $new${part_new:+ ; $part_new}"
