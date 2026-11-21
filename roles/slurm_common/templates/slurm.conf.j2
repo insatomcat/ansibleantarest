@@ -61,7 +61,10 @@ SlurmdLogFile={{ slurm_log_dir }}/slurmd.log
 {% set ns = namespace(mem_per_cpu=[]) %}
 {% for host in (groups['slurm_compute'] | default([])) | sort %}
 {% set h = hostvars[host] %}
-{% set reserve = slurm_mem_reserve_mb_web if host in (groups['antares_web'] | default([])) else slurm_mem_reserve_mb %}
+{# The reserve never takes more than a quarter of a node, so that a small
+   node keeps memory for its jobs and Slurm a valid configuration. #}
+{% set reserve = [(slurm_mem_reserve_mb_web if host in (groups['antares_web'] | default([])) else slurm_mem_reserve_mb) | int,
+                  (h.slurm_node_real_memory | int) // 4] | min %}
 {% set ns.mem_per_cpu = ns.mem_per_cpu + [((h.slurm_node_real_memory | int) - (reserve | int)) // (h.slurm_node_cpus | int)] %}
 {% set cpus = h.slurm_node_cpus | int %}
 {% set sockets = h.slurm_node_sockets | int %}
