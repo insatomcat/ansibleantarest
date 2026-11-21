@@ -24,3 +24,6 @@
   ansible.builtin.include_tasks: remove.yml
   when: not (monitoring_enabled | bool and monitoring_slurm_enabled | bool
              and monitoring_slurm_exporter_supported | default(true) | bool)
+
+- name: Export the durations of the recent jobs
+  ansible.builtin.include_tasks: jobs_metrics.yml

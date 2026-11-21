@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Export the durations of the recent Slurm jobs for the node exporter
+After=slurmdbd.service slurmctld.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/antares-slurm-jobs-metrics
+Nice=10

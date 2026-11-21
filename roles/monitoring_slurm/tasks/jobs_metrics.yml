@@ -1,0 +1,54 @@
+---
+# The job durations the Slurm exporter does not give: see
+# monitoring_slurm_jobs_window_days. Runs whatever the exporter's version
+# check said, since it reads the accounting with the machine's own sacct.
+
+- name: Install the job duration export
+  when: monitoring_enabled | bool and monitoring_slurm_enabled | bool
+  block:
+    - name: Install the script that reads the accounting
+      ansible.builtin.template:
+        src: antares-slurm-jobs-metrics.py.j2
+        dest: /usr/local/sbin/antares-slurm-jobs-metrics
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install its unit and timer
+      ansible.builtin.template:
+        src: "antares-slurm-jobs-metrics.{{ item }}.j2"
+        dest: "/etc/systemd/system/antares-slurm-jobs-metrics.{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: [service, timer]
+      register: monitoring_slurm_jobs_units
+
+    - name: Start the timer, and run the export once now
+      ansible.builtin.systemd:
+        name: "antares-slurm-jobs-metrics.{{ item }}"
+        state: started
+        enabled: "{{ item == 'timer' }}"
+        daemon_reload: "{{ monitoring_slurm_jobs_units.changed }}"
+      loop: [timer, service]
+      changed_when: false
+
+- name: Remove the job duration export
+  when: not (monitoring_enabled | bool and monitoring_slurm_enabled | bool)
+  block:
+    - name: Stop its timer
+      ansible.builtin.systemd:
+        name: antares-slurm-jobs-metrics.timer
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Remove its files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/antares-slurm-jobs-metrics.timer
+        - /etc/systemd/system/antares-slurm-jobs-metrics.service
+        - /usr/local/sbin/antares-slurm-jobs-metrics
+        - "{{ monitoring_node_textfile_dir }}/antares_slurm_jobs.prom"

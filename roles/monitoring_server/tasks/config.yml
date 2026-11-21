@@ -94,6 +94,15 @@
 # Only where there is a cluster being scraped, and actively removed where
 # there is not: a dashboard of empty panels is worse than no dashboard, and
 # this is what takes it away from a deployment whose cluster was switched off.
+- name: Deploy the service dashboard
+  ansible.builtin.copy:
+    src: grafana/dashboards/antares-service.json
+    dest: "{{ monitoring_server_dir }}/grafana/dashboards/antares-service.json"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Grafana
+
 - name: Deploy the Slurm dashboard
   ansible.builtin.copy:
     src: grafana/dashboards/antares-slurm.json

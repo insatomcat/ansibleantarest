@@ -57,3 +57,11 @@ monitoring_slurm_exporter_extra_flags: []
 # reading the host's own binaries, where there is nothing in the image to
 # read and the check already stands aside.
 monitoring_slurm_version_check: true
+
+# The durations of the jobs that finished on the cluster, read from the Slurm
+# accounting (sacct) every monitoring_slurm_jobs_interval and left for the
+# node exporter's textfile collector: the Slurm exporter counts the queue,
+# and nothing else says how long a study took. One series per job finished in
+# the last monitoring_slurm_jobs_window_days days, so a few dozen at most.
+monitoring_slurm_jobs_interval: 5min
+monitoring_slurm_jobs_window_days: 7

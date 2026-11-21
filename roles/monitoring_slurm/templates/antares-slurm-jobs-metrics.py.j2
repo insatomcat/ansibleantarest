@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+# {{ ansible_managed }}
+#
+# The jobs that finished on the cluster in the last
+# {{ monitoring_slurm_jobs_window_days }} days, read from the Slurm accounting,
+# written for the node exporter's textfile collector. Run by
+# antares-slurm-jobs-metrics.timer.
+import os
+import subprocess
+import tempfile
+import time
+from datetime import datetime
+
+OUT = "{{ monitoring_node_textfile_dir }}/antares_slurm_jobs.prom"
+WINDOW = {{ monitoring_slurm_jobs_window_days | int }}
+FIELDS = ["JobID", "JobName", "User", "State", "ElapsedRaw", "AllocCPUS", "End"]
+
+
+def label(value):
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+
+
+rows = subprocess.run(
+    ["sacct", "-a", "-X", "-n", "-P", "-S", f"now-{WINDOW}days", "-E", "now",
+     "--state=CD,F,TO,OOM,CA,NF,PR", "-o", ",".join(FIELDS)],
+    check=True, capture_output=True, text=True,
+).stdout.splitlines()
+
+jobs = []
+for row in rows:
+    parts = row.split("|")
+    if len(parts) != len(FIELDS):
+        continue
+    job = dict(zip(FIELDS, parts))
+    try:
+        end = time.mktime(datetime.strptime(job["End"], "%Y-%m-%dT%H:%M:%S").timetuple())
+        elapsed = int(job["ElapsedRaw"])
+    except ValueError:
+        continue
+    job["State"] = job["State"].split()[0]          # "CANCELLED by 1000" -> CANCELLED
+    jobs.append((job, elapsed, end))
+
+lines = [
+    "# HELP antares_slurm_job_duration_seconds How long a job that finished recently ran.",
+    "# TYPE antares_slurm_job_duration_seconds gauge",
+]
+for job, elapsed, end in jobs:
+    lines.append(
+        'antares_slurm_job_duration_seconds{job_id="%s",job_name="%s",user="%s",state="%s",cpus="%s"} %d'
+        % (label(job["JobID"]), label(job["JobName"]), label(job["User"]),
+           label(job["State"]), label(job["AllocCPUS"]), elapsed))
+lines += [
+    "# HELP antares_slurm_job_end_timestamp_seconds When a job that finished recently ended.",
+    "# TYPE antares_slurm_job_end_timestamp_seconds gauge",
+]
+for job, elapsed, end in jobs:
+    lines.append('antares_slurm_job_end_timestamp_seconds{job_id="%s"} %d' % (label(job["JobID"]), end))
+lines += [
+    "# HELP antares_slurm_jobs_finished Jobs finished in the window, by final state.",
+    "# TYPE antares_slurm_jobs_finished gauge",
+]
+for state in sorted({j["State"] for j, _, _ in jobs} | {"COMPLETED", "FAILED"}):
+    lines.append('antares_slurm_jobs_finished{state="%s",window_days="%d"} %d'
+                 % (state, WINDOW, sum(1 for j, _, _ in jobs if j["State"] == state)))
+
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(OUT), prefix=".antares_slurm_jobs.")
+with os.fdopen(fd, "w") as f:
+    f.write("\n".join(lines) + "\n")
+os.chmod(tmp, 0o644)
+os.replace(tmp, OUT)

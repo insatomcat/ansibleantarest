@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Export the durations of the recent Slurm jobs, every {{ monitoring_slurm_jobs_interval }}
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec={{ monitoring_slurm_jobs_interval }}
+
+[Install]
+WantedBy=timers.target
