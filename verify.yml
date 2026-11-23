@@ -516,6 +516,24 @@
         - keycloak_enabled | default(false) | bool
         - verify_kc_login.status | default(0) != 200
 
+    # A gated short address must ask for the password before it says where
+    # it leads: nginx runs `return` before auth_basic, so a template that
+    # wrote one there would answer 302 to anybody.
+    - name: Ask the front door for every gated redirect with no password
+      vars:
+        _tier_gated: "{{ verify_web_gated if item.auth == 'app' else verify_admin_gated }}"
+      ansible.builtin.uri:
+        url: "{{ verify_web_url | trim }}{{ item.path }}"
+        status_code: [401]
+        follow_redirects: none
+        validate_certs: false
+      loop: "{{ antares_edge_redirects | default([]) | selectattr('auth', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.path }}"
+      delegate_to: localhost
+      become: false
+      when: _tier_gated | bool
+
     # The consoles are a list of their own, and the console of an identity
     # provider is the one page on a deployment worth the second password.
     - name: Ask the front door for the Keycloak console with no password

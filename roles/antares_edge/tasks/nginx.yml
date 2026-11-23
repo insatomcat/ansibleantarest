@@ -4,6 +4,25 @@
 # door starts (plain http, so that certbot has something to answer the
 # challenge with) and once after (TLS on, the redirect in place).
 
+# Named, because each entry lands verbatim in an nginx location: a path
+# without its leading slash, or a target with a space or a semicolon in it,
+# is a front door that refuses to start rather than a redirect that fails.
+- name: Check the front door redirects
+  ansible.builtin.assert:
+    that:
+      - item.path | default('') is match('/[^\s;{}]*$')
+      - item.to | default('') is match('(/|https?://)[^\s;{}]*$')
+      - item.auth | default('') in ['', 'app', 'admin']
+    fail_msg: >-
+      antares_edge_redirects entry {{ item | to_json }} is not usable: it needs
+      a `path` starting with /, a `to` that is a path or an http(s) URL, neither
+      with a space, a semicolon or a brace in it, and an `auth` that is app,
+      admin or left out. See docs/edge-and-tls.md.
+    quiet: true
+  loop: "{{ antares_edge_redirects }}"
+  loop_control:
+    label: "{{ item.path | default('(no path)') }}"
+
 - name: Create the front door configuration directory
   ansible.builtin.file:
     path: "{{ antares_edge_dir }}"

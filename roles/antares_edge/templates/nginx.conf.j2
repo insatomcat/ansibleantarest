@@ -133,6 +133,25 @@ map $http_authorization $antares_edge_upstream_auth {
       proxy_pass http://{{ route.upstream }};
     }
 {% endfor %}
+{% for redirect in antares_edge_redirects %}
+{% set tier = redirect.auth | default('') %}
+
+    # Short address, see antares_edge_redirects.
+    location = {{ redirect.path }} {
+{% if tier in antares_edge_basic_auth_names %}
+      # `return` runs in the rewrite phase, before auth_basic gets a say, so
+      # on its own it would hand the redirect to anybody. try_files runs after
+      # the access phase: the password is asked first, and the named location
+      # below only answers once it has been given.
+      auth_basic           $antares_edge_{{ tier }}_realm;
+      auth_basic_user_file {{ antares_edge_htpasswd_container_dir }}/{{ tier }};
+      try_files            /.antares-edge-redirect-nothing @antares_edge_redirect_{{ loop.index }};
+    }
+    location @antares_edge_redirect_{{ loop.index }} {
+{% endif %}
+      return 302 {{ redirect.to }};
+    }
+{% endfor %}
 {% endmacro %}
 {% macro neutral_errors() %}
 

@@ -57,6 +57,21 @@ antares_edge_proxy_read_timeout: 1200
 # route that names neither is served to anyone who reaches the front door.
 antares_edge_extra_routes: []
 
+# Short addresses, each answered by the front door itself with a 302 to a
+# longer one. `path` is matched exactly, `to` is where the browser is sent
+# (a path on this host, or a full URL), and `auth` the password list asked
+# before the redirect is given, if any:
+#
+#   antares_edge_redirects:
+#     - path: /auth
+#       to: /auth/admin/antares/console/
+#       auth: admin
+#
+# A redirect protects nothing by itself, the address it points to does. The
+# `auth` key is there so that the short address does not answer anything a
+# stranger can read where the route around it answers 401.
+antares_edge_redirects: []
+
 # ---------------------------------------------------------------------------
 #  The password in front of the password
 #

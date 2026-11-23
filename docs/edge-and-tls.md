@@ -31,6 +31,20 @@ antares_edge_extra_routes:
     name: Reports
 ```
 
+A short address for a long one is a redirect the front door answers itself, with a `302`:
+
+```yaml
+antares_edge_redirects:
+  - path: /auth                              # matched exactly
+    to: /auth/admin/antares/console/         # a path on this host, or a full URL
+    auth: admin                              # optional: app, admin, or nothing
+  - path: /authadmin
+    to: /auth/admin/master/console/
+    auth: admin
+```
+
+The redirect protects nothing by itself: the address it points to keeps its own tier. `auth` asks the password of a tier before the redirect is given, so that a short address under a gated prefix answers `401` to a stranger like the rest of it rather than telling them where the console is. Give it the tier of the target: the browser then asks once, and sends the same credential to the target without asking again. `path` is matched exactly, so `/auth` and `/auth/` are two entries.
+
 Longest prefix wins, whatever the order. `antares_edge_client_max_body_size` and `antares_edge_proxy_read_timeout` (1200 s) apply to every route; the rest of the plumbing is in `roles/antares_edge/defaults/main.yml`. The first follows `antarest_max_upload_size` and is what answers 413 on an import too large, so that is the one to raise: see [the size of a study import](antares-web.md#the-size-of-a-study-import).
 
 ## The password in front of the password
