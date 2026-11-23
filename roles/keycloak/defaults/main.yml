@@ -106,6 +106,22 @@ keycloak_events_retention: 365
 # exists; groups created from the console stay, this only adds.
 keycloak_realm_groups: "{{ (antarest_external_auth_group_mapping | default({})).keys() | list }}"
 
+# Groups whose members administer the accounts of the realm from its own
+# console, https://<domain>/auth/admin/<realm>/console/, with no account in
+# the master realm. Each is created if missing and given the roles below of
+# the realm-management client. Only adds: a role granted from the console
+# stays, and taking a group out of this list takes nothing away.
+keycloak_realm_admin_groups: []
+
+# What those groups may do. Create, edit, disable and delete accounts, see
+# them, and see the groups to put them in; the settings of the realm, its
+# clients and its identity providers stay out of reach.
+keycloak_realm_admin_roles:
+  - manage-users
+  - view-users
+  - query-users
+  - query-groups
+
 # Mail sent by the realm: the "forgot password" link of the login page, and
 # any action an administrator sends from the console (set a password, verify
 # an e-mail). Empty host, no mail at all and no reset link on the login page.

@@ -175,5 +175,84 @@
         status_code: [201]
       changed_when: true
       loop: >-
-        {{ keycloak_realm_groups
+        {{ (keycloak_realm_groups + keycloak_realm_admin_groups) | unique
            | difference(keycloak_settings_groups.json | map(attribute='name') | list) }}
+
+    # The groups that administer the accounts of the realm, see
+    # keycloak_realm_admin_groups. Their roles belong to the realm-management
+    # client, which every realm has; a group just created above has no id in
+    # the first read, hence the second one.
+    - name: Give the account administrators their roles
+      when: keycloak_realm_admin_groups | length > 0
+      block:
+        - name: Read the groups of the realm again
+          ansible.builtin.uri:
+            url: "{{ _keycloak_realm_url }}/groups?briefRepresentation=true&max=1000"
+            headers:
+              Authorization: "{{ _keycloak_auth }}"
+          register: keycloak_admin_groups_read
+          changed_when: false
+
+        - name: Read the realm-management client
+          ansible.builtin.uri:
+            url: "{{ _keycloak_realm_url }}/clients?clientId=realm-management"
+            headers:
+              Authorization: "{{ _keycloak_auth }}"
+          register: keycloak_admin_client
+          changed_when: false
+
+        - name: Read the roles of the realm-management client
+          ansible.builtin.uri:
+            url: "{{ _keycloak_realm_url }}/clients/{{ keycloak_admin_client.json[0].id }}/roles?max=1000"
+            headers:
+              Authorization: "{{ _keycloak_auth }}"
+          register: keycloak_admin_roles
+          changed_when: false
+
+        # A role name Keycloak does not know would be dropped from the POST
+        # below without a word, and the console would then refuse the
+        # Secretariat a page with nothing on the deployment side to say why.
+        - name: Check the account administrator roles exist
+          ansible.builtin.assert:
+            that: >-
+              keycloak_realm_admin_roles
+              | difference(keycloak_admin_roles.json | map(attribute='name') | list)
+              | length == 0
+            fail_msg: >-
+              keycloak_realm_admin_roles names roles the realm-management client
+              of the {{ keycloak_realm }} realm does not have:
+              {{ keycloak_realm_admin_roles
+                 | difference(keycloak_admin_roles.json | map(attribute='name') | list)
+                 | join(', ') }}.
+            quiet: true
+
+        - name: Read the roles each account administrator group holds
+          ansible.builtin.uri:
+            url: >-
+              {{ _keycloak_realm_url }}/groups/{{
+              (keycloak_admin_groups_read.json | selectattr('name', 'equalto', item) | first).id
+              }}/role-mappings/clients/{{ keycloak_admin_client.json[0].id }}
+            headers:
+              Authorization: "{{ _keycloak_auth }}"
+          register: keycloak_admin_held
+          changed_when: false
+          loop: "{{ keycloak_realm_admin_groups }}"
+
+        - name: Grant the account administrator groups the roles they lack
+          vars:
+            _missing: >-
+              {{ keycloak_realm_admin_roles
+                 | difference(item.json | map(attribute='name') | list) }}
+          ansible.builtin.uri:
+            url: "{{ item.url }}"
+            method: POST
+            headers:
+              Authorization: "{{ _keycloak_auth }}"
+            body_format: json
+            body: "{{ keycloak_admin_roles.json | selectattr('name', 'in', _missing) | list }}"
+            status_code: [204]
+          changed_when: true
+          loop: "{{ keycloak_admin_held.results }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: _missing | length > 0
