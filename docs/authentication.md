@@ -129,7 +129,7 @@ antares_auth_sync_roles:
   modelling: writer
 ```
 
-A managed group is one the mapping points to (every group, with `antarest_external_auth_add_ext_groups`). A role granted by hand in any other group is never touched, nor are local accounts, the administrator among them.
+A managed group is one the mapping points to, or with `antarest_external_auth_add_ext_groups` any group of the realm. The job reads the list of the realm's groups for that, so a group emptied of its last member stays managed and that member's role in it is withdrawn. A group deleted from Keycloak leaves the list too, and the job can no longer tell that it managed it: empty a group and let one run go before deleting it. A role granted by hand in any other group is never touched, nor are local accounts, the administrator among them.
 
 The studies change owner before the account goes because Antares-Web cannot do otherwise: `study.owner_id` references the identity with no `ON DELETE`, so deleting an account that owns a study fails on the constraint. The new owner is `admin`; the studies keep their groups and their permissions. Antares-Web refuses to change the owner of an archived study, so a leaver who owns one keeps an account with no role and no token: the run logs which study blocks, ends in error, and completes the closure at the first run after the study is restored.
 

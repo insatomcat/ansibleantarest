@@ -24,8 +24,16 @@ What the job manages:
 
   - accounts that came from the hook only (table users_ldap). Local accounts,
     the administrator among them, are never touched;
-  - the Antares-Web groups the configuration maps a Keycloak group to. A role
-    granted by hand in any other group survives every run.
+  - the Antares-Web groups the configuration maps a Keycloak group to, and
+    with add_ext_groups every group of the realm, whether or not anybody is
+    still in it. A role granted by hand in any other group survives every
+    run.
+
+The groups come from the list of the realm, not from the memberships alone:
+a group emptied of its last member is still managed, so that member's role
+in it is withdrawn. A group deleted from Keycloak is gone from that list as
+well and the job cannot tell it ever managed it, so a group is emptied, and
+one run let go, before it is deleted.
 
 The link between an Antares-Web account and its Keycloak username is the
 `external_id` column of users_ldap, which the administration API does not
@@ -153,8 +161,42 @@ class Table:
 # ---------------------------------------------------------------------------
 
 
+def _read_groups(headers):
+    """Every group of the realm, subgroups included: {external id: name}."""
+    found = {}
+
+    def walk(url):
+        first = 0
+        while True:
+            page = requests.get(
+                url,
+                headers=headers,
+                params={"first": first, "max": PAGE, "briefRepresentation": "true"},
+                timeout=TIMEOUT,
+            )
+            page.raise_for_status()
+            batch = page.json()
+            for group in batch:
+                if group.get(GROUP_KEY) and group.get("name"):
+                    found[group[GROUP_KEY]] = group["name"]
+                # The top level list says how many children a group has and
+                # leaves them out; they are listed group by group.
+                if group.get("subGroupCount"):
+                    walk(f"{KEYCLOAK_URL}/admin/realms/{REALM}/groups/{group['id']}/children")
+            if len(batch) < PAGE:
+                break
+            first += PAGE
+
+    walk(f"{KEYCLOAK_URL}/admin/realms/{REALM}/groups")
+    return found
+
+
 def read_keycloak():
-    """username (lower case) -> {"enabled": bool, "groups": {external id: name}}."""
+    """The accounts and the groups of the realm.
+
+    accounts: username (lower case) -> {"enabled": bool, "groups": {external id: name}}
+    groups:   {external id: name}, every group of the realm, empty ones included
+    """
     try:
         token = requests.post(
             f"{KEYCLOAK_URL}/realms/{REALM}/protocol/openid-connect/token",
@@ -204,12 +246,14 @@ def read_keycloak():
                     if group.get(GROUP_KEY) and group.get("name")
                 },
             }
+
+        realm_groups = _read_groups(headers)
     except (requests.RequestException, KeyError, ValueError) as exc:
         raise Refused(f"Keycloak could not be read in full: {exc}") from exc
 
     if not accounts:
         raise Refused("Keycloak returned no account at all")
-    return accounts
+    return accounts, realm_groups
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +387,7 @@ def run():
     max_closures = int(os.environ.get("SYNC_MAX_CLOSURES", "10"))
     table = Table()
 
-    keycloak = read_keycloak()
+    keycloak, realm_groups = read_keycloak()
     external = read_external_accounts()
     aw = AntaresWeb(dry_run)
     try:
@@ -352,12 +396,15 @@ def run():
     except (requests.RequestException, KeyError, ValueError) as exc:
         raise Refused(f"Antares-Web users and groups could not be read: {exc}") from exc
 
-    every_group = {g for account in keycloak.values() for g in account["groups"]}
+    # The groups of the realm, empty ones included, so that the last member
+    # taken out of a group still has their role there withdrawn.
+    every_group = dict(realm_groups)
+    for account in keycloak.values():
+        every_group.update(account["groups"])
     managed = table.managed({table.target(g) for g in every_group} - {None})
     names = {
         table.target(external_id): name
-        for account in keycloak.values()
-        for external_id, name in account["groups"].items()
+        for external_id, name in every_group.items()
         if table.target(external_id)
     }
 
