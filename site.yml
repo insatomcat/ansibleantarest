@@ -255,6 +255,12 @@
       tags: monitoring
     - role: antares_edge
       tags: edge
+    # After antares_web, which creates the workspace directories the upload
+    # directory sits in. The role reads antarest_workspaces and
+    # antarest_data_dir, defaults of antares_web, hence this play.
+    - role: antares_sftp
+      tags: sftp
+      when: antares_sftp_enabled | bool
 
 # ---------------------------------------------------------------------------
 #  Database dumps

@@ -113,6 +113,33 @@ Raising it costs disk on the way in. Both nginx buffer the whole body before pro
 
 `antares_edge_proxy_read_timeout` (1200 s) is the other limit an import can reach. It bounds the silence between two reads rather than the whole transfer, so a slow upload is fine as long as it keeps progressing; what it does bound is the wait once the body is in and the backend is unpacking it.
 
+## Study import over SFTP
+
+A browser upload restarts from zero when the connection drops, and stops at `antarest_max_upload_size`. For the studies it cannot carry, the play can open SFTP accounts that land in a workspace, with keys only:
+
+```yaml
+antares_sftp_enabled: true          # roles/antares_defaults/defaults/main/antares-web.yml
+antares_sftp_users:                 # roles/antares_sftp/defaults/main.yml
+  - name: jdoe
+    public_keys:
+      - "ssh-ed25519 AAAA... jdoe@laptop"
+antares_sftp_workspace: tmp         # the workspace the uploads land in
+antares_sftp_dir: import            # the directory made for them inside it
+```
+
+Each entry is an account of its own, so the journal of sshd names who connected and one person can be cut off alone. It has no password and no shell, and sshd gives it SFTP only, locked in `antares_sftp_chroot` (`/srv/antares-sftp`), where the one thing to see is the upload directory, `{{ antarest_data_dir }}/workspaces/<dir of the workspace>/import`, bind-mounted from the data volume. Port 22 is already open for the operators, and the `sshd` jail of fail2ban covers these accounts like any other. An entry taken out of the list loses its account and its keys at the next run; what it uploaded stays.
+
+The upload directory is setgid on the `antares` group, so what lands there belongs to the group the containers run as. The session runs with umask 0002: directories come out group-writable, files with the mode the client asks for, which is that of its own copy, 0644 as a rule. The application reads, scans and copies every file, and deletes in every directory; it does not modify an uploaded file in place, which is the managed copy's job. Forcing the mode of files (`internal-sftp -m`) is a Red Hat patch to OpenSSH, which Debian and Ubuntu refuse, hence its absence. The accounts are members of that group, which is what lets them write there, and the chroot is what keeps them from reaching anything else of it.
+
+Two ways from there into the managed storage:
+
+- **Unzipped study.** The watcher finds it at its next scan under `<workspace>/import/`, and the interface copies it into the managed storage ("Copy"). The copy is made on the server, nothing goes through the browser.
+- **Zip.** `POST /v1/studies/_import` from the server itself, through the application nginx on the loopback, imports it into the managed storage. It is still bound by `antarest_max_upload_size`, which can be raised for the occasion, see above.
+
+WinSCP and OpenSSH `sftp` (`reput`) both resume an interrupted transfer, which is the point of this path over a slow link.
+
+`ansible-playbook site.yml --tags sftp` applies a change of the list alone. The role refuses an account name that already exists on the machine outside its group, `default` as the workspace (the watcher never scans it), and an sshd configuration that `sshd -t` rejects: the drop-in is removed again and the run fails with the reason.
+
 ## Study workspaces
 
 The directories the application exposes, one entry per workspace:

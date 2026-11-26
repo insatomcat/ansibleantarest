@@ -1,0 +1,242 @@
+---
+# ---------------------------------------------------------------------------
+#  Preconditions
+# ---------------------------------------------------------------------------
+- name: Check the upload workspace
+  ansible.builtin.assert:
+    that:
+      - antares_sftp_workspace in antarest_workspaces
+      - antares_sftp_workspace != 'default'
+      - antares_sftp_dir is match('^[A-Za-z0-9._-]+$')
+    fail_msg: >-
+      antares_sftp_workspace must name a workspace of antarest_workspaces other
+      than `default` (it is {{ antares_sftp_workspace }}), and antares_sftp_dir
+      a plain directory name (it is {{ antares_sftp_dir }}).
+    quiet: true
+
+- name: Check the upload accounts
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.name is match('^[a-z_][a-z0-9_-]{0,31}$')
+      - item.name not in ['root', antares_user]
+      - item.public_keys is defined
+      - item.public_keys | length > 0
+    fail_msg: >-
+      Every entry of antares_sftp_users needs a `name`, a lowercase account
+      name other than root and {{ antares_user }}, and a non-empty list of
+      `public_keys`: {{ item }}
+    quiet: true
+  loop: "{{ antares_sftp_users }}"
+  loop_control:
+    label: "{{ item.name | default('?') }}"
+
+- name: Check no upload account is listed twice
+  ansible.builtin.assert:
+    that:
+      - _names | length == _names | unique | length
+    fail_msg: "antares_sftp_users lists an account twice: {{ _names | join(', ') }}"
+    quiet: true
+  vars:
+    _names: "{{ antares_sftp_users | map(attribute='name') | list }}"
+
+- name: Read the main sshd configuration
+  ansible.builtin.slurp:
+    src: /etc/ssh/sshd_config
+  register: antares_sftp_sshd_main
+
+- name: Check sshd reads its drop-in directory
+  ansible.builtin.assert:
+    that:
+      - antares_sftp_sshd_main.content | b64decode
+        is search('(?m)^\s*Include\s+/etc/ssh/sshd_config\.d/')
+    fail_msg: >-
+      /etc/ssh/sshd_config on {{ inventory_hostname }} does not include
+      /etc/ssh/sshd_config.d/*.conf, so {{ antares_sftp_ssh_config_file }}
+      would be written and never read. See the same check in the hardening
+      role.
+    quiet: true
+
+# ---------------------------------------------------------------------------
+#  Accounts
+# ---------------------------------------------------------------------------
+- name: Create the group of the upload accounts
+  ansible.builtin.group:
+    name: "{{ antares_sftp_group }}"
+    system: true
+
+- name: Read the accounts of the machine
+  ansible.builtin.getent:
+    database: passwd
+
+- name: Read the group of the upload accounts
+  ansible.builtin.getent:
+    database: group
+    key: "{{ antares_sftp_group }}"
+
+# An account of the list that already exists outside the group is somebody
+# else's: an operator, a service. Turning it into an upload account would
+# lock its owner into the chroot.
+- name: Check no upload account takes over an existing account
+  ansible.builtin.assert:
+    that:
+      - item.name not in ansible_facts.getent_passwd
+        or ansible_facts.getent_passwd[item.name][2] == _sftp_gid
+    fail_msg: >-
+      {{ item.name }} already exists on {{ inventory_hostname }} and is not an
+      upload account. Give the upload account another name.
+    quiet: true
+  loop: "{{ antares_sftp_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  vars:
+    _sftp_gid: "{{ ansible_facts.getent_group[antares_sftp_group][1] }}"
+
+# No password (`*` matches no hash, and unlike `!` it does not read as a
+# locked account to an sshd built without PAM), no shell, and the chroot as
+# home: sshd reads the keys from antares_sftp_keys_dir, never from there. The
+# second group is what lets them write into the upload directory.
+- name: Create the upload accounts
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    group: "{{ antares_sftp_group }}"
+    groups: ["{{ antares_group }}"]
+    append: false
+    shell: /usr/sbin/nologin
+    home: "{{ antares_sftp_chroot }}"
+    create_home: false
+    password: "*"
+    comment: "Antares study upload"
+  loop: "{{ antares_sftp_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# Recognised by their primary group, which only this role hands out. What
+# they uploaded stays, owned by a number until the directory is cleaned.
+- name: Remove the upload accounts taken out of the list
+  ansible.builtin.user:
+    name: "{{ item }}"
+    state: absent
+    remove: false
+  loop: "{{ ansible_facts.getent_passwd | dict2items
+            | selectattr('value.2', 'equalto', _sftp_gid)
+            | map(attribute='key')
+            | reject('in', antares_sftp_users | map(attribute='name') | list)
+            | list }}"
+  vars:
+    _sftp_gid: "{{ ansible_facts.getent_group[antares_sftp_group][1] }}"
+
+- name: Create the directory of the public keys
+  ansible.builtin.file:
+    path: "{{ antares_sftp_keys_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the public keys of each account
+  ansible.builtin.copy:
+    content: "{{ item.public_keys | join('\n') }}\n"
+    dest: "{{ antares_sftp_keys_dir }}/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ antares_sftp_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: List the key files
+  ansible.builtin.find:
+    paths: "{{ antares_sftp_keys_dir }}"
+    file_type: file
+  register: antares_sftp_key_files
+
+- name: Remove the keys of the accounts taken out of the list
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ antares_sftp_key_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when: item.path | basename not in antares_sftp_users | map(attribute='name') | list
+
+# ---------------------------------------------------------------------------
+#  The upload directory and the chroot
+# ---------------------------------------------------------------------------
+
+# On the data volume, inside a workspace: it survives a rebuild of the
+# server, and the watcher scans it. setgid antares, so that whatever lands in
+# it belongs to the group the containers run as.
+- name: Create the upload directory
+  ansible.builtin.file:
+    path: "{{ antares_sftp_data_dir }}"
+    state: directory
+    owner: "{{ antares_user }}"
+    group: "{{ antares_group }}"
+    mode: "2775"
+
+- name: Create the chroot
+  ansible.builtin.file:
+    path: "{{ antares_sftp_chroot }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# No owner and no mode on purpose: once the bind mount is in place this path
+# is the upload directory, and setting them here would change it on every run.
+- name: Create the mount point in the chroot
+  ansible.builtin.file:
+    path: "{{ antares_sftp_chroot }}/{{ antares_sftp_dir }}"
+    state: directory
+
+# In fstab, so that it comes back at boot, after the data volume it reads.
+- name: Bind the upload directory into the chroot
+  ansible.posix.mount:
+    path: "{{ antares_sftp_chroot }}/{{ antares_sftp_dir }}"
+    src: "{{ antares_sftp_data_dir }}"
+    fstype: none
+    opts: "bind,x-systemd.requires-mounts-for={{ antarest_data_dir }}"
+    state: mounted
+
+# ---------------------------------------------------------------------------
+#  sshd
+# ---------------------------------------------------------------------------
+- name: Check whether the sshd daemon is running
+  ansible.builtin.command: "systemctl is-active {{ antares_sftp_ssh_service }}.service"
+  register: antares_sftp_ssh_active
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Deploy the sshd configuration of the upload accounts
+  ansible.builtin.template:
+    src: sshd-sftp.conf.j2
+    dest: "{{ antares_sftp_ssh_config_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sshd for the SFTP accounts
+
+# As in the hardening role: a configuration sshd refuses is taken out again,
+# so the machine is left as it was found rather than with a file that breaks
+# the next restart of sshd.
+- name: Check the resulting sshd configuration is valid
+  ansible.builtin.command: sshd -t
+  register: antares_sftp_sshd_check
+  changed_when: false
+  failed_when: false
+
+- name: Remove the drop-in that sshd refused
+  ansible.builtin.file:
+    path: "{{ antares_sftp_ssh_config_file }}"
+    state: absent
+  when: antares_sftp_sshd_check.rc != 0
+
+- name: Report the sshd configuration error
+  ansible.builtin.fail:
+    msg: >-
+      sshd refused the configuration on {{ inventory_hostname }}, so
+      {{ antares_sftp_ssh_config_file }} was removed and nothing changed:
+      {{ antares_sftp_sshd_check.stderr | default('') | trim }}
+  when: antares_sftp_sshd_check.rc != 0

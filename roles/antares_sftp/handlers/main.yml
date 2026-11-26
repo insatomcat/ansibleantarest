@@ -1,0 +1,12 @@
+---
+# Reloaded whenever the daemon runs, socket activation or not. Ubuntu starts
+# ssh.service from ssh.socket on the first connection (Accept=no), and from
+# then on it is a daemon like any other, holding the configuration it read at
+# start: skipping the reload because the socket is active leaves the drop-in
+# unread until the next reboot. Nothing to do when the service is not running,
+# the next connection starts it with the new configuration.
+- name: Reload sshd for the SFTP accounts
+  ansible.builtin.systemd:
+    name: "{{ antares_sftp_ssh_service }}.service"
+    state: reloaded
+  when: antares_sftp_ssh_active.stdout | default('') | trim == 'active'

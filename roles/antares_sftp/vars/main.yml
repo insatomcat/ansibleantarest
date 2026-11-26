@@ -1,0 +1,11 @@
+---
+# Where the uploads land on the host: the upload directory inside the
+# directory of the chosen workspace, on the data volume.
+antares_sftp_data_dir: >-
+  {{ antarest_data_dir }}/workspaces/{{
+     antarest_workspaces[antares_sftp_workspace].dir | default(antares_sftp_workspace)
+  }}/{{ antares_sftp_dir }}
+
+# `ssh` on Debian and Ubuntu, `sshd` on the RHEL rebuilds, as in the hardening
+# role, whose default is out of scope in this play.
+antares_sftp_ssh_service: "{{ 'ssh' if ansible_facts['os_family'] == 'Debian' else 'sshd' }}"
