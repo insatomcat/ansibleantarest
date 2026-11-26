@@ -7,44 +7,73 @@
 # LoginWrapper.tsx up to 2.19, webapp/src/routes/login/index.tsx from 2.33), so
 # it is looked up by content rather than by path. An empty result simply means
 # upstream got rid of the label, and the patch turns into a no-op.
-- name: Locate the login form carrying the "NNI" label
-  ansible.builtin.command:
-    cmd: "grep -rlF --include=*.tsx 'label=\"NNI\"' webapp/src"
-    chdir: "{{ antarest_dir }}"
-  register: antarest_nni_files
-  changed_when: false
-  failed_when: antarest_nni_files.rc not in [0, 1]
+- name: Replace the "NNI" label of the login form
+  when: antarest_patch_login_label | bool
+  block:
+    - name: Locate the login form carrying the "NNI" label
+      ansible.builtin.command:
+        cmd: "grep -rlF --include=*.tsx 'label=\"NNI\"' webapp/src"
+        chdir: "{{ antarest_dir }}"
+      register: antarest_nni_files
+      changed_when: false
+      failed_when: antarest_nni_files.rc not in [0, 1]
 
-- name: Report that upstream no longer ships the "NNI" label
-  ansible.builtin.debug:
-    msg: >-
-      No "NNI" label found in {{ antarest_version }}; nothing to patch.
-      antarest_patch_login_label can be turned off.
-  when: antarest_nni_files.stdout_lines | length == 0
+    - name: Report that upstream no longer ships the "NNI" label
+      ansible.builtin.debug:
+        msg: >-
+          No "NNI" label found in {{ antarest_version }}; nothing to patch.
+          antarest_patch_login_label can be turned off.
+      when: antarest_nni_files.stdout_lines | length == 0
 
-- name: Replace the "NNI" label on the login form
-  ansible.builtin.replace:
-    path: "{{ antarest_dir }}/{{ item }}"
-    regexp: 'label="NNI"'
-    replace: "label={{ antarest_login_username_label }}"
-    owner: "{{ antarest_checkout_owner }}"
-    group: "{{ antarest_checkout_group }}"
-  loop: "{{ antarest_nni_files.stdout_lines }}"
+    - name: Replace the "NNI" label on the login form
+      ansible.builtin.replace:
+        path: "{{ antarest_dir }}/{{ item }}"
+        regexp: 'label="NNI"'
+        replace: "label={{ antarest_login_username_label }}"
+        owner: "{{ antarest_checkout_owner }}"
+        group: "{{ antarest_checkout_group }}"
+      loop: "{{ antarest_nni_files.stdout_lines }}"
 
-- name: Check no "NNI" label survived the patch
-  ansible.builtin.command:
-    cmd: "grep -rlF --include=*.tsx 'label=\"NNI\"' webapp/src"
-    chdir: "{{ antarest_dir }}"
-  register: antarest_nni_left
-  changed_when: false
-  failed_when: antarest_nni_left.rc not in [0, 1]
+    - name: Check no "NNI" label survived the patch
+      ansible.builtin.command:
+        cmd: "grep -rlF --include=*.tsx 'label=\"NNI\"' webapp/src"
+        chdir: "{{ antarest_dir }}"
+      register: antarest_nni_left
+      changed_when: false
+      failed_when: antarest_nni_left.rc not in [0, 1]
 
-- name: Fail when the login form is still labelled "NNI"
-  ansible.builtin.assert:
-    that: antarest_nni_left.stdout_lines | length == 0
-    fail_msg: >-
-      The "NNI" label is still present in
-      {{ antarest_nni_left.stdout_lines | join(', ') }}. The markup probably
-      changed upstream; patch it by hand or set
-      antarest_patch_login_label: false.
-    quiet: true
+    - name: Fail when the login form is still labelled "NNI"
+      ansible.builtin.assert:
+        that: antarest_nni_left.stdout_lines | length == 0
+        fail_msg: >-
+          The "NNI" label is still present in
+          {{ antarest_nni_left.stdout_lines | join(', ') }}. The markup probably
+          changed upstream; patch it by hand or set
+          antarest_patch_login_label: false.
+        quiet: true
+
+# ---------------------------------------------------------------------------
+#  The privacy notice of the first login
+# ---------------------------------------------------------------------------
+# Upstream shows RTE's own notice (in French, about one of RTE's applications)
+# in a full-screen dialog that asks to Accept or to Sign out. With
+# antarest_privacy_notice set, the text is the deployment's own and the dialog
+# becomes a notice with a single Close: the processing rests on running the
+# service, not on consent, so there is nothing to accept. See
+# docs/antares-web.md, "Privacy notice at first login".
+- name: Replace the privacy notice of the first login
+  when: antarest_privacy_notice | length > 0
+  block:
+    - name: Write the text of the notice
+      ansible.builtin.copy:
+        content: "{{ antarest_privacy_notice | trim }}\n"
+        dest: "{{ antarest_dir }}/webapp/src/assets/md/rgpd.md"
+        owner: "{{ antarest_checkout_owner }}"
+        group: "{{ antarest_checkout_group }}"
+        mode: "0644"
+
+    - name: Reduce the dialog to a notice with a single Close
+      ansible.builtin.script:
+        cmd: patch_privacy_notice.py {{ antarest_dir }}/webapp/src/routes/_authenticated/route.tsx
+        executable: python3
+      changed_when: true

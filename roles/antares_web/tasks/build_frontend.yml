@@ -23,6 +23,7 @@
       node={{ antarest_node_tag }}
       patch_login_label={{ antarest_patch_login_label | bool }}
       login_username_label={{ antarest_login_username_label }}
+      privacy_notice={{ antarest_privacy_notice | hash('sha1') }}
 
 - name: Look for a previous build stamp
   ansible.builtin.stat:

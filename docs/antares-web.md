@@ -167,6 +167,21 @@ Two workspaces may not share a directory, and `dir` has to be a plain directory 
 
 A directory holding a file named `AW_NO_SCAN` is skipped by the scan, and a study only reaches the interface once the watcher has run for real, see [Background maintenance tasks](background-tasks.md).
 
+## Privacy notice at first login
+
+Upstream shows a notice once per browser, after the first login: the text of `webapp/src/assets/md/rgpd.md`, in a full-screen dialog with Accept and Sign out. That text is RTE's own, in French, about one of RTE's applications. A deployment for anyone else sets its own:
+
+```yaml
+antarest_privacy_notice: |          # roles/antares_web/defaults/main.yml
+  This platform is operated for ACME by ... It processes your username,
+  name and e-mail address and a record of your actions, only to run it.
+  Questions about your data: ...
+```
+
+Markdown, a few lines. Set, it replaces the text, and the dialog keeps a single Close: a notice informs, the processing rests on running the service, so there is nothing to accept and no reason to sign anyone out. Close records that the notice was shown exactly as Accept did, in the browser's local storage, so the notice comes back in a new browser or a private window. Empty, the default, leaves upstream's notice and dialog untouched.
+
+The dialog is patched in `webapp/src/routes/_authenticated/route.tsx` before the build, by `roles/antares_web/files/patch_privacy_notice.py`. Each edit must match exactly once, and what the Sign out button used is removed with it, since the project builds with `noUnusedLocals`. A release that changes that file stops the build with the name of the edit that no longer matches; adapt the script, or empty the variable to ship upstream's dialog meanwhile. The CI build sets a notice, so that check runs on every pull request. Like the label below, the patch is reapplied on every run and a change of the text rebuilds the web application.
+
 ## Login label for the username field
 
 The login form labels its identifier field "NNI" (the internal RTE identifier) hard-coded in upstream sources. The playbook replaces that label before building the frontend:

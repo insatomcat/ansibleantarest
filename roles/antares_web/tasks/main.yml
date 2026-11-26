@@ -39,7 +39,7 @@
   ansible.builtin.include_tasks: patch_frontend.yml
   when:
     - antarest_image_source == 'build'
-    - antarest_patch_login_label | bool
+    - antarest_patch_login_label | bool or antarest_privacy_notice | length > 0
 
 - name: Build the web application
   ansible.builtin.include_tasks: build_frontend.yml

@@ -108,6 +108,16 @@ all:
       # ---------------------------------------------------------------
       monitoring_enabled: true
 
+      # ---------------------------------------------------------------
+      #  A privacy notice of our own, so that the patch of the first
+      #  login dialog goes through the TypeScript build on every run: an
+      #  upstream change to that file then fails here, by name, rather
+      #  than on a deployment.
+      # ---------------------------------------------------------------
+      antarest_privacy_notice: |
+        This test platform processes your username and the record of
+        your actions, only to run it.
+
       # Left at the default of antares_defaults, which is true. The builder
       # is not a cluster node, but this is also what decides whether the
       # accounting database's images are archived, and the `slurm` and
