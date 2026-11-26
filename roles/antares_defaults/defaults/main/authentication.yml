@@ -49,6 +49,32 @@ keycloak_client_id: antares-auth
 # administration tier.
 keycloak_account_public: true
 
+# The theme of the realm, written by the role (tasks/theme.yml), for two of
+# Keycloak's pages:
+#   - login: Keycloak's own, with a link to Antares-Web on the page a member
+#     lands on after following a link mailed from the console ("Credential
+#     reset"), where Keycloak shows none;
+#   - admin: the console of the realm, without the tabs of an account that
+#     its administrators have no use for (keycloak_admin_hidden_tabs).
+# The console of the master realm keeps its own theme. Empty, Keycloak's
+# themes as shipped.
+keycloak_login_theme: antares
+
+# Tabs of the account page of the realm's console hidden by that theme, by
+# the data-testid Keycloak gives them. A stylesheet hides them: what the
+# administrator may do is still set by their roles, this only takes off the
+# screen what they would never use here. Checked against Keycloak 26.8, and
+# by verify.yml against the Keycloak installed: Keycloak gives these names
+# for its own tests and may rename one in a new version, which would bring
+# the tab back into view.
+keycloak_admin_hidden_tabs:
+  - role-mapping-tab
+  - user-consents-tab
+  - identity-provider-links-tab
+  - user-sessions-tab
+  - workflows-tab
+  - verifiable-credentials-tab
+
 # Secrets - CHANGE THESE.
 #
 # keycloak_admin_password seeds the first administrator of the master realm and

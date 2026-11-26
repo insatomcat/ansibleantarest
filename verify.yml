@@ -547,6 +547,43 @@
         - keycloak_enabled | default(false) | bool
         - verify_admin_gated | bool
 
+    # The tabs the console theme hides are named by the data-testid Keycloak
+    # gives them for its own tests, which no release promises to keep. A
+    # renamed one comes back into view without a word, so each name is
+    # looked for in the console the running Keycloak serves, inside the jar
+    # it ships it in.
+    - name: Look for the tabs the console theme hides in the Keycloak installed
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail;
+          {{ container_cmd }} exec {{ keycloak_container | default('keycloak') }}
+          sh -c 'cat /opt/keycloak/lib/lib/main/org.keycloak.keycloak-admin-ui-*.jar'
+          | python3 -c 'import io, sys, zipfile;
+          z = zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read()));
+          js = "".join(z.read(n).decode("utf-8", "ignore") for n in z.namelist() if n.endswith(".js"));
+          print(" ".join(t for t in sys.argv[1:] if chr(34) + t + chr(34) not in js))'
+          {{ keycloak_admin_hidden_tabs | map('quote') | join(' ') }}
+        executable: /bin/bash
+      register: verify_kc_tabs
+      changed_when: false
+      become: true
+      when:
+        - keycloak_enabled | default(false) | bool
+        - keycloak_login_theme | default('') | length > 0
+        - keycloak_admin_hidden_tabs | default([]) | length > 0
+
+    - name: Check the console of the realm still hides every tab it should
+      ansible.builtin.assert:
+        that: verify_kc_tabs.stdout | trim | length == 0
+        fail_msg: >-
+          The console of this Keycloak has no tab named
+          {{ verify_kc_tabs.stdout | trim }}: Keycloak renamed it, and the
+          stylesheet of the {{ keycloak_realm }} realm no longer hides it.
+          Find its new data-testid in the console (the browser's inspector, on
+          the tab of an account) and put it in keycloak_admin_hidden_tabs.
+        quiet: true
+      when: verify_kc_tabs is not skipped
+
     # ---------------------------------------------------------------
     # What a stranger sees: the answers of the door itself, asked from the
     # controller with no credential, on one path of every route and on one
