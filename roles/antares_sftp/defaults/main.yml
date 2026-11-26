@@ -1,0 +1,44 @@
+---
+# ===========================================================================
+#  Study import over SFTP. Switched on by antares_sftp_enabled
+#  (roles/antares_defaults/defaults/main/antares-web.yml) and documented in
+#  docs/antares-web.md, "Study import over SFTP".
+# ===========================================================================
+
+# The people allowed to upload, one entry each: the name of the account and
+# the public keys it accepts. One account per person, so that the journal
+# names who connected and one person can be cut off alone. An entry taken out
+# of the list loses its account at the next run; what it uploaded stays.
+#
+#   antares_sftp_users:
+#     - name: jdoe
+#       public_keys:
+#         - "ssh-ed25519 AAAA... jdoe@laptop"
+#
+# `public_keys` and not `keys`: in a Jinja expression `item.keys` is the
+# method of the dictionary, whatever the entry holds.
+antares_sftp_users: []
+
+# The workspace the uploads land in, by its key in antarest_workspaces, and
+# the directory made for them inside it. A sub-directory of a workspace the
+# watcher scans: an unzipped study uploaded there appears in the interface
+# after the next scan, from where the interface copies it into the managed
+# storage. `default` is refused, the watcher never scans it.
+antares_sftp_workspace: tmp
+antares_sftp_dir: import
+
+# The group of the upload accounts. The sshd Match block keys on it, and the
+# play recognises the accounts it made by it when one leaves the list.
+antares_sftp_group: antares-sftp
+
+# The directory the accounts are locked in. sshd wants every component of
+# that path owned by root and writable by nobody else, which no directory of
+# the data volume is: the upload directory is bind-mounted into it.
+antares_sftp_chroot: /srv/antares-sftp
+
+# One file of public keys per account, written by root. Outside any home
+# directory: the accounts have none, and on a cluster /home is the NFS export
+# of the front-end.
+antares_sftp_keys_dir: /etc/ssh/antares-sftp-keys
+
+antares_sftp_ssh_config_file: /etc/ssh/sshd_config.d/60-antares-sftp.conf

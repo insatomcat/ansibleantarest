@@ -541,6 +541,8 @@ jobs:
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519_ci
+          # The key of the SFTP upload account, read by inventory/ci-vm.yml.
+          ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519_sftp
 
           # A NoCloud seed: the only account the machine gets is the one
           # Ansible connects with. No package_update, the deployment
@@ -734,6 +736,53 @@ jobs:
           probe='import urllib.request;'
           probe="$probe print(urllib.request.urlopen('http://127.0.0.1:8870/health').read())"
           vm "sudo podman exec antares-auth-keycloak python -c \"$probe\""
+
+      # The upload account of inventory/ci-vm.yml, from the runner through the
+      # forwarded port, the way an uploader reaches the machine. What it
+      # proves: the chroot shows the upload directory and nothing else, a
+      # shell is refused, and the file comes out group antares and
+      # group-writable, identical when the backend container reads it. The
+      # last part is the SELinux half, which only a target that enforces it
+      # can answer.
+      - name: Check an upload over SFTP lands where the application reads it
+        run: |
+          set -euo pipefail
+          opts=(-i ~/.ssh/id_ed25519_sftp -P 2222 -o BatchMode=yes
+                -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+                -o LogLevel=ERROR)
+          head -c 1048576 /dev/urandom > /tmp/sftp-probe.bin
+          printf 'put /tmp/sftp-probe.bin\n' | sftp "${opts[@]}" -b - ci-upload@ci-vm
+
+          root=$(printf 'ls -1 /\n' | sftp "${opts[@]}" -b - ci-upload@ci-vm | grep -v '^sftp>')
+          if [ "$root" != "/import" ] && [ "$root" != "import" ]; then
+            echo "::error::the chroot shows more than the upload directory: $root"
+            exit 1
+          fi
+
+          # The exit status says nothing here: the forced internal-sftp reads
+          # an empty stdin and leaves cleanly. Whether the command ran does.
+          out=$(ssh -i ~/.ssh/id_ed25519_sftp -p 2222 -o BatchMode=yes \
+                    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                    -o LogLevel=ERROR ci-upload@ci-vm 'echo shell-reached' \
+                    < /dev/null 2>&1 || true)
+          if printf '%s' "$out" | grep -q shell-reached; then
+            echo "::error::the upload account was given a shell"
+            exit 1
+          fi
+
+          path=/var/antares-web/data/workspaces/studies/import/sftp-probe.bin
+          owner=$(vm "sudo stat -c '%G %a' $path")
+          if [ "$owner" != "antares 664" ]; then
+            echo "::error::the upload came out as '$owner', not 'antares 664'"
+            exit 1
+          fi
+          want=$(sha256sum /tmp/sftp-probe.bin | cut -d' ' -f1)
+          got=$(vm "sudo podman exec antarest sha256sum /workspaces/studies/import/sftp-probe.bin" | cut -d' ' -f1)
+          if [ "$want" != "$got" ]; then
+            echo "::error::the backend container does not read the uploaded file as sent"
+            exit 1
+          fi
+          vm "sudo rm -f $path"
 
       # Last on purpose: a failure here says the deployment converged but does
       # not settle, which is worth knowing and worth fixing, but only after the

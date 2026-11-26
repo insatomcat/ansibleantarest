@@ -1,0 +1,21 @@
+{{ ansible_managed | comment }}
+#
+# The study upload accounts, and only them: each one is locked in
+# {{ antares_sftp_chroot }}, where /{{ antares_sftp_dir }} is the upload
+# directory of the `{{ antares_sftp_workspace }}` workspace, and gets SFTP and
+# nothing else. A Match block in an included file ends with that file, so
+# nothing that follows the Include line in sshd_config falls into it.
+#
+#   sshd -T -C user=<account>,host=x,addr=127.0.0.1 | grep -E 'chroot|forcecommand|authorizedkeysfile'
+
+Match Group {{ antares_sftp_group }}
+    ChrootDirectory {{ antares_sftp_chroot }}
+    # -d starts the session in the upload directory. -u 0002 makes what is
+    # uploaded group-writable, and the directory, setgid, gives it the group
+    # the containers run as: the application can read, scan and copy it.
+    ForceCommand internal-sftp -d /{{ antares_sftp_dir }} -u 0002
+    AuthorizedKeysFile {{ antares_sftp_keys_dir }}/%u
+    AuthenticationMethods publickey
+    PermitTTY no
+    DisableForwarding yes
+    PermitTunnel no

@@ -1,0 +1,8 @@
+---
+# Nothing to do when sshd is started from its socket unit: there is no daemon
+# holding the configuration, each connection reads it again.
+- name: Reload sshd for the SFTP accounts
+  ansible.builtin.systemd:
+    name: "{{ antares_sftp_ssh_service }}.service"
+    state: reloaded
+  when: antares_sftp_ssh_socket.stdout | default('') | trim != 'active'

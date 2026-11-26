@@ -84,3 +84,11 @@ antarest_nginx_port: 8081
 # on the filesystem podman's storage lives on, and then written again by the
 # backend under the tmp directory of antarest_data_dir.
 antarest_max_upload_size: 1G
+
+# Study import over SFTP: one account per uploader, keys only, locked in a
+# chroot that holds the upload directory of a workspace and nothing else. For
+# the studies a browser upload cannot carry, above antarest_max_upload_size or
+# over a link that drops. Here rather than in the role because site.yml reads
+# it to decide whether the role runs. The rest is in roles/antares_sftp and
+# docs/antares-web.md, "Study import over SFTP".
+antares_sftp_enabled: false
