@@ -63,7 +63,16 @@ antares_edge_basic_auth_admin_users:      # the consoles next to it
     hash: "$6$dQ2...$Zt..."
 ```
 
-Two lists, because the people who use a deployment are not the people who operate it. The first guards the web application; the second guards the administration interfaces the same front door serves: the Keycloak console under `/auth/`, Grafana under `/grafana/`, Prometheus when it is published. An account in one is not an account in the other, and both are separate again from the accounts of Antares-Web itself and from those of Keycloak.
+Two lists, because the people who use a deployment are not the people who operate it. The first guards the web application; the second guards the administration interfaces the same front door serves: the Keycloak console under `/auth/`, Grafana under `/grafana/`, Prometheus when it is published. An application account opens nothing of the administration tier, and both lists are separate again from the accounts of Antares-Web itself and from those of Keycloak.
+
+**One prompt for an administrator.** The administration accounts open the application tier as well:
+
+```yaml
+antares_edge_basic_auth_admin_opens_app: true      # the default
+antares_edge_basic_auth_admin_realm: "{{ antares_edge_basic_auth_realm }}"   # the default
+```
+
+The Keycloak console sends whoever opens it to the login page of the realm, `/auth/realms/<realm>/protocol/openid-connect/auth`, which is in the application tier because every user signs in there. A browser keeps a password per realm name and resends it, without asking, to a challenge carrying the same name. With both defaults, the administrator types the administration account once, at the console, and the browser presents it again at the login page, where it is accepted. A distinct `antares_edge_basic_auth_admin_realm`, or `antares_edge_basic_auth_admin_opens_app: false`, brings back a second prompt at that page, for an application account. A name cannot be in both lists: the play refuses it, since the application's password file would hold it twice and nginx reads only the first. `verify.yml` checks both directions: the application account refused everywhere in the administration tier, the administration account let through the application's routes.
 
 There is no `_enabled` flag: a list with one account in it is a tier that is on, an empty one is a tier that is off. Emptying a list removes the password file with it. Extra routes can join either tier with `auth: app` or `auth: admin`, and a route that names neither is served to whoever reaches the door.
 

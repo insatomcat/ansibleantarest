@@ -39,7 +39,11 @@ antares_edge_tls_volumes: >-
 antares_edge_basic_auth_tiers: >-
   {{ [{'name': 'app',
        'realm': antares_edge_basic_auth_realm,
-       'users': antares_edge_basic_auth_users},
+       'users': antares_edge_basic_auth_users
+                + (antares_edge_basic_auth_admin_users
+                   if antares_edge_basic_auth_admin_opens_app | bool
+                      and antares_edge_basic_auth_users | length > 0
+                   else [])},
       {'name': 'admin',
        'realm': antares_edge_basic_auth_admin_realm,
        'users': antares_edge_basic_auth_admin_users}]

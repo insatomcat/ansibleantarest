@@ -84,7 +84,12 @@ antares_edge_redirects: []
 # realm of the WWW-Authenticate header. It is read by whoever is being asked,
 # so it is worth naming the deployment rather than the software.
 antares_edge_basic_auth_realm: "Antares-Web"
-antares_edge_basic_auth_admin_realm: "Antares administration"
+# The same name by default, on purpose: a browser keeps what it was given per
+# realm and resends it to a challenge of the same name without asking. That
+# is what makes one prompt of an administrator's way from the identity
+# provider's console to its login page, see antares_edge_basic_auth_admin_
+# opens_app. A name of its own brings the second prompt back.
+antares_edge_basic_auth_admin_realm: "{{ antares_edge_basic_auth_realm }}"
 
 # Where the two password files are written, one per tier, named after it. A
 # directory of its own because it is bind-mounted whole into the container:

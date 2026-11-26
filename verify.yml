@@ -617,8 +617,11 @@
         quiet: true
       when: antares_edge_health_path | default('', true) | length > 0
 
-    # The two lists are two lists: the account of one tier is refused by
-    # every route of the other. Only with the two probe accounts at hand.
+    # The application account is refused by every route of the
+    # administration tier. The administration account is refused by the
+    # application's routes too, unless antares_edge_basic_auth_admin_opens_app
+    # lets it through them, which the next task checks. Only with the two
+    # probe accounts at hand.
     - name: Ask the routes of each tier with the account of the other
       ansible.builtin.uri:
         url: "{{ verify_web_url | trim }}{{ item.path }}"
@@ -626,13 +629,36 @@
         status_code: [401]
         follow_redirects: none
         validate_certs: false
-      loop: "{{ verify_exposure_paths }}"
+      loop: >-
+        {{ verify_exposure_paths
+           | rejectattr('tier', 'equalto',
+                        'app' if antares_edge_basic_auth_admin_opens_app | default(true) | bool else '')
+           | list }}
       loop_control:
         label: "{{ item.path }} with the {{ 'application' if item.tier == 'admin' else 'administration' }} account"
       delegate_to: localhost
       become: false
       when:
         - verify_web_auth | length > 0
+        - verify_admin_auth | length > 0
+
+    # The other half: what saves an administrator the second prompt on the
+    # way from the identity provider's console to its login page.
+    - name: Ask the application's routes with the administration account
+      ansible.builtin.uri:
+        url: "{{ verify_web_url | trim }}{{ item.path }}"
+        headers: "{{ verify_admin_auth }}"
+        status_code: [200, 204, 301, 302, 303, 307, 308, 404]
+        follow_redirects: none
+        validate_certs: false
+      loop: "{{ verify_exposure_paths | selectattr('tier', 'equalto', 'app') | list }}"
+      loop_control:
+        label: "{{ item.path }} with the administration account"
+      delegate_to: localhost
+      become: false
+      when:
+        - antares_edge_basic_auth_admin_opens_app | default(true) | bool
+        - verify_web_gated | bool
         - verify_admin_auth | length > 0
 
     # The only way past the door without its password is a bearer token, on
