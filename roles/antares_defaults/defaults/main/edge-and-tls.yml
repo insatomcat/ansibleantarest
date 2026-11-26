@@ -74,6 +74,18 @@ antarest_tls_domain: ""                # e.g. antares.example.org
 antares_edge_basic_auth_users: []
 antares_edge_basic_auth_admin_users: []
 
+# The administration accounts also open the application tier. Whoever
+# operates the consoles may use the application anyway, and the identity
+# provider's console sends its user to the login page of the realm, which is
+# in the application tier since every user signs in there: without this, an
+# administrator enters a second password at that page, under a second name.
+# With it, and with the two realms named alike (antares_edge_basic_auth_admin_
+# realm follows antares_edge_basic_auth_realm by default), the browser resends
+# the administration account by itself and asks once. The application
+# accounts still open nothing of the administration tier. Here because
+# verify.yml checks either answer.
+antares_edge_basic_auth_admin_opens_app: true
+
 # The accounts verify.yml presents at the door, one per tier. Empty by
 # default, and meant to be given at run time rather than stored - they are
 # passwords in the clear, which is what the lists above exist to avoid:

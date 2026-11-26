@@ -1661,13 +1661,16 @@ jobs:
             -e antares_edge_basic_auth_admin_probe_user=ci-admin \
             -e antares_edge_basic_auth_admin_probe_password=ci-edge-admin-not-a-secret
 
-      # The one thing verify.yml does not check, because it is given one
-      # account per tier and never crosses them: that the two lists are two
-      # lists. Everything else about the door - that it opens for a listed
-      # account, that it answers 401 to nobody, that the three interfaces
-      # authenticate through it and that what each login hands back works -
-      # is in the step above, on this shape and on the cluster one.
-      - name: Check the two password tiers are not one list read twice
+      # The two lists from outside, both ways: the application account is
+      # refused by the consoles, and the administration account opens the
+      # interface (antares_edge_basic_auth_admin_opens_app, on by default),
+      # which is what spares an administrator a second prompt at the login
+      # page of the identity provider. verify.yml checks the same from the
+      # controller; this is the plain curl of it. Everything else about the
+      # door - that it opens for a listed account, that it answers 401 to
+      # nobody, that the three interfaces authenticate through it and that
+      # what each login hands back works - is in the step above.
+      - name: Check what each password tier opens of the other
         run: |
           set -euo pipefail
           host=http://192.168.77.11
@@ -1676,7 +1679,7 @@ jobs:
           test "$code" = 401 || { echo "::error::Grafana answered $code to an account of the other tier"; exit 1; }
           code=$(curl -s -o /dev/null -w '%{http_code}' \
                    -u ci-admin:ci-edge-admin-not-a-secret "$host/")
-          test "$code" = 401 || { echo "::error::the interface answered $code to an account of the other tier"; exit 1; }
+          test "$code" = 200 || { echo "::error::the interface answered $code to the administration account, which opens it"; exit 1; }
 
       # Last on purpose: a failure here says the deployment converged but
       # does not settle, which is worth knowing and worth fixing, but only

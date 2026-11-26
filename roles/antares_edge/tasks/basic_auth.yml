@@ -31,6 +31,25 @@
   loop_control:
     label: "{{ item.name | default('(no name)') }}"
 
+# With the administration accounts in the application's file as well, one
+# name in both lists would be two lines of that file, and nginx keeps the
+# first: a password that works on one tier and not on the other.
+- name: Check no account is in both front door lists
+  ansible.builtin.assert:
+    that:
+      - _both | length == 0
+    fail_msg: >-
+      {{ _both | join(', ') }} is both in antares_edge_basic_auth_users and in
+      antares_edge_basic_auth_admin_users. The administration accounts already
+      open the application (antares_edge_basic_auth_admin_opens_app): keep
+      each name in one list.
+    quiet: true
+  vars:
+    _both: >-
+      {{ antares_edge_basic_auth_users | map(attribute='name')
+         | intersect(antares_edge_basic_auth_admin_users | map(attribute='name')) | list }}
+  when: antares_edge_basic_auth_admin_opens_app | bool
+
 - name: Create the front door password directory
   ansible.builtin.file:
     path: "{{ antares_edge_htpasswd_dir }}"
