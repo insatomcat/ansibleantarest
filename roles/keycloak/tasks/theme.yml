@@ -1,0 +1,42 @@
+---
+# A login theme of one page: Keycloak's info page with a link to Antares-Web
+# where Keycloak shows none, which is the page a member lands on after
+# following a link mailed from the console. Why there is no link otherwise is
+# in files/theme/info.ftl.
+#
+# Mounted read-only into /opt/keycloak/themes/, which Keycloak reads at
+# start: a change restarts it. The realm is pointed at the theme by
+# realm_settings.yml, and by the realm file for a new realm.
+
+- name: Create the directories of the login theme
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ keycloak_theme_dir }}"
+    - "{{ keycloak_theme_dir }}/login"
+    - "{{ keycloak_theme_dir }}/login/messages"
+
+- name: Install the info page of the login theme
+  ansible.builtin.copy:
+    src: theme/info.ftl
+    dest: "{{ keycloak_theme_dir }}/login/info.ftl"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Keycloak
+
+- name: Write the settings and the wording of the login theme
+  ansible.builtin.template:
+    src: "theme/{{ item.src }}"
+    dest: "{{ keycloak_theme_dir }}/login/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - {src: theme.properties.j2, dest: theme.properties}
+    - {src: messages_en.properties.j2, dest: messages/messages_en.properties}
+  notify: Restart Keycloak

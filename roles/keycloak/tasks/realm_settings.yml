@@ -1,9 +1,10 @@
 ---
 # The settings of the realm that have to hold on a realm that already
 # exists, which the realm file cannot do: it is imported at the first start
-# only. Password policy, lockout after repeated failures, the event log, and
-# the groups the mapping of Antares-Web names. Read first, written only when
-# something differs, so a run on a realm in order costs a few GETs.
+# only. Password policy, lockout after repeated failures, the event log, the
+# login theme, and the groups the mapping of Antares-Web names. Read first,
+# written only when something differs, so a run on a realm in order costs a
+# few GETs.
 #
 # Same login as client_scope.yml, and the same answer to a master realm
 # whose password was changed from the console: said so, and left alone.
@@ -50,6 +51,7 @@
       adminEventsDetailsEnabled: "{{ keycloak_events_enabled | bool }}"
       resetPasswordAllowed: "{{ keycloak_reset_password_allowed | bool }}"
       actionTokenGeneratedByUserLifespan: "{{ keycloak_action_token_lifespan | int }}"
+      loginTheme: "{{ keycloak_login_theme }}"
     # Keycloak keeps every value of smtpServer as a string, and answers the
     # password masked: it is left out of the comparison and sent with the
     # rest whenever anything else differs. Changing the password alone is

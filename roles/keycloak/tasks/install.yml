@@ -27,6 +27,10 @@
   ansible.builtin.include_tasks: realm.yml
   when: keycloak_realm_import | bool
 
+- name: Install the login theme
+  ansible.builtin.include_tasks: theme.yml
+  when: keycloak_login_theme | length > 0
+
 - name: Deploy the Keycloak quadlet unit
   ansible.builtin.template:
     src: quadlet/keycloak.container.j2
