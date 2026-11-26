@@ -741,7 +741,7 @@ jobs:
       # forwarded port, the way an uploader reaches the machine. What it
       # proves: the chroot shows the upload directory and nothing else, a
       # shell is refused, and the file comes out group antares and
-      # group-writable, identical when the backend container reads it. The
+      # group-readable, identical when the backend container reads it. The
       # last part is the SELinux half, which only a target that enforces it
       # can answer.
       - name: Check an upload over SFTP lands where the application reads it
@@ -771,11 +771,14 @@ jobs:
           fi
 
           path=/var/antares-web/data/workspaces/studies/import/sftp-probe.bin
+          # Group antares, readable by it: the mode of the file is the one
+          # the client asked for (0644 from this runner), see the role.
           owner=$(vm "sudo stat -c '%G %a' $path")
-          if [ "$owner" != "antares 664" ]; then
-            echo "::error::the upload came out as '$owner', not 'antares 664'"
-            exit 1
-          fi
+          case "$owner" in
+            "antares 644"|"antares 664") ;;
+            *) echo "::error::the upload came out as '$owner', not group antares and group-readable"
+               exit 1 ;;
+          esac
           want=$(sha256sum /tmp/sftp-probe.bin | cut -d' ' -f1)
           got=$(vm "sudo podman exec antarest sha256sum /workspaces/studies/import/sftp-probe.bin" | cut -d' ' -f1)
           if [ "$want" != "$got" ]; then

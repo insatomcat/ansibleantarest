@@ -10,13 +10,14 @@
 
 Match Group {{ antares_sftp_group }}
     ChrootDirectory {{ antares_sftp_chroot }}
-    # -d starts the session in the upload directory. -m 0664 sets the mode
-    # of an uploaded file, whatever mode the client asks for (it sends the
-    # mode of its local copy, often 0644); -u 0002 does the same for the
-    # directories it creates, which it asks 0777 for. The directory being
-    # setgid, all of it belongs to the group the containers run as, which
-    # can then read, scan, copy and change it.
-    ForceCommand internal-sftp -d /{{ antares_sftp_dir }} -u 0002 -m 0664
+    # -d starts the session in the upload directory. -u 0002 keeps the
+    # group bits the client asks for: directories come out 0775, files with
+    # the mode of the client's copy, 0644 as a rule. The directory being
+    # setgid, all of it belongs to the group the containers run as, which can
+    # read, scan and copy every file and delete in every directory. No -m:
+    # forcing the mode of files is a Red Hat patch, and an internal-sftp
+    # without it refuses the option and closes every session.
+    ForceCommand internal-sftp -d /{{ antares_sftp_dir }} -u 0002
     AuthorizedKeysFile {{ antares_sftp_keys_dir }}/%u
     AuthenticationMethods publickey
     PermitTTY no
