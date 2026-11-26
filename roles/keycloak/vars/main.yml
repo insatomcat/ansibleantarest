@@ -26,9 +26,15 @@ keycloak_public_url: >-
 # Same spelling as everywhere else: the access mode is written out so that
 # container_volume_opts (the SELinux `,z`) has something to be appended to.
 keycloak_volumes: >-
-  {{ ([keycloak_dir ~ '/import:/opt/keycloak/data/import:ro']
-      if keycloak_realm_import | bool else [])
+  {{ (([keycloak_dir ~ '/import:/opt/keycloak/data/import:ro']
+       if keycloak_realm_import | bool else [])
+      + ([keycloak_theme_dir ~ ':/opt/keycloak/themes/' ~ keycloak_login_theme ~ ':ro']
+         if keycloak_login_theme | length > 0 else []))
      | map('regex_replace', '$', container_volume_opts | trim) | list }}
+
+# Where the login theme is written on the host, mounted under its own name in
+# /opt/keycloak/themes/ of the container.
+keycloak_theme_dir: "{{ keycloak_dir }}/themes/{{ keycloak_login_theme }}"
 
 # ===========================================================================
 #  The user profile of the imported realm

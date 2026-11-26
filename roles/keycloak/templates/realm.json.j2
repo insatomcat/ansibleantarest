@@ -34,6 +34,9 @@
   "realm": {{ keycloak_realm | to_json }},
   "enabled": true,
   "displayName": "Antares",
+{% if keycloak_login_theme | length > 0 %}
+  "loginTheme": {{ keycloak_login_theme | to_json }},
+{% endif %}
   "registrationAllowed": false,
   "resetPasswordAllowed": false,
   "sslRequired": {{ ('external' if antarest_tls_enabled | bool else 'none') | to_json }},
