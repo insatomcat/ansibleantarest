@@ -829,6 +829,9 @@ jobs:
             echo "===== $unit.service"
             vm "sudo journalctl -u $unit.service --no-pager -n 100"
           done
+          echo "===== sshd, for the SFTP upload account"
+          vm 'sudo journalctl -u ssh.service -u sshd.service -u ssh.socket --no-pager -n 60'
+          vm 'sudo sshd -T -C user=ci-upload,host=ci-vm,addr=127.0.0.1 | grep -iE "^(chrootdirectory|forcecommand|authorizedkeysfile|authenticationmethods)"'
           exit 0
 
   # ---------------------------------------------------------------------

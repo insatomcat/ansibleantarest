@@ -10,10 +10,13 @@
 
 Match Group {{ antares_sftp_group }}
     ChrootDirectory {{ antares_sftp_chroot }}
-    # -d starts the session in the upload directory. -u 0002 makes what is
-    # uploaded group-writable, and the directory, setgid, gives it the group
-    # the containers run as: the application can read, scan and copy it.
-    ForceCommand internal-sftp -d /{{ antares_sftp_dir }} -u 0002
+    # -d starts the session in the upload directory. -m 0664 sets the mode
+    # of an uploaded file, whatever mode the client asks for (it sends the
+    # mode of its local copy, often 0644); -u 0002 does the same for the
+    # directories it creates, which it asks 0777 for. The directory being
+    # setgid, all of it belongs to the group the containers run as, which
+    # can then read, scan, copy and change it.
+    ForceCommand internal-sftp -d /{{ antares_sftp_dir }} -u 0002 -m 0664
     AuthorizedKeysFile {{ antares_sftp_keys_dir }}/%u
     AuthenticationMethods publickey
     PermitTTY no

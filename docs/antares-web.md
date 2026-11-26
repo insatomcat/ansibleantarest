@@ -129,7 +129,7 @@ antares_sftp_dir: import            # the directory made for them inside it
 
 Each entry is an account of its own, so the journal of sshd names who connected and one person can be cut off alone. It has no password and no shell, and sshd gives it SFTP only, locked in `antares_sftp_chroot` (`/srv/antares-sftp`), where the one thing to see is the upload directory, `{{ antarest_data_dir }}/workspaces/<dir of the workspace>/import`, bind-mounted from the data volume. Port 22 is already open for the operators, and the `sshd` jail of fail2ban covers these accounts like any other. An entry taken out of the list loses its account and its keys at the next run; what it uploaded stays.
 
-The upload directory is setgid on the `antares` group and the session uploads with umask 0002, so what lands there is group-writable and belongs to the group the containers run as. The accounts are members of that group, which is what lets them write there, and the chroot is what keeps them from reaching anything else of it.
+The upload directory is setgid on the `antares` group, and the session forces mode 0664 on the files and umask 0002 on the directories it creates, whatever the client asks for, so what lands there is group-writable and belongs to the group the containers run as. The accounts are members of that group, which is what lets them write there, and the chroot is what keeps them from reaching anything else of it.
 
 Two ways from there into the managed storage:
 
