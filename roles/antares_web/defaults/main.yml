@@ -334,6 +334,13 @@ antarest_frontend_stamp_file: "{{ antarest_deploy_dir }}/.frontend-build-stamp"
 antarest_patch_login_label: true
 antarest_login_username_label: '{t("global.username")}'
 
+# The notice shown once per browser at the first login, in Markdown. Empty
+# keeps upstream's, which is RTE's own text about one of RTE's applications,
+# in French, behind an Accept / Sign out dialog. Set, it replaces that text and
+# the dialog keeps a single Close. See docs/antares-web.md, "Privacy notice at
+# first login".
+antarest_privacy_notice: ""
+
 antares_web_packages:
   - git
 

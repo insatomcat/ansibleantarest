@@ -123,7 +123,7 @@
         name: antares_web
         tasks_from: patch_frontend
         public: true
-      when: antarest_patch_login_label | bool
+      when: antarest_patch_login_label | bool or antarest_privacy_notice | length > 0
 
     - name: Build the web application
       ansible.builtin.include_role:
