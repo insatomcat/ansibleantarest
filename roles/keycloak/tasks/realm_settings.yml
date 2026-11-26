@@ -52,6 +52,7 @@
       resetPasswordAllowed: "{{ keycloak_reset_password_allowed | bool }}"
       actionTokenGeneratedByUserLifespan: "{{ keycloak_action_token_lifespan | int }}"
       loginTheme: "{{ keycloak_login_theme }}"
+      adminTheme: "{{ keycloak_login_theme }}"
     # Keycloak keeps every value of smtpServer as a string, and answers the
     # password masked: it is left out of the comparison and sent with the
     # rest whenever anything else differs. Changing the password alone is
@@ -156,6 +157,37 @@
         status_code: [200]
       changed_when: true
       when: keycloak_profile_wanted.attributes != keycloak_settings_profile.json.attributes
+
+    # The actions Keycloak may ask of a user, which are also the list the
+    # console offers under Credential Reset. Every one outside
+    # keycloak_required_actions is turned off; see that variable for why.
+    - name: Read the required actions of the realm
+      ansible.builtin.uri:
+        url: "{{ _keycloak_realm_url }}/authentication/required-actions"
+        headers:
+          Authorization: "{{ _keycloak_auth }}"
+      register: keycloak_settings_actions
+      changed_when: false
+      when: keycloak_required_actions | length > 0
+
+    - name: Turn the other required actions off, and the listed ones on
+      ansible.builtin.uri:
+        url: "{{ _keycloak_realm_url }}/authentication/required-actions/{{ item.alias | urlencode }}"
+        method: PUT
+        headers:
+          Authorization: "{{ _keycloak_auth }}"
+        body_format: json
+        body: >-
+          {{ item | combine({'enabled': item.alias in keycloak_required_actions,
+                             'defaultAction': item.defaultAction and item.alias in keycloak_required_actions}) }}
+        status_code: [204]
+      changed_when: true
+      loop: "{{ keycloak_settings_actions.json | default([]) }}"
+      loop_control:
+        label: "{{ item.alias }}"
+      when:
+        - keycloak_required_actions | length > 0
+        - item.enabled != (item.alias in keycloak_required_actions)
 
     - name: Read the groups of the realm
       ansible.builtin.uri:

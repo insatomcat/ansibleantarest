@@ -146,17 +146,44 @@ keycloak_reset_password_allowed: "{{ keycloak_smtp_host | length > 0 }}"
 # hours by default.
 keycloak_action_token_lifespan: 1800
 
-# The login theme of the realm, written by the role (tasks/theme.yml):
-# Keycloak's own, with a link to Antares-Web on the page a member lands on
-# after following a link mailed from the console ("Credential reset"), where
-# Keycloak shows none. Empty, Keycloak's theme as shipped.
+# The theme of the realm, written by the role (tasks/theme.yml), for two of
+# Keycloak's pages:
+#   - login: Keycloak's own, with a link to Antares-Web on the page a member
+#     lands on after following a link mailed from the console ("Credential
+#     reset"), where Keycloak shows none;
+#   - admin: the console of the realm, without the tabs of an account that
+#     its administrators have no use for (keycloak_admin_hidden_tabs).
+# The console of the master realm keeps its own theme. Empty, Keycloak's
+# themes as shipped.
 keycloak_login_theme: antares
+
+# Tabs of the account page of the realm's console hidden by that theme, by
+# the data-testid Keycloak gives them. A stylesheet hides them: what the
+# administrator may do is still set by their roles, this only takes off the
+# screen what they would never use here. Checked against Keycloak 26.8.
+keycloak_admin_hidden_tabs:
+  - role-mapping-tab
+  - user-consents-tab
+  - identity-provider-links-tab
+  - user-sessions-tab
+  - workflows-tab
+  - verifiable-credentials-tab
 
 # Where that link points, and what it says. Antares-Web is served at the root
 # of the name Keycloak lives under, so the root is right wherever the realm
 # is reached from.
 keycloak_app_url: "/"
 keycloak_app_link_label: "Open Antares Web"
+
+# The required actions the realm keeps: what Keycloak may ask of a user at
+# login, and the list the console offers under Credential Reset. Every other
+# one is turned off. Antares-Web logs people in through the connector with a
+# password alone, so a member who set up a one-time code (Configure OTP)
+# would be refused by Antares-Web from then on, and the rest (passkeys,
+# profile and e-mail checks, identity provider links) has nothing to act on
+# here. Empty, the realm's required actions are left as they are.
+keycloak_required_actions:
+  - UPDATE_PASSWORD
 
 # The fields of their own account a user may change from the account page,
 # among username, email, firstName and lastName. None by default: accounts
