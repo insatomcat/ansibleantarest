@@ -36,6 +36,7 @@
   "displayName": "Antares",
 {% if keycloak_login_theme | length > 0 %}
   "loginTheme": {{ keycloak_login_theme | to_json }},
+  "adminTheme": {{ keycloak_login_theme | to_json }},
 {% endif %}
   "registrationAllowed": false,
   "resetPasswordAllowed": false,

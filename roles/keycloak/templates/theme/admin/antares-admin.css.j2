@@ -1,0 +1,17 @@
+/* {{ ansible_managed }}
+   Tabs of the account page hidden in the console of the {{ keycloak_realm }}
+   realm: keycloak_admin_hidden_tabs. */
+{% if keycloak_admin_hidden_tabs | length > 0 %}
+{{ keycloak_admin_hidden_tabs | map('regex_replace', '^(.*)$', 'li:has(> [data-testid="\\1"])') | join(',\n') }} {
+  display: none !important;
+}
+{% endif %}
+{% if keycloak_admin_hidden_tabs | length > 0 %}
+
+/* PatternFly measured the bar with every tab in it and keeps its scroll
+   arrows; with three tabs left there is nothing to scroll. The account page
+   alone: it is the one whose tabs carry user-details-tab. */
+.pf-v5-c-tabs:has([data-testid="user-details-tab"]) > .pf-v5-c-tabs__scroll-button {
+  display: none !important;
+}
+{% endif %}
